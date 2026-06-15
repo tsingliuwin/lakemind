@@ -6,6 +6,7 @@ import SqlEditor from "./components/SqlEditor";
 import ResultTable from "./components/ResultTable";
 import RightInspector from "./components/RightInspector";
 import BottomConsole, { type ConsoleState } from "./components/BottomConsole";
+import SettingsPage from "./components/SettingsPage";
 import { executeSql } from "./lib/duckdb";
 import type { LogEntry, SourceTable, SqlResult } from "./lib/types";
 import "./App.css";
@@ -34,6 +35,7 @@ export default function App() {
   // --- drawers & layout sizes ---
   const [inspectorOpen, setInspectorOpen] = createSignal<boolean>(true);
   const [consoleState, setConsoleState] = createSignal<ConsoleState>("folded");
+  const [settingsOpen, setSettingsOpen] = createSignal<boolean>(false);
 
   const [leftWidth, setLeftWidth] = createSignal<number>(240);
   const [rightWidth, setRightWidth] = createSignal<number>(280);
@@ -197,24 +199,12 @@ export default function App() {
   }
 
   function onSettings() {
-    // M1 占位 —— 完整设置面板是 M4 的交付物。
-    setLogs((prev) =>
-      [
-        {
-          id: ++logSeq,
-          ts: Date.now(),
-          sql: "// 设置",
-          status: "error" as const,
-          error: "设置面板将在 M4 上线。M1 目前是纯算力客户端。",
-        },
-        ...prev,
-      ].slice(0, 100),
-    );
-    setConsoleState("default");
+    setSettingsOpen(true);
   }
 
-  const rightWidthActual = () => inspectorOpen() ? `${rightWidth()}px` : "0px";
+  const rightWidthActual = () => (settingsOpen() || !inspectorOpen()) ? "0px" : `${rightWidth()}px`;
   const bottomHeightActual = () => {
+    if (settingsOpen()) return "0px";
     if (consoleState() === "folded") return "32px";
     if (consoleState() === "expanded") return `${bottomHeight() * 1.8}px`;
     return `${bottomHeight()}px`;
@@ -234,15 +224,17 @@ export default function App() {
       <DropZone busy={busy()} onSources={mergeSources} onError={(m) => setError(m)} />
 
       {/* Vertical Left Resizer */}
-      <div 
-        class="resizer-v" 
-        classList={{ dragging: isDraggingLeft() }}
-        style={{ left: `${leftWidth() - 3}px` }} 
-        onMouseDown={startDraggingLeft}
-      />
+      <Show when={!settingsOpen()}>
+        <div 
+          class="resizer-v" 
+          classList={{ dragging: isDraggingLeft() }}
+          style={{ left: `${leftWidth() - 3}px` }} 
+          onMouseDown={startDraggingLeft}
+        />
+      </Show>
       
       {/* Vertical Right Resizer */}
-      <Show when={inspectorOpen()}>
+      <Show when={inspectorOpen() && !settingsOpen()}>
         <div 
           class="resizer-v" 
           classList={{ dragging: isDraggingRight() }}
@@ -252,7 +244,7 @@ export default function App() {
       </Show>
 
       {/* Horizontal Console Resizer */}
-      <Show when={consoleState() !== "folded"}>
+      <Show when={consoleState() !== "folded" && !settingsOpen()}>
         <div 
           class="resizer-h" 
           classList={{ dragging: isDraggingBottom() }}
@@ -275,52 +267,58 @@ export default function App() {
         onOpenSettings={onSettings}
       />
 
-      <LeftNav
-        workspace="lakemind"
-        sources={sources()}
-        selected={selectedTable()?.name ?? null}
-        busy={busy()}
-        onSelect={selectTable}
-        onOpenSettings={onSettings}
-        onNewQuery={() => injectSql("SELECT 1 AS n;")}
-        inspectorOpen={inspectorOpen()}
-        consoleOpen={consoleState() !== "folded"}
-        onToggleInspector={() => setInspectorOpen((v) => !v)}
-        onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
-        onDisconnect={() => { setSources([]); setSelectedTable(null); setResult(null); setError(null); }}
-      />
+      <Show when={settingsOpen()} fallback={
+        <>
+          <LeftNav
+            workspace="lakemind"
+            sources={sources()}
+            selected={selectedTable()?.name ?? null}
+            busy={busy()}
+            onSelect={selectTable}
+            onOpenSettings={onSettings}
+            onNewQuery={() => injectSql("SELECT 1 AS n;")}
+            inspectorOpen={inspectorOpen()}
+            consoleOpen={consoleState() !== "folded"}
+            onToggleInspector={() => setInspectorOpen((v) => !v)}
+            onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
+            onDisconnect={() => { setSources([]); setSelectedTable(null); setResult(null); setError(null); }}
+          />
 
-      <main class="main">
-        <SqlEditor
-          initialSql={sql()}
-          rowCap={rowCap()}
-          busy={busy()}
-          onSql={setSql}
-          onRowCap={setRowCap}
-          onRun={run}
-          onCopy={copySql}
-        />
-        <Show when={error()}>
-          <pre class="error-box">{error()}</pre>
-        </Show>
-        <ResultTable result={result()} />
-      </main>
+          <main class="main">
+            <SqlEditor
+              initialSql={sql()}
+              rowCap={rowCap()}
+              busy={busy()}
+              onSql={setSql}
+              onRowCap={setRowCap}
+              onRun={run}
+              onCopy={copySql}
+            />
+            <Show when={error()}>
+              <pre class="error-box">{error()}</pre>
+            </Show>
+            <ResultTable result={result()} />
+          </main>
 
-      <Show when={inspectorOpen()}>
-        <RightInspector
-          table={selectedTable()}
-          busy={busy()}
-          onInjectSql={injectSql}
-          onPreview={previewTable}
-        />
+          <Show when={inspectorOpen()}>
+            <RightInspector
+              table={selectedTable()}
+              busy={busy()}
+              onInjectSql={injectSql}
+              onPreview={previewTable}
+            />
+          </Show>
+
+          <BottomConsole
+            logs={logs()}
+            state={consoleState()}
+            onCycleState={cycleConsole}
+            onClear={() => setLogs([])}
+          />
+        </>
+      }>
+        <SettingsPage onClose={() => setSettingsOpen(false)} />
       </Show>
-
-      <BottomConsole
-        logs={logs()}
-        state={consoleState()}
-        onCycleState={cycleConsole}
-        onClear={() => setLogs([])}
-      />
     </div>
   );
 }
