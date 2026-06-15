@@ -1,15 +1,16 @@
 import { createSignal, onCleanup, onMount } from "solid-js";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { registerFolder, type SourceTable } from "../lib/duckdb";
+import { importFileToWorkspace, type SourceTable } from "../lib/duckdb";
 
 /**
  * Full-window drag-and-drop target. Listens to Tauri v2's native webview
  * drag/drop events (so dropping OS files works, unlike HTML5 DnD which only
- * sees sanitized payloads). On `drop`, hands each path to `registerFolder`.
+ * sees sanitized payloads). On `drop`, hands each path to `importFileToWorkspace`.
  *
  * While the OS is dragging over the window we paint an overlay highlight.
  */
 export default function DropZone(props: {
+  workspace: string;
   onSources: (sources: SourceTable[]) => void;
   onError: (message: string) => void;
   busy: boolean;
@@ -27,7 +28,7 @@ export default function DropZone(props: {
         setDragging(false);
         if (props.busy) return;
         for (const p of payload.paths) {
-          registerFolder(p)
+          importFileToWorkspace(props.workspace, p)
             .then(props.onSources)
             .catch((e) => props.onError(String(e)));
         }

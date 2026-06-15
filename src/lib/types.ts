@@ -72,3 +72,22 @@ export function typeFamily(type: string): TypeFamily {
   if (/BOOL/.test(t)) return "bool";
   return "other";
 }
+
+export interface QueryTask {
+  id: string;
+  name: string;
+  sql: string;
+  createdAt: number;
+}
+
+export interface Workspace {
+  name: string;
+  path: string;
+}
+
+export interface FileItem {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  is_modified: boolean;
+}

@@ -21,6 +21,9 @@ pub fn run() {
             commands::list_sources,
             commands::describe_table,
             commands::execute_sql,
+            commands::import_file_to_workspace,
+            commands::select_directory,
+            commands::read_directory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

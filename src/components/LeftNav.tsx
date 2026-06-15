@@ -1,5 +1,6 @@
 import { For, Show, createMemo, createSignal, onMount, onCleanup } from "solid-js";
-import type { SourceTable } from "../lib/types";
+import { invoke } from "@tauri-apps/api/core";
+import type { SourceTable, QueryTask, Workspace, FileItem } from "../lib/types";
 import { t, currentLanguage, setCurrentLanguage } from "../lib/i18n";
 import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom } from "../lib/theme";
 
@@ -13,6 +14,15 @@ import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom } from "../l
  */
 export default function LeftNav(props: {
   workspace: string;
+  workspacePath?: string;
+  workspaces?: Workspace[];
+  tasks?: QueryTask[];
+  activeTaskId?: string | null;
+  onSelectTask?: (id: string) => void;
+  onDeleteTask?: (id: string) => void;
+  onSelectWorkspace?: (ws: string) => void;
+  onRemoveWorkspace?: (wsPath: string) => void;
+  onAddWorkspace?: (name: string) => void;
   sources: SourceTable[];
   selected: string | null;
   busy: boolean;
@@ -42,11 +52,103 @@ export default function LeftNav(props: {
   const [activeSubmenu, setActiveSubmenu] = createSignal<"language" | "theme" | "zoom" | "quota" | null>(null);
   let userMenuRef!: HTMLDivElement;
 
+  // File explorer states
+  const [viewMode, setViewMode] = createSignal<"tasks" | "files">("tasks");
+  const [expandedPaths, setExpandedPaths] = createSignal<Record<string, boolean>>({});
+  const [directoryContents, setDirectoryContents] = createSignal<Record<string, FileItem[]>>({});
+  const [activeActionWsPath, setActiveActionWsPath] = createSignal<string | null>(null);
+  const [fileSearchQuery, setFileSearchQuery] = createSignal("");
+
+  const loadDirContents = async (dirPath: string) => {
+    try {
+      const items = await invoke<FileItem[]>("read_directory", { path: dirPath });
+      setDirectoryContents((prev) => ({ ...prev, [dirPath]: items }));
+    } catch (e) {
+      console.error("Failed to read dir:", e);
+    }
+  };
+
+  const toggleFolder = async (dirPath: string) => {
+    const isExpanded = !!expandedPaths()[dirPath];
+    setExpandedPaths((prev) => ({ ...prev, [dirPath]: !isExpanded }));
+    if (!isExpanded && !directoryContents()[dirPath]) {
+      await loadDirContents(dirPath);
+    }
+  };
+
+  const enterFilesMode = async () => {
+    setViewMode("files");
+    const rootPath = props.workspacePath || props.workspace;
+    if (rootPath) {
+      await loadDirContents(rootPath);
+      setExpandedPaths((prev) => ({ ...prev, [rootPath]: true }));
+    }
+  };
+
   const handleClickOutside = (e: MouseEvent) => {
     if (userMenuRef && !userMenuRef.contains(e.target as Node)) {
       setUserMenuOpen(false);
       setActiveSubmenu(null);
     }
+    const target = e.target as HTMLElement;
+    if (!target.closest(".ws-action-icon-btn") && !target.closest(".ws-action-popover")) {
+      setActiveActionWsPath(null);
+    }
+  };
+
+  const renderFileTree = (dirPath: string, depth: number = 0) => {
+    const contents = directoryContents()[dirPath] || [];
+    const query = fileSearchQuery().trim().toLowerCase();
+
+    const filteredContents = query
+      ? contents.filter(item => item.name.toLowerCase().includes(query))
+      : contents;
+
+    return (
+      <div class="fe-tree-container" style={{ "padding-left": `${depth > 0 ? 12 : 0}px` }}>
+        <For each={filteredContents}>
+          {(item) => {
+            const isExpanded = !!expandedPaths()[item.path];
+            return (
+              <div class="fe-tree-node">
+                <div 
+                  class="fe-node-row" 
+                  classList={{ "is-dir": item.is_dir }}
+                  style={{ 
+                    display: "flex", 
+                    "align-items": "center", 
+                    padding: "4px 8px", 
+                    "border-radius": "4px",
+                    cursor: "pointer",
+                    transition: "background 0.1s"
+                  }}
+                  onClick={() => {
+                    if (item.is_dir) {
+                      toggleFolder(item.path);
+                    }
+                  }}
+                >
+                  <span class="fe-node-icon" style="margin-right: 6px; font-size: 11px;">
+                    {item.is_dir ? (isExpanded ? "▾ 📁" : "▸ 📁") : "📄"}
+                  </span>
+                  <span class="fe-node-name" style="flex: 1; font-size: 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary);">
+                    {item.name}
+                  </span>
+                  <Show when={item.is_modified}>
+                    <Show when={item.is_dir} fallback={<span class="fe-modified-badge" style="color: var(--accent-orange); font-size: 11px; font-weight: bold; margin-left: 6px; padding-right: 4px;">M</span>}>
+                      <span class="fe-modified-dot" style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background-color: var(--accent-orange); margin-left: 6px; margin-right: 4px;" />
+                    </Show>
+                  </Show>
+                </div>
+                <Show when={item.is_dir && isExpanded}>
+                  {renderFileTree(item.path, depth + 1)}
+                </Show>
+              </div>
+            );
+          }}
+        </For>
+      </div>
+    );
   };
 
   onMount(() => {
@@ -58,139 +160,332 @@ export default function LeftNav(props: {
 
   return (
     <nav class="leftnav">
-      {/* ZCode style top header with Z logo and history arrows */}
-      <div class="ln-top-bar">
-        <div class="ln-logo-box" title="ZCode 3.0 / LakeMind">
-          <svg class="ln-logo-z" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M4 4H20V7L8 17H20V20H4V17L16 7H4V4Z" fill="currentColor"/>
-          </svg>
-        </div>
-        <div class="ln-nav-arrows">
-          <button class="ln-arrow-btn" title="后退" disabled={props.busy}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="19" y1="12" x2="5" y2="12"></line>
-              <polyline points="12 19 5 12 12 5"></polyline>
-            </svg>
-          </button>
-          <button class="ln-arrow-btn" title="前进" disabled={props.busy}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-              <polyline points="12 5 19 12 12 19"></polyline>
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {/* Quick Action links */}
-      <div class="ln-quick-actions">
-        <button class="ln-action-btn" title="新建查询 (Ctrl+N)" onClick={() => props.onNewQuery?.()} disabled={props.busy}>
-          <span class="action-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 5v14M5 12h14"/>
-            </svg>
-          </span>
-          <span class="action-label">{t("newQueryTask")}</span>
-          <span class="action-shortcut">Ctrl+N</span>
-        </button>
-        <button class="ln-action-btn" title={`${t("search")} (Ctrl+K)`} disabled={props.busy}>
-          <span class="action-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-          </span>
-          <span class="action-label">{t("search")}</span>
-          <span class="action-shortcut">Ctrl+K</span>
-        </button>
-        <button class="ln-action-btn" title={t("skills")} disabled={props.busy}>
-          <span class="action-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-              <polyline points="2 17 12 22 22 17"></polyline>
-              <polyline points="2 12 12 17 22 12"></polyline>
-            </svg>
-          </span>
-          <span class="action-label">{t("skills")}</span>
-          <span class="action-shortcut"></span>
-        </button>
-      </div>
-
-      {/* Workspace header */}
-      <div class="ln-section-header">
-        <span class="section-title">{t("workspace")} <span class="ws-indicator-dot" /></span>
-        <div class="section-actions">
-          <button class="sec-act-btn" title="筛选/排序">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="4" y1="21" x2="4" y2="14"></line>
-              <line x1="4" y1="10" x2="4" y2="3"></line>
-              <line x1="12" y1="21" x2="12" y2="12"></line>
-              <line x1="12" y1="8" x2="12" y2="3"></line>
-              <line x1="20" y1="21" x2="20" y2="16"></line>
-              <line x1="20" y1="12" x2="20" y2="3"></line>
-              <line x1="1" y1="14" x2="7" y2="14"></line>
-              <line x1="9" y1="8" x2="15" y2="8"></line>
-              <line x1="17" y1="16" x2="23" y2="16"></line>
-            </svg>
-          </button>
-          <button class="sec-act-btn" title="搜索表">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-          </button>
-          <button class="sec-act-btn" title="收起全部">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="4 14 10 14 10 20"></polyline>
-              <polyline points="20 10 14 10 14 4"></polyline>
-              <line x1="14" y1="10" x2="21" y2="3"></line>
-              <line x1="10" y1="14" x2="3" y2="21"></line>
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {/* Tree content */}
-      <Show
-        when={props.sources.length > 0}
-        fallback={
-          <div class="empty-hint">
-            <div class="empty-icon">📂</div>
-            {t("dragHint")}
+      <Show when={viewMode() === "files"} fallback={
+        <>
+          {/* ZCode style top header with Z logo and history arrows */}
+          <div class="ln-top-bar">
+            <div class="ln-logo-box" title="ZCode 3.0 / LakeMind">
+              <svg class="ln-logo-z" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 4H20V7L8 17H20V20H4V17L16 7H4V4Z" fill="currentColor"/>
+              </svg>
+            </div>
+            <div class="ln-nav-arrows">
+              <button class="ln-arrow-btn" title="后退" disabled={props.busy}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="19" y1="12" x2="5" y2="12"></line>
+                  <polyline points="12 19 5 12 12 5"></polyline>
+                </svg>
+              </button>
+              <button class="ln-arrow-btn" title="前进" disabled={props.busy}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                  <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+              </button>
+            </div>
           </div>
-        }
-      >
-        <div class="tree">
-          <For each={groups()}>
-            {(group) => (
-              <div class="tree-group">
-                <div class="tree-group-label" title={group[0]}>
-                  📁 {shortDir(group[0])}
-                </div>
-                <For each={group[1]}>
-                  {(t) => (
-                    <button
-                      class="tree-leaf"
-                      classList={{ selected: props.selected === t.name }}
-                      disabled={props.busy}
-                      title={t.scanPath}
-                      onClick={() => props.onSelect(t)}
+
+          {/* Quick Action links */}
+          <div class="ln-quick-actions">
+            <button class="ln-action-btn" title="新建任务 (Ctrl+N)" onClick={() => props.onNewQuery?.()} disabled={props.busy}>
+              <span class="action-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
+              </span>
+              <span class="action-label">新建任务</span>
+              <span class="action-shortcut">⌘ N</span>
+            </button>
+            <button class="ln-action-btn" title={`${t("search")} (Ctrl+K)`} disabled={props.busy}>
+              <span class="action-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+              </span>
+              <span class="action-label">搜索</span>
+              <span class="action-shortcut">⌘ K</span>
+            </button>
+            <button class="ln-action-btn" title={t("skills")} disabled={props.busy}>
+              <span class="action-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                  <polyline points="2 17 12 22 22 17"></polyline>
+                  <polyline points="2 12 12 17 22 12"></polyline>
+                </svg>
+              </span>
+              <span class="action-label">技能</span>
+              <span class="action-shortcut"></span>
+            </button>
+          </div>
+
+          {/* Workspace header */}
+          <div class="ln-section-header">
+            <span class="section-title">工作区 <span class="ws-indicator-dot" /></span>
+            <div class="section-actions">
+              <button class="sec-act-btn" title="筛选/排序">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="4" y1="21" x2="4" y2="14"></line>
+                  <line x1="4" y1="10" x2="4" y2="3"></line>
+                  <line x1="12" y1="21" x2="12" y2="12"></line>
+                  <line x1="12" y1="8" x2="12" y2="3"></line>
+                  <line x1="20" y1="21" x2="20" y2="16"></line>
+                  <line x1="20" y1="12" x2="20" y2="3"></line>
+                  <line x1="1" y1="14" x2="7" y2="14"></line>
+                  <line x1="9" y1="8" x2="15" y2="8"></line>
+                  <line x1="17" y1="16" x2="23" y2="16"></line>
+                </svg>
+              </button>
+              <button class="sec-act-btn" title="搜索表">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+              </button>
+              <button class="sec-act-btn" title="收起全部">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="4 14 10 14 10 20"></polyline>
+                  <polyline points="20 10 14 10 14 4"></polyline>
+                  <line x1="14" y1="10" x2="21" y2="3"></line>
+                  <line x1="10" y1="14" x2="3" y2="21"></line>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Tree content */}
+          <div class="tree">
+            <For each={props.workspaces ?? []}>
+              {(ws) => {
+                const isActive = ws.path === props.workspacePath;
+                return (
+                  <div class="tree-group" style={{ "margin-bottom": isActive ? "12px" : "4px" }}>
+                    {/* Workspace Folder Node */}
+                    <div 
+                      class="tree-group-label workspace-root-node"
+                      classList={{ active: isActive }}
+                      title={ws.path}
+                      onClick={() => props.onSelectWorkspace?.(ws.path)}
+                      style={{
+                        display: "flex", 
+                        "align-items": "center", 
+                        "font-weight": isActive ? "600" : "500", 
+                        "font-size": "12px", 
+                        color: isActive ? "var(--text-primary)" : "var(--text-secondary)", 
+                        cursor: "pointer", 
+                        padding: "6px 8px", 
+                        "border-radius": "var(--radius-sm)",
+                        background: isActive ? "var(--bg-hover)" : "transparent",
+                        position: "relative"
+                      }}
                     >
-                      <span class="kind-badge" data-kind={t.kind}>{t.kind}</span>
-                      <span class="leaf-label">{t.label}</span>
-                      <Show when={t.rowCountEstimate != null}>
-                        <span class="leaf-count">{formatCount(t.rowCountEstimate!)}</span>
+                      <span style="margin-right: 6px; font-size: 14px;">📁</span>
+                      <span style="flex: 1; text-align: left;">{ws.name}</span>
+                      
+                      {/* Action buttons shown on hover */}
+                      <div class="ws-hover-actions">
+                        <button class="ws-action-icon-btn" title="更多" onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveActionWsPath(activeActionWsPath() === ws.path ? null : ws.path);
+                        }}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                            <circle cx="12" cy="12" r="1"></circle>
+                            <circle cx="19" cy="12" r="1"></circle>
+                            <circle cx="5" cy="12" r="1"></circle>
+                          </svg>
+                        </button>
+                        <button class="ws-action-icon-btn" title="查看文件" onClick={(e) => {
+                          e.stopPropagation();
+                          props.onSelectWorkspace?.(ws.path);
+                          enterFilesMode();
+                        }}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                            <line x1="3" y1="6" x2="18" y2="6"></line>
+                            <line x1="6" y1="12" x2="18" y2="12"></line>
+                            <line x1="6" y1="18" x2="18" y2="18"></line>
+                          </svg>
+                        </button>
+                        <button class="ws-action-icon-btn" title="新建任务" onClick={(e) => {
+                          e.stopPropagation();
+                          props.onSelectWorkspace?.(ws.path);
+                          props.onNewQuery?.();
+                        }}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
+                            <line x1="12" y1="9" x2="12" y2="15"></line>
+                            <line x1="9" y1="12" x2="15" y2="12"></line>
+                          </svg>
+                        </button>
+                      </div>
+
+                      {/* Action popover menu */}
+                      <Show when={activeActionWsPath() === ws.path}>
+                        <div class="ws-action-popover" onClick={(e) => e.stopPropagation()}>
+                          <button class="ws-action-popover-item remove-item" onClick={() => {
+                            props.onRemoveWorkspace?.(ws.path);
+                            setActiveActionWsPath(null);
+                          }}>
+                            <span class="remove-icon">✕</span>
+                            <span>移除</span>
+                          </button>
+                        </div>
                       </Show>
-                      <Show when={t.partitionKeys.length > 0}>
-                        <span class="leaf-part" title={`Hive partitions: ${t.partitionKeys.join(", ")}`}>
-                          🗂 {t.partitionKeys.length}
-                        </span>
+
+                      <Show when={isActive && activeActionWsPath() !== ws.path}>
+                        <span style="font-size: 8px; color: var(--accent-blue);">●</span>
                       </Show>
-                    </button>
-                  )}
-                </For>
-              </div>
-            )}
-          </For>
+                    </div>
+
+                    {/* If active, render its tasks and sources */}
+                    <Show when={isActive}>
+                      {/* Render Tasks under active workspace */}
+                      <For each={props.tasks ?? []}>
+                        {(task) => (
+                          <div
+                            class="tree-leaf task-leaf"
+                            classList={{ selected: props.activeTaskId === task.id }}
+                            onClick={() => props.onSelectTask?.(task.id)}
+                            style="padding-left: 20px; display: flex; align-items: center;"
+                          >
+                            <span class="task-icon" style="margin-right: 8px; font-size: 12px; color: var(--text-secondary);">📄</span>
+                            <span class="leaf-label">{task.name}</span>
+                            <button 
+                              class="task-delete-btn" 
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                props.onDeleteTask?.(task.id); 
+                              }}
+                              title="关闭任务"
+                              style="background: transparent; border: none; color: var(--text-dim); cursor: pointer; font-size: 10px; padding: 2px 4px; border-radius: 4px; transition: all 0.1s;"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        )}
+                      </For>
+
+                      {/* Render Imported Tables */}
+                      <For each={groups()}>
+                        {(group) => (
+                          <div class="tree-subgroup" style="margin-left: 20px;">
+                            <div class="tree-group-label" title={group[0]}>
+                              📁 {shortDir(group[0])}
+                            </div>
+                            <For each={group[1]}>
+                              {(t) => (
+                                <button
+                                  class="tree-leaf"
+                                  classList={{ selected: props.selected === t.name }}
+                                  disabled={props.busy}
+                                  title={t.scanPath}
+                                  onClick={() => props.onSelect(t)}
+                                >
+                                  <span class="kind-badge" data-kind={t.kind}>{t.kind}</span>
+                                  <span class="leaf-label">{t.label}</span>
+                                  <Show when={t.rowCountEstimate != null}>
+                                    <span class="leaf-count">{formatCount(t.rowCountEstimate!)}</span>
+                                  </Show>
+                                  <Show when={t.partitionKeys.length > 0}>
+                                    <span class="leaf-part" title={`Hive partitions: ${t.partitionKeys.join(", ")}`}>
+                                      🗂 {t.partitionKeys.length}
+                                    </span>
+                                  </Show>
+                                </button>
+                              )}
+                            </For>
+                          </div>
+                        )}
+                      </For>
+
+                      {/* If active workspace is empty, show 暂无任务 */}
+                      <Show when={(props.tasks?.length ?? 0) === 0 && props.sources.length === 0}>
+                        <div class="empty-task-item" style="padding: 8px 20px; color: var(--text-dim); font-size: 12px; font-style: italic;">
+                          暂无任务
+                        </div>
+                      </Show>
+                    </Show>
+                  </div>
+                );
+              }}
+            </For>
+          </div>
+        </>
+      }
+      >
+        {/* File tree explorer mode */}
+        <div class="file-explorer-container">
+          <div class="file-explorer-back">
+            <button class="fe-back-btn" onClick={() => setViewMode("tasks")}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; margin-right: 6px;">
+                <line x1="19" y1="12" x2="5" y2="12"></line>
+                <polyline points="12 19 5 12 12 5"></polyline>
+              </svg>
+              返回任务
+            </button>
+          </div>
+          <div class="file-search-container">
+            <span class="file-search-icon">🔍</span>
+            <input 
+              type="text" 
+              class="file-search-input" 
+              placeholder="搜索文件..." 
+              value={fileSearchQuery()} 
+              onInput={(e) => setFileSearchQuery(e.currentTarget.value)}
+            />
+          </div>
+          <div class="file-explorer-header">
+            <div class="fe-title-box">
+              <span class="fe-ws-name">{props.workspace}</span>
+              <span class="fe-ws-branch-icon" style="margin-left: 6px; color: var(--text-dim); display: inline-flex; align-items: center; justify-content: center; transform: translateY(1px);">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                  <line x1="6" y1="3" x2="6" y2="15"></line>
+                  <circle cx="18" cy="6" r="3"></circle>
+                  <circle cx="6" cy="18" r="3"></circle>
+                  <path d="M18 9a9 9 0 0 1-9 9"></path>
+                </svg>
+              </span>
+            </div>
+            <div class="fe-controls">
+              <button class="fe-ctrl-btn" title="更多">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="1"></circle>
+                  <circle cx="19" cy="12" r="1"></circle>
+                  <circle cx="5" cy="12" r="1"></circle>
+                </svg>
+              </button>
+              <button class="fe-ctrl-btn" title="筛选/排序">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="4" y1="21" x2="4" y2="14"></line>
+                  <line x1="4" y1="10" x2="4" y2="3"></line>
+                  <line x1="12" y1="21" x2="12" y2="12"></line>
+                  <line x1="12" y1="8" x2="12" y2="3"></line>
+                  <line x1="20" y1="21" x2="20" y2="16"></line>
+                  <line x1="20" y1="12" x2="20" y2="3"></line>
+                  <line x1="1" y1="14" x2="7" y2="14"></line>
+                  <line x1="9" y1="8" x2="15" y2="8"></line>
+                  <line x1="17" y1="16" x2="23" y2="16"></line>
+                </svg>
+              </button>
+              <button class="fe-ctrl-btn" title="刷新" onClick={async () => {
+                const rootPath = props.workspacePath || props.workspace;
+                if (rootPath) {
+                  await loadDirContents(rootPath);
+                  for (const path of Object.keys(expandedPaths())) {
+                    if (expandedPaths()[path]) {
+                      await loadDirContents(path);
+                    }
+                  }
+                }
+              }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="file-tree-scroll-container" style="flex: 1; overflow-y: auto; padding: 0 4px;">
+            {renderFileTree(props.workspacePath || props.workspace)}
+          </div>
         </div>
       </Show>
 

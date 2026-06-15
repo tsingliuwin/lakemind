@@ -26,3 +26,5 @@ duckdb = { version = "1.10503.1", features = ["bundled"] }
 walkdir = "2.5.0"
 tokio = { version = "1.52.3", features = ["full"] }
 
+[profile.dev]
+debug = 0

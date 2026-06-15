@@ -32,3 +32,15 @@ export async function executeSql(sql: string, rowCap: number): Promise<SqlResult
   const cap = rowCap && rowCap > 0 ? rowCap : null;
   return invoke<SqlResult>("execute_sql", { sql, rowCap: cap });
 }
+
+/** Import a file or folder into the active workspace directory and register it as a view. */
+export async function importFileToWorkspace(workspace: string, path: string): Promise<SourceTable[]> {
+  return invoke<SourceTable[]>("import_file_to_workspace", { workspace, path });
+}
+
+/** Open a native folder picker and return the selected absolute path. */
+export async function selectDirectory(): Promise<string | null> {
+  return invoke<string | null>("select_directory");
+}
+
+

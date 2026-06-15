@@ -37,8 +37,8 @@ export default function TitleBar(props: {
     if (props.selectedTable && props.selectedTable.path) {
       try {
         // Use Tauri's opener plugin to open the directory path
-        const { open } = await import("@tauri-apps/plugin-opener");
-        await open(props.selectedTable.path);
+        const { openPath } = await import("@tauri-apps/plugin-opener");
+        await openPath(props.selectedTable.path);
       } catch (err) {
         console.error("Failed to open explorer", err);
       }

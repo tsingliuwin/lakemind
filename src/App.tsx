@@ -7,8 +7,9 @@ import ResultTable from "./components/ResultTable";
 import RightInspector from "./components/RightInspector";
 import BottomConsole, { type ConsoleState } from "./components/BottomConsole";
 import SettingsPage from "./components/SettingsPage";
+import HomePanel from "./components/HomePanel";
 import { executeSql } from "./lib/duckdb";
-import type { LogEntry, SourceTable, SqlResult } from "./lib/types";
+import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace } from "./lib/types";
 import "./App.css";
 
 /**
@@ -48,6 +49,98 @@ export default function App() {
   const [isDraggingLeft, setIsDraggingLeft] = createSignal<boolean>(false);
   const [isDraggingRight, setIsDraggingRight] = createSignal<boolean>(false);
   const [isDraggingBottom, setIsDraggingBottom] = createSignal<boolean>(false);
+
+  // --- workspaces & tasks ---
+  const [workspaces, setWorkspaces] = createSignal<Workspace[]>([
+    { name: "DefaultProject", path: "DefaultProject" }
+  ]);
+  const [currentWorkspace, setCurrentWorkspace] = createSignal<Workspace>({
+    name: "DefaultProject",
+    path: "DefaultProject"
+  });
+  const [tasks, setTasks] = createSignal<QueryTask[]>([]);
+  const [activeTaskId, setActiveTaskId] = createSignal<string | null>(null);
+
+  function addWorkspace(path: string) {
+    if (!path) return;
+    // Extract folder name from absolute path
+    const name = path.split(/[\\/]/).filter(Boolean).pop() || path;
+
+    setWorkspaces((prev) => {
+      if (prev.some((w) => w.path === path)) return prev;
+      return [...prev, { name, path }];
+    });
+
+    const ws = { name, path };
+    setCurrentWorkspace(ws);
+  }
+
+  function selectWorkspace(path: string) {
+    const ws = workspaces().find((w) => w.path === path);
+    if (ws) {
+      setCurrentWorkspace(ws);
+    }
+  }
+
+  function removeWorkspace(path: string) {
+    const list = workspaces();
+    const nextList = list.filter((w) => w.path !== path);
+    
+    if (nextList.length === 0) {
+      const def = { name: "DefaultProject", path: "DefaultProject" };
+      setWorkspaces([def]);
+      setCurrentWorkspace(def);
+      return;
+    }
+    
+    setWorkspaces(nextList);
+    if (currentWorkspace().path === path) {
+      setCurrentWorkspace(nextList[0]);
+    }
+  }
+
+  function createTask(prompt: string) {
+    const id = `task-${Date.now()}`;
+    let name = prompt.trim();
+    if (name.length > 20) {
+      name = name.slice(0, 18) + "...";
+    }
+    name = name.replace(/\n/g, " ");
+
+    const newTask: QueryTask = {
+      id,
+      name,
+      sql: prompt.trim(),
+      createdAt: Date.now()
+    };
+
+    setTasks((prev) => [...prev, newTask]);
+    setActiveTaskId(id);
+    injectSql(newTask.sql);
+  }
+
+  function selectTask(id: string) {
+    const task = tasks().find((t) => t.id === id);
+    if (task) {
+      setActiveTaskId(id);
+      injectSql(task.sql);
+    }
+  }
+
+  function deleteTask(id: string) {
+    setTasks((prev) => prev.filter((t) => t.id !== id));
+    if (activeTaskId() === id) {
+      setActiveTaskId(null);
+    }
+  }
+
+  function handleSqlChange(newSql: string) {
+    setSql(newSql);
+    const activeId = activeTaskId();
+    if (activeId) {
+      setTasks((prev) => prev.map((t) => (t.id === activeId ? { ...t, sql: newSql } : t)));
+    }
+  }
 
   function startDraggingLeft(e: MouseEvent) {
     e.preventDefault();
@@ -221,7 +314,7 @@ export default function App() {
         "--bottom-height-actual": bottomHeightActual()
       }}
     >
-      <DropZone busy={busy()} onSources={mergeSources} onError={(m) => setError(m)} />
+      <DropZone workspace={currentWorkspace().path} busy={busy()} onSources={mergeSources} onError={(m) => setError(m)} />
 
       {/* Vertical Left Resizer */}
       <Show when={!settingsOpen()}>
@@ -262,7 +355,7 @@ export default function App() {
         consoleOpen={consoleState() !== "folded"}
         onToggleInspector={() => setInspectorOpen((v) => !v)}
         onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
-        onNewQuery={() => injectSql("SELECT 1 AS n;")}
+        onNewQuery={() => createTask("SELECT 1 AS n;")}
         selectedTable={selectedTable()}
         onOpenSettings={onSettings}
       />
@@ -270,34 +363,56 @@ export default function App() {
       <Show when={settingsOpen()} fallback={
         <>
           <LeftNav
-            workspace="lakemind"
+            workspace={currentWorkspace().name}
+            workspacePath={currentWorkspace().path}
+            workspaces={workspaces()}
+            tasks={tasks()}
+            activeTaskId={activeTaskId()}
+            onSelectTask={selectTask}
+            onDeleteTask={deleteTask}
+            onSelectWorkspace={selectWorkspace}
+            onRemoveWorkspace={removeWorkspace}
+            onAddWorkspace={addWorkspace}
             sources={sources()}
             selected={selectedTable()?.name ?? null}
             busy={busy()}
             onSelect={selectTable}
             onOpenSettings={onSettings}
-            onNewQuery={() => injectSql("SELECT 1 AS n;")}
+            onNewQuery={() => createTask("SELECT 1 AS n;")}
             inspectorOpen={inspectorOpen()}
             consoleOpen={consoleState() !== "folded"}
             onToggleInspector={() => setInspectorOpen((v) => !v)}
             onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
-            onDisconnect={() => { setSources([]); setSelectedTable(null); setResult(null); setError(null); }}
+            onDisconnect={() => { setSources([]); setSelectedTable(null); setResult(null); setError(null); setTasks([]); setActiveTaskId(null); }}
           />
 
           <main class="main">
-            <SqlEditor
-              initialSql={sql()}
-              rowCap={rowCap()}
-              busy={busy()}
-              onSql={setSql}
-              onRowCap={setRowCap}
-              onRun={run}
-              onCopy={copySql}
-            />
-            <Show when={error()}>
-              <pre class="error-box">{error()}</pre>
+            <Show 
+              when={activeTaskId() !== null}
+              fallback={
+                <HomePanel
+                  workspace={currentWorkspace().name}
+                  workspaces={workspaces()}
+                  onSelectWorkspace={selectWorkspace}
+                  onAddWorkspace={addWorkspace}
+                  onCreateTask={createTask}
+                />
+              }
+            >
+              <SqlEditor
+                initialSql={sql()}
+                rowCap={rowCap()}
+                busy={busy()}
+                onSql={handleSqlChange}
+                onRowCap={setRowCap}
+                onRun={run}
+                onCopy={copySql}
+              />
+              <Show when={error()}>
+                <pre class="error-box">{error()}</pre>
+              </Show>
+              <ResultTable result={result()} />
             </Show>
-            <ResultTable result={result()} />
           </main>
 
           <Show when={inspectorOpen()}>
