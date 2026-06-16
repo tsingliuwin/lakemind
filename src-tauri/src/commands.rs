@@ -394,3 +394,252 @@ pub async fn read_directory(path: String) -> Result<Vec<FileItem>, String> {
     });
     Ok(items)
 }
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct Workspace {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct QueryTask {
+    pub id: String,
+    pub name: String,
+    pub sql: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    pub kind: String,
+    pub messages: Option<serde_json::Value>,
+    pub saved: bool,
+}
+
+#[tauri::command]
+pub async fn load_workspaces() -> Result<Vec<Workspace>, String> {
+    let conn = crate::db::get_db_conn()?;
+    let mut stmt = conn
+        .prepare("SELECT name, path FROM workspaces ORDER BY created_at ASC")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(Workspace {
+                name: row.get(0)?,
+                path: row.get(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut list = Vec::new();
+    for r in rows {
+        if let Ok(w) = r {
+            list.push(w);
+        }
+    }
+    Ok(list)
+}
+
+#[tauri::command]
+pub async fn register_workspace_sources(
+    workspace_path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SourceTable>, String> {
+    let resolved_path = resolve_workspace_dir(&workspace_path)?;
+    if !resolved_path.exists() {
+        return Ok(Vec::new());
+    }
+    let path_str = resolved_path.to_string_lossy().to_string();
+    register_folder(path_str, state).await
+}
+
+#[tauri::command]
+pub async fn add_workspace(name: String, path: String) -> Result<(), String> {
+    let conn = crate::db::get_db_conn()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    conn.execute(
+        "INSERT OR REPLACE INTO workspaces (path, name, created_at) VALUES (?, ?, ?)",
+        rusqlite::params![path, name, now],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn remove_workspace(path: String) -> Result<(), String> {
+    let conn = crate::db::get_db_conn()?;
+    
+    // Enable foreign keys cascade deletion
+    let _ = conn.execute("PRAGMA foreign_keys = ON;", []);
+
+    // Clean up content files for all tasks under this workspace
+    let mut stmt = conn
+        .prepare("SELECT id, kind FROM tasks WHERE workspace_path = ?")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([&path], |row| {
+            let id: String = row.get(0)?;
+            let kind: String = row.get(1)?;
+            Ok((id, kind))
+        })
+        .map_err(|e| e.to_string())?;
+        
+    let lakemind_dir = crate::db::get_lakemind_dir()?;
+    for r in rows {
+        if let Ok((id, kind)) = r {
+            if kind == "sql" {
+                let filepath = lakemind_dir.join("sqls").join(format!("{}.sql", id));
+                let _ = std::fs::remove_file(filepath);
+            } else if kind == "chat" {
+                let filepath = lakemind_dir.join("chats").join(format!("{}.json", id));
+                let _ = std::fs::remove_file(filepath);
+            }
+        }
+    }
+    
+    // Delete the workspace record (which triggers ON DELETE CASCADE for tasks)
+    conn.execute("DELETE FROM workspaces WHERE path = ?", [&path])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn load_workspace_tasks(workspace_path: String) -> Result<Vec<QueryTask>, String> {
+    let conn = crate::db::get_db_conn()?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, kind, created_at, saved FROM tasks WHERE workspace_path = ? ORDER BY created_at ASC")
+        .map_err(|e| e.to_string())?;
+        
+    let rows = stmt
+        .query_map([&workspace_path], |row| {
+            let id: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            let kind: String = row.get(2)?;
+            let created_at: i64 = row.get(3)?;
+            let saved: i32 = row.get(4)?;
+            Ok((id, name, kind, created_at, saved != 0))
+        })
+        .map_err(|e| e.to_string())?;
+        
+    let lakemind_dir = crate::db::get_lakemind_dir()?;
+    let mut tasks = Vec::new();
+    for r in rows {
+        if let Ok((id, name, kind, created_at, saved)) = r {
+            let mut sql = String::new();
+            let mut messages = None;
+            
+            if kind == "sql" {
+                let filepath = lakemind_dir.join("sqls").join(format!("{}.sql", id));
+                if filepath.exists() {
+                    sql = std::fs::read_to_string(filepath).unwrap_or_default();
+                }
+            } else if kind == "chat" {
+                let filepath = lakemind_dir.join("chats").join(format!("{}.json", id));
+                if filepath.exists() {
+                    let json_str = std::fs::read_to_string(filepath).unwrap_or_default();
+                    messages = serde_json::from_str(&json_str).ok();
+                }
+            }
+            
+            tasks.push(QueryTask {
+                id,
+                name,
+                sql,
+                created_at,
+                kind,
+                messages,
+                saved,
+            });
+        }
+    }
+    Ok(tasks)
+}
+
+#[tauri::command]
+pub async fn save_sql_task(
+    workspace_path: String,
+    task_id: String,
+    name: String,
+    sql: String,
+) -> Result<(), String> {
+    let conn = crate::db::get_db_conn()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    
+    // Upsert task in SQLite index
+    conn.execute(
+        "INSERT OR REPLACE INTO tasks (id, workspace_path, name, kind, created_at, saved)
+         VALUES (?, ?, ?, 'sql', COALESCE((SELECT created_at FROM tasks WHERE id = ?), ?), 1)",
+        rusqlite::params![task_id, workspace_path, name, task_id, now],
+    )
+    .map_err(|e| e.to_string())?;
+    
+    // Write SQL text to physical file
+    let lakemind_dir = crate::db::get_lakemind_dir()?;
+    let filepath = lakemind_dir.join("sqls").join(format!("{}.sql", task_id));
+    std::fs::write(filepath, sql).map_err(|e| format!("Failed to write SQL file: {e}"))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn save_chat_task(
+    workspace_path: String,
+    task_id: String,
+    name: String,
+    messages: serde_json::Value,
+) -> Result<(), String> {
+    let conn = crate::db::get_db_conn()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    
+    // Upsert task in SQLite index
+    conn.execute(
+        "INSERT OR REPLACE INTO tasks (id, workspace_path, name, kind, created_at, saved)
+         VALUES (?, ?, ?, 'chat', COALESCE((SELECT created_at FROM tasks WHERE id = ?), ?), 1)",
+        rusqlite::params![task_id, workspace_path, name, task_id, now],
+    )
+    .map_err(|e| e.to_string())?;
+    
+    // Write Chat history JSON to physical file
+    let lakemind_dir = crate::db::get_lakemind_dir()?;
+    let filepath = lakemind_dir.join("chats").join(format!("{}.json", task_id));
+    let json_str = serde_json::to_string(&messages).map_err(|e| e.to_string())?;
+    std::fs::write(filepath, json_str).map_err(|e| format!("Failed to write chat JSON file: {e}"))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_task(task_id: String) -> Result<(), String> {
+    let conn = crate::db::get_db_conn()?;
+    
+    // Find the task kind to delete its content file
+    let kind: Option<String> = conn
+        .query_row(
+            "SELECT kind FROM tasks WHERE id = ?",
+            [&task_id],
+            |row| row.get(0),
+        )
+        .ok();
+        
+    if let Some(k) = kind {
+        let lakemind_dir = crate::db::get_lakemind_dir()?;
+        if k == "sql" {
+            let filepath = lakemind_dir.join("sqls").join(format!("{}.sql", task_id));
+            let _ = std::fs::remove_file(filepath);
+        } else if k == "chat" {
+            let filepath = lakemind_dir.join("chats").join(format!("{}.json", task_id));
+            let _ = std::fs::remove_file(filepath);
+        }
+    }
+    
+    // Delete record in SQLite
+    conn.execute("DELETE FROM tasks WHERE id = ?", [&task_id])
+        .map_err(|e| e.to_string())?;
+        
+    Ok(())
+}

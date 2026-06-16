@@ -1,4 +1,5 @@
-import { createSignal, Show, Switch, Match, onMount, onCleanup } from "solid-js";
+import { createSignal, Show, Switch, Match, onMount, onCleanup, createEffect } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
 import DropZone from "./components/DropZone";
 import LeftNav from "./components/LeftNav";
 import TitleBar from "./components/TitleBar";
@@ -63,7 +64,19 @@ export default function App() {
   const [tasks, setTasks] = createSignal<QueryTask[]>([]);
   const [activeTaskId, setActiveTaskId] = createSignal<string | null>(null);
 
-  onMount(() => {
+  // Load workspaces on startup
+  onMount(async () => {
+    try {
+      const list = await invoke<Workspace[]>("load_workspaces");
+      if (list && list.length > 0) {
+        setWorkspaces(list);
+        const defaultWS = list.find((w) => w.path === "DefaultProject") || list[0];
+        setCurrentWorkspace(defaultWS);
+      }
+    } catch (err) {
+      console.error("Failed to load workspaces:", err);
+    }
+
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       const isN = e.key.toLowerCase() === "n";
       const isS = e.key.toLowerCase() === "s";
@@ -86,18 +99,58 @@ export default function App() {
     });
   });
 
-  function addWorkspace(path: string) {
+  // Track workspace change to load its tasks and scan source files
+  createEffect(async () => {
+    const ws = currentWorkspace();
+    if (!ws) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // 1. Load tasks
+      const loadedTasks = await invoke<QueryTask[]>("load_workspace_tasks", { workspacePath: ws.path });
+      setTasks(loadedTasks);
+      
+      if (loadedTasks.length > 0) {
+        const activeId = activeTaskId();
+        if (activeId && loadedTasks.some(t => t.id === activeId)) {
+          selectTask(activeId);
+        } else {
+          selectTask(loadedTasks[0].id);
+        }
+      } else {
+        setActiveTaskId(null);
+        setSql("SELECT 1 AS n;");
+        setResult(null);
+        setError(null);
+      }
+
+      // 2. Scan and register files in workspace
+      const registeredSources = await invoke<SourceTable[]>("register_workspace_sources", { workspacePath: ws.path });
+      setSources(registeredSources);
+      setSelectedTable(null);
+    } catch (err) {
+      console.error("Failed to load workspace tasks & sources:", err);
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  async function addWorkspace(path: string) {
     if (!path) return;
-    // Extract folder name from absolute path
     const name = path.split(/[\\/]/).filter(Boolean).pop() || path;
 
-    setWorkspaces((prev) => {
-      if (prev.some((w) => w.path === path)) return prev;
-      return [...prev, { name, path }];
-    });
-
-    const ws = { name, path };
-    setCurrentWorkspace(ws);
+    try {
+      await invoke("add_workspace", { name, path });
+      setWorkspaces((prev) => {
+        if (prev.some((w) => w.path === path)) return prev;
+        return [...prev, { name, path }];
+      });
+      const ws = { name, path };
+      setCurrentWorkspace(ws);
+    } catch (err) {
+      console.error("Failed to add workspace:", err);
+    }
   }
 
   function selectWorkspace(path: string) {
@@ -107,20 +160,26 @@ export default function App() {
     }
   }
 
-  function removeWorkspace(path: string) {
-    const list = workspaces();
-    const nextList = list.filter((w) => w.path !== path);
-    
-    if (nextList.length === 0) {
-      const def = { name: "DefaultProject", path: "DefaultProject" };
-      setWorkspaces([def]);
-      setCurrentWorkspace(def);
-      return;
-    }
-    
-    setWorkspaces(nextList);
-    if (currentWorkspace().path === path) {
-      setCurrentWorkspace(nextList[0]);
+  async function removeWorkspace(path: string) {
+    try {
+      await invoke("remove_workspace", { path });
+      const list = workspaces();
+      const nextList = list.filter((w) => w.path !== path);
+      
+      if (nextList.length === 0) {
+        const def = { name: "DefaultProject", path: "DefaultProject" };
+        await invoke("add_workspace", def);
+        setWorkspaces([def]);
+        setCurrentWorkspace(def);
+        return;
+      }
+      
+      setWorkspaces(nextList);
+      if (currentWorkspace().path === path) {
+        setCurrentWorkspace(nextList[0]);
+      }
+    } catch (err) {
+      console.error("Failed to remove workspace:", err);
     }
   }
 
@@ -171,28 +230,49 @@ export default function App() {
     return tasks().find((t) => t.id === id) ?? null;
   }
 
+  async function saveChatTaskBackend(taskId: string, name: string, messages: ChatMessage[]) {
+    try {
+      await invoke("save_chat_task", {
+        workspacePath: currentWorkspace().path,
+        taskId,
+        name,
+        messages,
+      });
+    } catch (err) {
+      console.error("Failed to save chat task to backend:", err);
+    }
+  }
+
   /** ChatView 发送消息：追加 user 消息 → Mock 回复 → 追加 assistant 消息。 */
   async function sendChatMessage(prompt: string) {
     const id = activeTaskId();
     if (!id) return;
+    const task = tasks().find((t) => t.id === id);
+    if (!task) return;
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: "user",
       content: prompt,
       ts: Date.now(),
     };
+    
+    const updatedMessages = [...(task.messages ?? []), userMsg];
     setTasks((prev) =>
       prev.map((t) =>
-        t.id === id ? { ...t, messages: [...(t.messages ?? []), userMsg] } : t,
+        t.id === id ? { ...t, messages: updatedMessages } : t,
       ),
     );
+    await saveChatTaskBackend(id, task.name, updatedMessages);
+
     // MOCK：M2 接真 Agent 时替换 mockAgentReply。
     const reply = await mockAgentReply(prompt);
+    const finalMessages = [...updatedMessages, reply];
     setTasks((prev) =>
       prev.map((t) =>
-        t.id === id ? { ...t, messages: [...(t.messages ?? []), reply] } : t,
+        t.id === id ? { ...t, messages: finalMessages } : t,
       ),
     );
+    await saveChatTaskBackend(id, task.name, finalMessages);
   }
 
   async function createChatTaskAndSend(prompt: string) {
@@ -221,13 +301,16 @@ export default function App() {
 
     setTasks((prev) => [...prev, newTask]);
     setActiveTaskId(id);
+    await saveChatTaskBackend(id, name, [userMsg]);
 
     const reply = await mockAgentReply(prompt);
+    const finalMessages = [userMsg, reply];
     setTasks((prev) =>
       prev.map((t) =>
-        t.id === id ? { ...t, messages: [...(t.messages ?? []), reply] } : t,
+        t.id === id ? { ...t, messages: finalMessages } : t,
       ),
     );
+    await saveChatTaskBackend(id, name, finalMessages);
   }
 
   async function sendChatMessageFromHome(id: string, prompt: string) {
@@ -255,13 +338,16 @@ export default function App() {
           : t
       )
     );
+    await saveChatTaskBackend(id, name, [userMsg]);
 
     const reply = await mockAgentReply(prompt);
+    const finalMessages = [userMsg, reply];
     setTasks((prev) =>
       prev.map((t) =>
-        t.id === id ? { ...t, messages: [...(t.messages ?? []), reply] } : t,
+        t.id === id ? { ...t, messages: finalMessages } : t,
       ),
     );
+    await saveChatTaskBackend(id, name, finalMessages);
   }
 
   /** ChatCard「在 SQL 面板打开」：新建 SQL task 注入 SQL 并自动执行。 */
@@ -270,14 +356,19 @@ export default function App() {
     void run();
   }
 
-  function deleteTask(id: string) {
+  async function deleteTask(id: string) {
     setTasks((prev) => prev.filter((t) => t.id !== id));
     if (activeTaskId() === id) {
       setActiveTaskId(null);
     }
+    try {
+      await invoke("delete_task", { taskId: id });
+    } catch (err) {
+      console.error("Failed to delete task:", err);
+    }
   }
 
-  function saveActiveTask() {
+  async function saveActiveTask() {
     const activeId = activeTaskId();
     if (!activeId) return;
     const task = tasks().find((t) => t.id === activeId);
@@ -302,6 +393,17 @@ export default function App() {
         t.id === activeId ? { ...t, name, saved: true } : t
       )
     );
+
+    try {
+      await invoke("save_sql_task", {
+        workspacePath: currentWorkspace().path,
+        taskId: activeId,
+        name,
+        sql: task.sql,
+      });
+    } catch (err) {
+      console.error("Failed to save SQL task:", err);
+    }
   }
 
   const visibleTasks = () => {
