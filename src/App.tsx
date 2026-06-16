@@ -296,6 +296,7 @@ export default function App() {
     const newTask: QueryTask = {
       id,
       name,
+      sql: "",
       createdAt: Date.now(),
       kind: "chat",
       messages: [userMsg],

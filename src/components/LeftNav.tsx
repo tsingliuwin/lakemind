@@ -60,7 +60,7 @@ export default function LeftNav(props: {
   const [expandedPaths, setExpandedPaths] = createSignal<Record<string, boolean>>({});
   const [directoryContents, setDirectoryContents] = createSignal<Record<string, FileItem[]>>({});
   const [activeActionWsPath, setActiveActionWsPath] = createSignal<string | null>(null);
-  const [fileSearchQuery, setFileSearchQuery] = createSignal("");
+  const [fileSearchQuery] = createSignal("");
 
   // Subsections expanded states
   const [tasksSectionExpanded, setTasksSectionExpanded] = createSignal(true);
