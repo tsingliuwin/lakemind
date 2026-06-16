@@ -40,7 +40,7 @@ pub struct ScanEntry {
 /// Walk `root` and produce a deduplicated list of SOURCE scan entries.
 ///
 /// Order: Delta dirs first, then Parquet globs, then CSV, then JSON.
-pub fn scan_path(root: &Path) -> Vec<ScanEntry> {
+pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
     // First pass: collect raw files & detect Delta roots.
     let mut parquet_files: Vec<PathBuf> = Vec::new();
     let mut csv_files: Vec<PathBuf> = Vec::new();
@@ -94,47 +94,95 @@ pub fn scan_path(root: &Path) -> Vec<ScanEntry> {
         out.push(entry_for(d, d, SourceKind::Delta, &root_str));
     }
 
-    // Parquet: prefer one globbed view for all shards. If Hive partition keys
-    // appear in the relative path, surface them (read_parquet handles them).
-    if !parquet_files.is_empty() {
-        // Detect the actual extension present (`.parquet` vs `.parq`); DuckDB's
-        // read_parquet does NOT support shell brace expansion like {a,b}, so we
-        // must emit a glob matching the extension(s) actually on disk.
-        let exts = present_parquet_exts(&parquet_files);
-        // Common case: a single directory of shards → one view named after it.
-        let parents: std::collections::BTreeSet<PathBuf> =
-            parquet_files.iter().map(|p| p.parent().unwrap_or(Path::new("")).to_path_buf()).collect();
-
-        if parents.len() == 1 {
-            let dir = parents.into_iter().next().unwrap();
-            let mut keys = hive_keys_of(&dir, &root_str);
-            // If no keys at the immediate parent, probe one level up (common:
-            // files sit under /year=2026/).
-            if keys.is_empty() {
-                if let Some(grand) = dir.parent() {
-                    keys = hive_keys_of(&grand.join("**"), &root_str);
-                }
-            }
-            out.push(build_entry("parquet_root", &dir, SourceKind::Parquet, &root_str, keys, &exts));
-        } else {
-            // Multiple directories (likely partitioned): glob the whole root.
-            let keys = hive_keys_glob(&root_str);
-            out.push(build_entry("parquet_glob", &root_str, SourceKind::Parquet, &root_str, keys, &exts));
+    if is_workspace || is_file {
+        // Individual files mapping strategy
+        for f in &csv_files {
+            out.push(build_individual_entry(f, SourceKind::Csv, &root_str));
         }
-    }
+        for f in &json_files {
+            out.push(build_individual_entry(f, SourceKind::Json, &root_str));
+        }
+        
+        // Group parquet files by parent directory to detect subdirectories (shards)
+        let mut parquet_groups: std::collections::BTreeMap<PathBuf, Vec<PathBuf>> = std::collections::BTreeMap::new();
+        for f in &parquet_files {
+            let dir = f.parent().unwrap_or(Path::new("")).to_path_buf();
+            parquet_groups.entry(dir).or_default().push(f.clone());
+        }
+        for (dir, files) in parquet_groups {
+            if dir == root_str {
+                // Direct files under workspace root -> map individually!
+                for f in files {
+                    out.push(build_individual_entry(&f, SourceKind::Parquet, &root_str));
+                }
+            } else {
+                // Nested directory -> group them as a single view glob!
+                let label = sanitize_label(dir.file_name().and_then(|s| s.to_str()).unwrap_or("parquet"));
+                let keys = hive_keys_of(&dir, &root_str);
+                let exts = present_parquet_exts(&files);
+                out.push(build_entry(&label, &dir, SourceKind::Parquet, &root_str, keys, &exts));
+            }
+        }
+    } else {
+        // Legacy grouping strategy (for folder drag-and-drop / import)
+        if !parquet_files.is_empty() {
+            // Detect the actual extension present (`.parquet` vs `.parq`); DuckDB's
+            // read_parquet does NOT support shell brace expansion like {a,b}, so we
+            // must emit a glob matching the extension(s) actually on disk.
+            let exts = present_parquet_exts(&parquet_files);
+            // Common case: a single directory of shards → one view named after it.
+            let parents: std::collections::BTreeSet<PathBuf> =
+                parquet_files.iter().map(|p| p.parent().unwrap_or(Path::new("")).to_path_buf()).collect();
 
-    // CSV: group by directory.
-    for (label, dir) in group_by_dir(&csv_files) {
-        out.push(build_entry(&label, &dir, SourceKind::Csv, &root_str, Vec::new(), &[]));
-    }
-    // JSON: group by directory.
-    for (label, dir) in group_by_dir(&json_files) {
-        out.push(build_entry(&label, &dir, SourceKind::Json, &root_str, Vec::new(), &[]));
+            if parents.len() == 1 {
+                let dir = parents.into_iter().next().unwrap();
+                let mut keys = hive_keys_of(&dir, &root_str);
+                // If no keys at the immediate parent, probe one level up (common:
+                // files sit under /year=2026/).
+                if keys.is_empty() {
+                    if let Some(grand) = dir.parent() {
+                        keys = hive_keys_of(&grand.join("**"), &root_str);
+                    }
+                }
+                out.push(build_entry("parquet_root", &dir, SourceKind::Parquet, &root_str, keys, &exts));
+            } else {
+                // Multiple directories (likely partitioned): glob the whole root.
+                let keys = hive_keys_glob(&root_str);
+                out.push(build_entry("parquet_glob", &root_str, SourceKind::Parquet, &root_str, keys, &exts));
+            }
+        }
+
+        // CSV: group by directory.
+        for (label, dir) in group_by_dir(&csv_files) {
+            out.push(build_entry(&label, &dir, SourceKind::Csv, &root_str, Vec::new(), &[]));
+        }
+        // JSON: group by directory.
+        for (label, dir) in group_by_dir(&json_files) {
+            out.push(build_entry(&label, &dir, SourceKind::Json, &root_str, Vec::new(), &[]));
+        }
     }
 
     // Deduplicate by scan_path (a file might be caught twice on edge cases).
     out.dedup_by(|a, b| a.scan_path == b.scan_path);
     out
+}
+
+fn build_individual_entry(file: &Path, kind: SourceKind, root: &Path) -> ScanEntry {
+    let label = file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(sanitize_label)
+        .unwrap_or_else(|| "data".to_string());
+    let view_name = to_view_name(&label);
+    let _ = root; // root retained for potential relative-path formatting later
+    ScanEntry {
+        label,
+        view_name,
+        kind,
+        path: forward_slashes(file),
+        scan_path: forward_slashes(file),
+        partition_keys: Vec::new(),
+    }
 }
 
 fn group_by_dir(files: &[PathBuf]) -> Vec<(String, PathBuf)> {

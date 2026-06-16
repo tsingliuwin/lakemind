@@ -39,6 +39,43 @@ mod tests {
         assert!(res.truncated);
     }
 
+    #[test]
+    fn test_list_tables() {
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE t1 (id INT);", []).unwrap();
+        conn.execute("CREATE VIEW v1 AS SELECT * FROM t1;", []).unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT table_name, 'table' as type FROM duckdb_tables() WHERE schema_name = 'main' AND NOT internal
+             UNION ALL
+             SELECT view_name as table_name, 'view' as type FROM duckdb_views() WHERE schema_name = 'main' AND NOT internal
+             ORDER BY table_name"
+        ).unwrap();
+
+        struct DbTable {
+            name: String,
+            kind: String,
+        }
+
+        let rows = stmt.query_map([], |row| {
+            Ok(DbTable {
+                name: row.get(0)?,
+                kind: row.get(1)?,
+            })
+        }).unwrap();
+
+        let mut db_tables = Vec::new();
+        for r in rows {
+            db_tables.push(r.unwrap());
+        }
+
+        assert_eq!(db_tables.len(), 2);
+        assert_eq!(db_tables[0].name, "t1");
+        assert_eq!(db_tables[0].kind, "table");
+        assert_eq!(db_tables[1].name, "v1");
+        assert_eq!(db_tables[1].kind, "view");
+    }
+
     /// A bare trailing semicolon must not break the wrapper subquery.
     #[test]
     fn execute_tolerates_trailing_semicolon() {
@@ -55,11 +92,21 @@ mod tests {
         std::fs::write(&csv, "id,name\n1,alice\n2,bob\n3,carol\n").unwrap();
 
         let conn = duckdb::Connection::open_in_memory().unwrap();
-        let entries = scan::scan_path(&csv);
+        let entries = scan::scan_path(&csv, false);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].kind, SourceKind::Csv);
 
         let table = register::register(&conn, &entries[0]).unwrap();
+        
+        let mut stmt = conn.prepare("SELECT view_name, schema_name, internal FROM duckdb_views()").unwrap();
+        let mut rows = stmt.query([]).unwrap();
+        while let Some(row) = rows.next().unwrap() {
+            let name: String = row.get(0).unwrap();
+            let schema: String = row.get(1).unwrap();
+            let internal: bool = row.get(2).unwrap();
+            println!("view_name: {}, schema_name: {}, internal: {}", name, schema, internal);
+        }
+
         assert!(table.columns.iter().any(|c| c.name == "name"), "columns: {:?}", table.columns);
 
         let res = execute::run_query(&conn, &format!("SELECT count(*) AS n FROM \"{}\"", table.name), None).unwrap();
@@ -74,7 +121,7 @@ mod tests {
         write_parquet(&pq);
 
         let conn = duckdb::Connection::open_in_memory().unwrap();
-        let entries = scan::scan_path(dir.path());
+        let entries = scan::scan_path(dir.path(), false);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].kind, SourceKind::Parquet);
 
@@ -99,7 +146,7 @@ mod tests {
 
         let conn = duckdb::Connection::open_in_memory().unwrap();
         let t_scan = std::time::Instant::now();
-        let entries = scan::scan_path(&demo);
+        let entries = scan::scan_path(&demo, false);
         let scan_ms = t_scan.elapsed().as_millis();
         println!("=== SCAN: {} entries in {} ms", entries.len(), scan_ms);
         for e in &entries {
@@ -225,5 +272,88 @@ mod tests {
             V::Decimal(d) => d.to_string().parse().unwrap_or(-1),
             _ => -1,
         }
+    }
+
+    #[test]
+    fn test_scan_default_project() {
+        let root = std::path::Path::new("C:/Users/lyq/.lakemind/DefaultProject");
+        assert!(root.exists(), "Root directory C:/Users/lyq/.lakemind/DefaultProject does not exist!");
+        let entries = scan::scan_path(root, true);
+        println!("Scan entries: {:#?}", entries);
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        for e in &entries {
+            match register::register(&conn, e) {
+                Ok(t) => println!("Successfully registered table through fallback! Columns: {:?}", t.columns),
+                Err(err) => panic!("Failed to register {}: {}", e.label, err),
+            }
+        }
+    }
+
+    #[test]
+    fn test_register_workspace_sources_incremental() {
+        let temp = tempdir();
+        let ws_path = temp.path();
+
+        // 1. Create a dummy CSV file in the workspace
+        let csv_path = ws_path.join("users_test.csv");
+        std::fs::write(&csv_path, "id,name\n1,Alice\n2,Bob\n").unwrap();
+
+        // 2. Initialize AppState
+        let state = crate::state::AppState::new().unwrap();
+
+        // Run the commands via block_on
+        tauri::async_runtime::block_on(async {
+            // First register: should ingest the table
+            let ws_str = ws_path.to_string_lossy().to_string();
+            let tables = crate::commands::register_workspace_sources_inner(ws_str.clone(), &state)
+                .await
+                .unwrap();
+            
+            assert_eq!(tables.len(), 1);
+            assert_eq!(tables[0].name, "s_users_test");
+            assert_eq!(tables[0].row_count_estimate, Some(2));
+
+            // Verify lake.duckdb is created physically
+            let db_file = ws_path.join("lake.duckdb");
+            assert!(db_file.exists(), "lake.duckdb database file must exist on disk");
+
+            // Verify we can query the table in DuckDB
+            {
+                let guard = state.conn.lock().await;
+                let count: i64 = guard
+                    .query_row("SELECT count(*) FROM s_users_test", [], |r| r.get(0))
+                    .unwrap();
+                assert_eq!(count, 2);
+            }
+
+            // Second register (incremental scan): table exists, should not ingest again
+            let tables_cached = crate::commands::register_workspace_sources_inner(ws_str.clone(), &state)
+                .await
+                .unwrap();
+            assert_eq!(tables_cached.len(), 1);
+            assert_eq!(tables_cached[0].name, "s_users_test");
+
+            // Delete the physical file
+            std::fs::remove_file(&csv_path).unwrap();
+
+            // Register again: should drop the orphan table and clear sources
+            let tables_after_delete = crate::commands::register_workspace_sources_inner(ws_str.clone(), &state)
+                .await
+                .unwrap();
+            assert_eq!(tables_after_delete.len(), 0);
+
+            // Verify the table was physically dropped
+            {
+                let guard = state.conn.lock().await;
+                let count_tables: i64 = guard
+                    .query_row(
+                        "SELECT count(*) FROM duckdb_tables() WHERE table_name = 's_users_test'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(count_tables, 0, "Table must be dropped from database");
+            }
+        });
     }
 }

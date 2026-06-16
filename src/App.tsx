@@ -612,10 +612,11 @@ export default function App() {
     setLogs((prev) => [entry, ...prev].slice(0, 100));
   }
 
-  /** 点击侧栏表：选中并在右侧检查器展示其 schema。 */
+  /** 点击侧栏表：选中并在右侧检查器展示其 schema，同时自动执行 LIMIT 50 预览查询。 */
   function selectTable(t: SourceTable) {
     setSelectedTable(t);
     setInspectorOpen(true);
+    previewTable(t);
   }
 
   /** 检查器 → 编辑器：注入一段 SQL（不自动执行）。 */

@@ -40,7 +40,7 @@ pub async fn register_folder(path: String, state: State<'_, AppState>) -> Result
 
         // 1. Pure filesystem scan — no DuckDB lock needed. This is the slow
         //    part on big trees and must not block concurrent queries.
-        let entries = scan::scan_path(&root);
+        let entries = scan::scan_path(&root, false);
 
         // 2. Short critical section: load delta only if needed, then create
         //    the views + introspect. Hold the lock only across these DB ops.
@@ -319,7 +319,7 @@ pub async fn import_file_to_workspace(
         };
 
         // Scan (FS, no lock) then short critical section for CREATE VIEW.
-        let entries = scan::scan_path(&target_path);
+        let entries = scan::scan_path(&target_path, false);
         let guard = conn.blocking_lock();
         let needs_delta = entries
             .iter()
@@ -436,17 +436,134 @@ pub async fn load_workspaces() -> Result<Vec<Workspace>, String> {
     Ok(list)
 }
 
+async fn switch_workspace_db(workspace_path: &str, state: &AppState) -> Result<PathBuf, String> {
+    let resolved_path = resolve_workspace_dir(workspace_path)?;
+    std::fs::create_dir_all(&resolved_path).map_err(|e| e.to_string())?;
+    let db_path = resolved_path.join("lake.duckdb");
+    
+    let mut conn_guard = state.conn.lock().await;
+    // Drop/close the existing connection first by replacing it with a temporary in-memory connection.
+    // This releases any active file lock on `lake.duckdb` if we are switching to/reopening the same workspace.
+    *conn_guard = duckdb::Connection::open_in_memory().map_err(|e| e.to_string())?;
+    let new_conn = duckdb::Connection::open(&db_path).map_err(|e| e.to_string())?;
+    new_conn.execute_batch(
+        "PRAGMA memory_limit='4GB';\n\
+         PRAGMA threads=8;",
+    ).map_err(|e| e.to_string())?;
+    
+    *conn_guard = new_conn;
+    
+    let mut sources_guard = state.sources.lock().await;
+    sources_guard.clear();
+    
+    Ok(resolved_path)
+}
+
 #[tauri::command]
 pub async fn register_workspace_sources(
     workspace_path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<SourceTable>, String> {
-    let resolved_path = resolve_workspace_dir(&workspace_path)?;
-    if !resolved_path.exists() {
-        return Ok(Vec::new());
+    register_workspace_sources_inner(workspace_path, &state).await
+}
+
+pub async fn register_workspace_sources_inner(
+    workspace_path: String,
+    state: &AppState,
+) -> Result<Vec<SourceTable>, String> {
+    let resolved_path = switch_workspace_db(&workspace_path, state).await?;
+
+    let conn = state.conn.clone();
+    let sources = state.sources.clone();
+
+    let join = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<SourceTable>> {
+        let entries = scan::scan_path(&resolved_path, true);
+
+        let guard = conn.blocking_lock();
+        
+        // 1. Drop tables for files that are no longer present in the workspace directory
+        let mut list_stmt = guard.prepare(
+            "SELECT table_name FROM duckdb_tables() WHERE schema_name = 'main' AND table_name LIKE 's_%'"
+        )?;
+        let rows = list_stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut tables_to_drop = Vec::new();
+        for r in rows {
+            if let Ok(name) = r {
+                if !entries.iter().any(|e| e.view_name == name) {
+                    tables_to_drop.push(name);
+                }
+            }
+        }
+        for name in tables_to_drop {
+            let _ = guard.execute(&format!("DROP TABLE IF EXISTS \"{}\";", name), []);
+        }
+
+        // 2. Load delta extension if any delta table is scanned
+        let needs_delta = entries
+            .iter()
+            .any(|e| e.kind == crate::model::SourceKind::Delta);
+        if needs_delta {
+            let _ = guard.execute("INSTALL delta;", []);
+            let _ = guard.execute("LOAD delta;", []);
+        }
+
+        // 3. Process entries incrementally
+        let mut created = Vec::with_capacity(entries.len());
+        
+        let mut check_stmt = guard.prepare(
+            "SELECT count(*) FROM duckdb_tables() WHERE schema_name = 'main' AND table_name = ?"
+        )?;
+
+        for e in &entries {
+            let table_exists: bool = check_stmt
+                .query_row([&e.view_name], |r| r.get::<_, i64>(0))
+                .unwrap_or(0) > 0;
+
+            if table_exists {
+                // Read columns and estimate count directly without full copy
+                if let Ok(columns) = schema::describe_view(&guard, &e.view_name) {
+                    let row_count_estimate = schema::estimate_row_count(&guard, e).unwrap_or(None);
+                    created.push(SourceTable {
+                        name: e.view_name.clone(),
+                        label: e.label.clone(),
+                        kind: e.kind.clone(),
+                        path: e.path.clone(),
+                        scan_path: e.scan_path.clone(),
+                        partition_keys: e.partition_keys.clone(),
+                        row_count_estimate,
+                        columns,
+                    });
+                } else {
+                    // Fallback to register if describe failed
+                    match register::register(&guard, e) {
+                        Ok(t) => created.push(t),
+                        Err(err) => eprintln!("skip source {}: {err}", e.label),
+                    }
+                }
+            } else {
+                // Register / Ingest the new file
+                match register::register(&guard, e) {
+                    Ok(t) => created.push(t),
+                    Err(err) => eprintln!("skip source {}: {err}", e.label),
+                }
+            }
+        }
+        drop(guard);
+
+        let mut registry = sources.blocking_lock();
+        for t in &created {
+            registry.retain(|existing| existing.name != t.name);
+            registry.push(t.clone());
+        }
+        Ok(created)
+    })
+    .await;
+
+    match join {
+        Ok(Ok(created)) => Ok(created),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(join_err) => Err(format!("task join error: {join_err}")),
     }
-    let path_str = resolved_path.to_string_lossy().to_string();
-    register_folder(path_str, state).await
 }
 
 #[tauri::command]
