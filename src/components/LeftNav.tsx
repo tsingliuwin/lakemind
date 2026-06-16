@@ -257,25 +257,25 @@ export default function LeftNav(props: {
           <div class="tree">
             <For each={props.workspaces ?? []}>
               {(ws) => {
-                const isActive = ws.path === props.workspacePath;
+                const isActive = () => ws.path === props.workspacePath;
                 return (
-                  <div class="tree-group" style={{ "margin-bottom": isActive ? "12px" : "4px" }}>
+                  <div class="tree-group" style={{ "margin-bottom": isActive() ? "12px" : "4px" }}>
                     {/* Workspace Folder Node */}
                     <div 
                       class="tree-group-label workspace-root-node"
-                      classList={{ active: isActive }}
+                      classList={{ active: isActive() }}
                       title={ws.path}
                       onClick={() => props.onSelectWorkspace?.(ws.path)}
                       style={{
                         display: "flex", 
                         "align-items": "center", 
-                        "font-weight": isActive ? "600" : "500", 
+                        "font-weight": isActive() ? "600" : "500", 
                         "font-size": "12px", 
-                        color: isActive ? "var(--text-primary)" : "var(--text-secondary)", 
+                        color: isActive() ? "var(--text-primary)" : "var(--text-secondary)", 
                         cursor: "pointer", 
                         padding: "6px 8px", 
                         "border-radius": "var(--radius-sm)",
-                        background: isActive ? "var(--bg-hover)" : "transparent",
+                        background: isActive() ? "var(--bg-hover)" : "transparent",
                         position: "relative"
                       }}
                     >
@@ -335,13 +335,13 @@ export default function LeftNav(props: {
                         </div>
                       </Show>
 
-                      <Show when={isActive && activeActionWsPath() !== ws.path}>
+                      <Show when={isActive() && activeActionWsPath() !== ws.path}>
                         <span style="font-size: 8px; color: var(--accent-blue);">●</span>
                       </Show>
                     </div>
 
                     {/* If active, render its tasks and sources */}
-                    <Show when={isActive}>
+                    <Show when={isActive()}>
                       {/* Render Tasks under active workspace */}
                       <For each={props.tasks ?? []}>
                         {(task) => (
