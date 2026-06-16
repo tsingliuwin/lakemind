@@ -34,6 +34,7 @@ export default function LeftNav(props: {
   onToggleInspector?: () => void;
   onToggleConsole?: () => void;
   onDisconnect?: () => void;
+  onImportFile?: (filePath: string) => void;
 }) {
   // Group tables by their parent directory for a tree-like feel.
   const groups = createMemo(() => {
@@ -50,7 +51,8 @@ export default function LeftNav(props: {
 
   const [userMenuOpen, setUserMenuOpen] = createSignal(false);
   const [activeSubmenu, setActiveSubmenu] = createSignal<"language" | "theme" | "zoom" | "quota" | null>(null);
-  let userMenuRef!: HTMLDivElement;
+  let userMenuDropdownRef!: HTMLDivElement;
+  let userBadgeRef!: HTMLButtonElement;
 
   // File explorer states
   const [viewMode, setViewMode] = createSignal<"tasks" | "files">("tasks");
@@ -86,11 +88,16 @@ export default function LeftNav(props: {
   };
 
   const handleClickOutside = (e: MouseEvent) => {
-    if (userMenuRef && !userMenuRef.contains(e.target as Node)) {
+    const target = e.target as HTMLElement;
+    if (
+      userMenuOpen() &&
+      userMenuDropdownRef &&
+      !userMenuDropdownRef.contains(target) &&
+      (!userBadgeRef || !userBadgeRef.contains(target))
+    ) {
       setUserMenuOpen(false);
       setActiveSubmenu(null);
     }
-    const target = e.target as HTMLElement;
     if (!target.closest(".ws-action-icon-btn") && !target.closest(".ws-action-popover")) {
       setActiveActionWsPath(null);
     }
@@ -125,6 +132,8 @@ export default function LeftNav(props: {
                   onClick={() => {
                     if (item.is_dir) {
                       toggleFolder(item.path);
+                    } else {
+                      props.onImportFile?.(item.path);
                     }
                   }}
                 >
@@ -495,8 +504,9 @@ export default function LeftNav(props: {
         </div>
       </Show>
 
-      <div class="ln-footer" ref={userMenuRef}>
+      <div class="ln-footer">
         <button 
+          ref={userBadgeRef}
           class="ln-user-badge"
           classList={{ active: userMenuOpen() }}
           onClick={() => {
@@ -511,7 +521,7 @@ export default function LeftNav(props: {
 
         {/* User Dropdown Menu */}
         <Show when={userMenuOpen()}>
-          <div class="ln-user-dropdown">
+          <div class="ln-user-dropdown" ref={userMenuDropdownRef}>
             
             {/* Language Submenu Trigger */}
             <div class="user-menu-item-wrapper">

@@ -7,6 +7,7 @@ interface HomePanelProps {
   onSelectWorkspace: (path: string) => void;
   onAddWorkspace: (path: string) => void;
   onCreateTask: (prompt: string) => void;
+  onAddSource?: () => void;
 }
 
 export default function HomePanel(props: HomePanelProps) {
@@ -115,7 +116,7 @@ export default function HomePanel(props: HomePanelProps) {
                       placeholder="搜索工作区" 
                       value={searchQuery()} 
                       onInput={(e) => setSearchQuery(e.currentTarget.value)}
-                      autofocus
+                      ref={(el) => setTimeout(() => el.focus(), 50)}
                     />
                   </div>
                   
@@ -163,7 +164,11 @@ export default function HomePanel(props: HomePanelProps) {
           <div class="pill-footer">
             <div class="footer-left">
               {/* Attachment Button */}
-              <button class="pill-btn attachment-btn" title="添加文件 / @">
+              <button 
+                class="pill-btn attachment-btn" 
+                title="添加文件 / @"
+                onClick={() => props.onAddSource?.()}
+              >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M12 5v14M5 12h14"/>
                 </svg>

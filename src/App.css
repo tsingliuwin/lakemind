@@ -3249,3 +3249,31 @@ select:hover:not(:disabled) {
   flex: 0 0 auto;
 }
 
+/* --- Added for interaction fixes --- */
+.sql-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.chat-card__copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 10px !important;
+  padding: 2px 6px !important;
+  background: var(--bg-hover) !important;
+  opacity: 0.8;
+  border: 1px solid var(--border-strong) !important;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.chat-card__copy-btn:hover {
+  opacity: 1;
+  background: var(--bg-active) !important;
+  color: var(--text-primary);
+}

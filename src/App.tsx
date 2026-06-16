@@ -8,7 +8,7 @@ import RightInspector from "./components/RightInspector";
 import BottomConsole, { type ConsoleState } from "./components/BottomConsole";
 import SettingsPage from "./components/SettingsPage";
 import HomePanel from "./components/HomePanel";
-import { executeSql } from "./lib/duckdb";
+import { executeSql, importFileToWorkspace } from "./lib/duckdb";
 import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage } from "./lib/types";
 import { mockAgentReply } from "./lib/mock";
 import ChatView from "./components/ChatView";
@@ -249,7 +249,8 @@ export default function App() {
 
     const onMouseMove = (moveEvent: MouseEvent) => {
       const deltaY = moveEvent.clientY - startY;
-      const newHeight = Math.max(80, Math.min(600, startHeight - deltaY));
+      const scale = consoleState() === "expanded" ? 1.8 : 1.0;
+      const newHeight = Math.max(80, Math.min(600, startHeight - deltaY / scale));
       setBottomHeight(newHeight);
       if (consoleState() === "folded") {
         setConsoleState("default");
@@ -279,6 +280,57 @@ export default function App() {
       for (const t of incoming) map.set(t.name, t);
       return [...map.values()];
     });
+  }
+
+  async function handleDropFiles(paths: string[]) {
+    if (busy()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      for (const p of paths) {
+        const res = await importFileToWorkspace(currentWorkspace().path, p);
+        mergeSources(res);
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleImportFile(filePath: string) {
+    if (busy()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await importFileToWorkspace(currentWorkspace().path, filePath);
+      mergeSources(res);
+      if (res.length > 0) {
+        selectTable(res[0]);
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSelectAndRegisterSource() {
+    if (busy()) return;
+    try {
+      const { selectDirectory } = await import("./lib/duckdb");
+      const path = await selectDirectory();
+      if (path) {
+        setBusy(true);
+        setError(null);
+        const res = await importFileToWorkspace(currentWorkspace().path, path);
+        mergeSources(res);
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   /** 执行当前 SQL，无论成功或失败都写入日志。 */
@@ -325,6 +377,16 @@ export default function App() {
     setSql(s);
     setResult(null);
     setError(null);
+
+    const active = activeTask();
+    if (!active || active.kind !== "sql") {
+      createTask(s, "sql");
+    } else {
+      const activeId = activeTaskId();
+      if (activeId) {
+        setTasks((prev) => prev.map((t) => (t.id === activeId ? { ...t, sql: s } : t)));
+      }
+    }
   }
 
   /** 检查器 → 直接预览某表（SELECT * LIMIT 50）。 */
@@ -364,7 +426,7 @@ export default function App() {
         "--bottom-height-actual": bottomHeightActual()
       }}
     >
-      <DropZone workspace={currentWorkspace().path} busy={busy()} onSources={mergeSources} onError={(m) => setError(m)} />
+      <DropZone workspace={currentWorkspace().path} busy={busy()} onDropFiles={handleDropFiles} />
 
       {/* Vertical Left Resizer */}
       <Show when={!settingsOpen()}>
@@ -423,6 +485,7 @@ export default function App() {
             onSelectWorkspace={selectWorkspace}
             onRemoveWorkspace={removeWorkspace}
             onAddWorkspace={addWorkspace}
+            onImportFile={handleImportFile}
             sources={sources()}
             selected={selectedTable()?.name ?? null}
             busy={busy()}
@@ -446,6 +509,7 @@ export default function App() {
                   onSelectWorkspace={selectWorkspace}
                   onAddWorkspace={addWorkspace}
                   onCreateTask={(prompt) => createTask(prompt, "chat")}
+                  onAddSource={handleSelectAndRegisterSource}
                 />
               }
             >

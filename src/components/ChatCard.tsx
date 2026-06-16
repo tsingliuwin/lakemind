@@ -33,7 +33,24 @@ export default function ChatCard(props: {
       </div>
 
       <Show when={props.card.kind === "sql" && props.card.sql}>
-        <pre class="chat-card__code">{props.card.sql}</pre>
+        <div style="position: relative;">
+          <pre class="chat-card__code">{props.card.sql}</pre>
+          <button
+            class="chat-card__copy-btn"
+            onClick={async (e) => {
+              e.stopPropagation();
+              try {
+                await navigator.clipboard.writeText(props.card.sql!);
+                const btn = e.currentTarget;
+                const oldText = btn.innerText;
+                btn.innerText = "✓ 已复制";
+                setTimeout(() => btn.innerText = oldText, 2000);
+              } catch {}
+            }}
+          >
+            复制
+          </button>
+        </div>
       </Show>
 
       <Show when={props.card.detail && props.card.kind !== "sql"}>

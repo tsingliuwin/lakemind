@@ -1,4 +1,4 @@
-import { createSignal, Show } from "solid-js";
+import { createSignal, Show, onMount, onCleanup } from "solid-js";
 import { t, currentLanguage, setCurrentLanguage } from "../lib/i18n";
 import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom } from "../lib/theme";
 
@@ -24,6 +24,28 @@ export default function SettingsPage(props: {
 
   // Left predefined providers
   const [selectedProvider, setSelectedProvider] = createSignal<string>("bigmodel");
+
+  let connDropdownRef!: HTMLDivElement;
+  let connTriggerRef!: HTMLButtonElement;
+
+  const handleClickOutside = (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (
+      showDropdown() &&
+      connDropdownRef &&
+      !connDropdownRef.contains(target) &&
+      (!connTriggerRef || !connTriggerRef.contains(target))
+    ) {
+      setShowDropdown(false);
+    }
+  };
+
+  onMount(() => {
+    document.addEventListener("mousedown", handleClickOutside);
+    onCleanup(() => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    });
+  });
 
   return (
     <div class="settings-layout" style={{ "grid-column": "1 / -1", "grid-row": "2 / -1", "z-index": 90 }}>
@@ -217,12 +239,12 @@ export default function SettingsPage(props: {
                   <div class="pd-connection">
                     <span class="pd-conn-lbl">{t("connectionType")}</span>
                     <div class="pd-select-container">
-                      <button class="pd-select-trigger" onClick={() => setShowDropdown(!showDropdown())}>
+                      <button ref={connTriggerRef} class="pd-select-trigger" onClick={() => setShowDropdown(!showDropdown())}>
                         {connectionType() === "coding" ? t("codingPackage") : t("defaultPackage")}
                         <span class="pd-select-chevron">▼</span>
                       </button>
                       <Show when={showDropdown()}>
-                        <div class="pd-select-dropdown">
+                        <div class="pd-select-dropdown" ref={connDropdownRef}>
                           <button 
                             class="pd-dropdown-opt" 
                             onClick={() => { setConnectionType("coding"); setShowDropdown(false); }}

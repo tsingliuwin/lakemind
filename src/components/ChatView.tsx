@@ -23,9 +23,10 @@ export default function ChatView(props: {
   const [busy, setBusy] = createSignal(false);
   let scrollEl: HTMLDivElement | undefined;
 
-  // 新消息到达时滚到底部。
+  // 新消息到达或状态变为 busy 时滚到底部。
   createEffect(() => {
     props.messages;
+    busy();
     if (scrollEl) {
       scrollEl.scrollTop = scrollEl.scrollHeight;
     }

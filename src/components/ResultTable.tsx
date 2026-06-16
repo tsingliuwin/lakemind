@@ -56,7 +56,7 @@ export default function ResultTable(props: { result: SqlResult | null }) {
 
   createEffect(() => {
     props.result; // track result identity
-    scrollRef?.scrollTo({ top: 0 });
+    scrollRef?.scrollTo({ top: 0, left: 0 });
   });
 
   return (
