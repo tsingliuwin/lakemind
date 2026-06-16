@@ -2549,6 +2549,7 @@ select:hover:not(:disabled) {
   border-radius: 50%;
   border: 1px solid var(--border-strong);
   color: var(--text-secondary);
+  padding: 0;
 }
 
 .attachment-btn:hover {
@@ -2578,6 +2579,12 @@ select:hover:not(:disabled) {
   gap: 6px;
   color: var(--text-secondary);
   height: 24px;
+}
+
+.select-btn.active {
+  background: var(--bg-active);
+  border-color: var(--accent-blue);
+  color: var(--text-primary);
 }
 
 .select-btn:hover {
@@ -2650,6 +2657,7 @@ select:hover:not(:disabled) {
   justify-content: center;
   cursor: not-allowed;
   transition: all 0.15s ease;
+  padding: 0;
 }
 
 .send-btn.active {

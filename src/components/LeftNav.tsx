@@ -436,14 +436,6 @@ export default function LeftNav(props: {
           <div class="file-explorer-header">
             <div class="fe-title-box">
               <span class="fe-ws-name">{props.workspace}</span>
-              <span class="fe-ws-branch-icon" style="margin-left: 6px; color: var(--text-dim); display: inline-flex; align-items: center; justify-content: center; transform: translateY(1px);">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
-                  <line x1="6" y1="3" x2="6" y2="15"></line>
-                  <circle cx="18" cy="6" r="3"></circle>
-                  <circle cx="6" cy="18" r="3"></circle>
-                  <path d="M18 9a9 9 0 0 1-9 9"></path>
-                </svg>
-              </span>
             </div>
             <div class="fe-controls">
               <button class="fe-ctrl-btn" title="更多">

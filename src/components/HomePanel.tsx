@@ -19,19 +19,13 @@ export default function HomePanel(props: HomePanelProps) {
   const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
   
   const [selectedConfirm, setSelectedConfirm] = createSignal("变更前确认");
-  const [confirmDropdownOpen, setConfirmDropdownOpen] = createSignal(false);
 
   const [selectedPriority, setSelectedPriority] = createSignal("最高");
   const [priorityDropdownOpen, setPriorityDropdownOpen] = createSignal(false);
 
-  const [currentBranch, setCurrentBranch] = createSignal("main");
-  const [branchMenuOpen, setBranchMenuOpen] = createSignal(false);
-
   let wsRef!: HTMLDivElement;
   let modelRef!: HTMLDivElement;
-  let confirmRef!: HTMLDivElement;
   let priorityRef!: HTMLDivElement;
-  let branchRef!: HTMLDivElement;
 
   const handleClickOutside = (e: MouseEvent) => {
     if (wsRef && !wsRef.contains(e.target as Node)) {
@@ -40,14 +34,8 @@ export default function HomePanel(props: HomePanelProps) {
     if (modelRef && !modelRef.contains(e.target as Node)) {
       setModelDropdownOpen(false);
     }
-    if (confirmRef && !confirmRef.contains(e.target as Node)) {
-      setConfirmDropdownOpen(false);
-    }
     if (priorityRef && !priorityRef.contains(e.target as Node)) {
       setPriorityDropdownOpen(false);
-    }
-    if (branchRef && !branchRef.contains(e.target as Node)) {
-      setBranchMenuOpen(false);
     }
   };
 
@@ -158,50 +146,6 @@ export default function HomePanel(props: HomePanelProps) {
                 </div>
               </Show>
             </div>
-
-            {/* Git Branch Selector */}
-            <div class="branch-dropdown-wrapper" ref={branchRef}>
-              <button class="branch-trigger-btn" onClick={() => setBranchMenuOpen(!branchMenuOpen())}>
-                <span class="branch-icon">
-                  <svg class="branch-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; transform: translateY(-1px);">
-                    <line x1="6" y1="3" x2="6" y2="15"></line>
-                    <circle cx="18" cy="6" r="3"></circle>
-                    <circle cx="6" cy="18" r="3"></circle>
-                    <path d="M18 9a9 9 0 0 1-9 9"></path>
-                  </svg>
-                </span>
-                <span class="branch-name">{currentBranch()}</span>
-                <span class="ws-caret">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="6 9 12 15 18 9"></polyline>
-                  </svg>
-                </span>
-              </button>
-              <Show when={branchMenuOpen()}>
-                <div class="branch-popover">
-                  <div class="branch-list">
-                    <For each={["main", "master", "dev"]}>
-                      {(br) => (
-                        <button
-                          class="branch-item"
-                          classList={{ active: br === currentBranch() }}
-                          onClick={() => {
-                            setCurrentBranch(br);
-                            setBranchMenuOpen(false);
-                          }}
-                        >
-                          <span class="branch-item-icon">⚬</span>
-                          <span class="branch-item-label">{br}</span>
-                          <Show when={br === currentBranch()}>
-                            <span class="branch-item-check">✓</span>
-                          </Show>
-                        </button>
-                      )}
-                    </For>
-                  </div>
-                </div>
-              </Show>
-            </div>
           </div>
 
           {/* Text Area */}
@@ -225,28 +169,23 @@ export default function HomePanel(props: HomePanelProps) {
                 </svg>
               </button>
 
-              {/* Confirmation Selector Dropdown */}
-              <div class="dropdown-wrapper" ref={confirmRef}>
-                <button class="pill-btn select-btn" onClick={() => setConfirmDropdownOpen(!confirmDropdownOpen())}>
-                  <span class="btn-prefix">✋</span>
-                  <span>{selectedConfirm()}</span>
-                  <span class="btn-caret">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                      <polyline points="6 9 12 15 18 9"></polyline>
-                    </svg>
-                  </span>
-                </button>
-                <Show when={confirmDropdownOpen()}>
-                  <div class="custom-dropdown-list">
-                    <button class="dropdown-item" onClick={() => { setSelectedConfirm("变更前确认"); setConfirmDropdownOpen(false); }}>
-                      ✋ 变更前确认
-                    </button>
-                    <button class="dropdown-item" onClick={() => { setSelectedConfirm("自动执行"); setConfirmDropdownOpen(false); }}>
-                      ⚡ 自动执行
-                    </button>
-                  </div>
-                </Show>
-              </div>
+              {/* Confirmation Mode Selector (Parallel Buttons) */}
+              <button 
+                class="pill-btn select-btn" 
+                classList={{ active: selectedConfirm() === "变更前确认" }}
+                onClick={() => setSelectedConfirm("变更前确认")}
+              >
+                <span class="btn-prefix">✋</span>
+                <span>变更前确认</span>
+              </button>
+              <button 
+                class="pill-btn select-btn" 
+                classList={{ active: selectedConfirm() === "自动执行" }}
+                onClick={() => setSelectedConfirm("自动执行")}
+              >
+                <span class="btn-prefix">⚡</span>
+                <span>自动执行</span>
+              </button>
             </div>
 
             <div class="footer-right">
