@@ -13,6 +13,7 @@ pub enum SourceKind {
     Csv,
     Json,
     Delta,
+    Excel,
     Table,
     View,
 }

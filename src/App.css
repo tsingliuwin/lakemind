@@ -815,6 +815,11 @@ select:hover:not(:disabled) {
   background: rgba(16, 185, 129, 0.1);
   border: 1px solid rgba(16, 185, 129, 0.2);
 }
+.kind-badge[data-kind="excel"] {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
 .leaf-label {
   flex: 1;
   overflow: hidden;

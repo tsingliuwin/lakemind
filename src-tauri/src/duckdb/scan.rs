@@ -45,6 +45,7 @@ pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
     let mut parquet_files: Vec<PathBuf> = Vec::new();
     let mut csv_files: Vec<PathBuf> = Vec::new();
     let mut json_files: Vec<PathBuf> = Vec::new();
+    let mut excel_files: Vec<PathBuf> = Vec::new();
     let mut delta_roots: Vec<PathBuf> = Vec::new();
     let mut root_str = root.to_path_buf();
 
@@ -83,6 +84,7 @@ pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
             Some("parquet") | Some("parq") => parquet_files.push(path),
             Some("csv") | Some("tsv") => csv_files.push(path),
             Some("json") | Some("ndjson") => json_files.push(path),
+            Some("xlsx") | Some("xls") => excel_files.push(path),
             _ => {}
         }
     }
@@ -101,6 +103,9 @@ pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
         }
         for f in &json_files {
             out.push(build_individual_entry(f, SourceKind::Json, &root_str));
+        }
+        for f in &excel_files {
+            out.push(build_individual_entry(f, SourceKind::Excel, &root_str));
         }
         
         // Group parquet files by parent directory to detect subdirectories (shards)
@@ -159,6 +164,10 @@ pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
         // JSON: group by directory.
         for (label, dir) in group_by_dir(&json_files) {
             out.push(build_entry(&label, &dir, SourceKind::Json, &root_str, Vec::new(), &[]));
+        }
+        // Excel: register individually since read_xlsx doesn't support globbing.
+        for f in &excel_files {
+            out.push(build_individual_entry(f, SourceKind::Excel, &root_str));
         }
     }
 
@@ -229,6 +238,7 @@ fn build_entry(
         }
         SourceKind::Csv => "*.csv".to_string(),
         SourceKind::Json => "*.json*".to_string(),
+        SourceKind::Excel => "*.xls*".to_string(),
         SourceKind::Delta => String::new(),
         SourceKind::Table | SourceKind::View => unreachable!("Table/View sources are not resolved as physical globs"),
     };

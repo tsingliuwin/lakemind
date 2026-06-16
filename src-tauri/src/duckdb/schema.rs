@@ -71,7 +71,7 @@ pub fn estimate_row_count(conn: &Connection, e: &ScanEntry) -> AppResult<Option<
             }
         }
         SourceKind::Delta => count_view(conn, &e.view_name).map(Some),
-        SourceKind::Csv | SourceKind::Json | SourceKind::Table | SourceKind::View => count_view(conn, &e.view_name).map(Some),
+        SourceKind::Csv | SourceKind::Json | SourceKind::Excel | SourceKind::Table | SourceKind::View => count_view(conn, &e.view_name).map(Some),
     }
 }
 

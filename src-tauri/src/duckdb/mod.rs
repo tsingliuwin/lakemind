@@ -356,4 +356,48 @@ mod tests {
             }
         });
     }
+
+    #[test]
+    fn test_scan_register_excel_and_query() {
+        let excel_path = std::path::Path::new("test_excel.xlsx");
+        if !excel_path.exists() {
+            eprintln!("skipped: test_excel.xlsx not present");
+            return;
+        }
+        let excel_file = std::fs::canonicalize(excel_path).unwrap();
+
+        // Load excel extension
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        if let Err(e) = conn.execute("INSTALL excel;", []) {
+            println!("INSTALL excel failed: {}", e);
+        }
+        if let Err(e) = conn.execute("LOAD excel;", []) {
+            println!("LOAD excel failed: {}", e);
+        }
+
+        let entries = scan::scan_path(&excel_file, false);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, SourceKind::Excel);
+
+        let table = register::register(&conn, &entries[0]).unwrap();
+
+        // The columns must contain "月份", "2026年GMV", "2025年GMV" because of our smart scoring strategy select.
+        assert!(
+            table.columns.iter().any(|c| c.name == "月份"),
+            "Columns: {:?}",
+            table.columns
+        );
+        assert!(
+            table.columns.iter().any(|c| c.name == "2026年GMV"),
+            "Columns: {:?}",
+            table.columns
+        );
+
+        // Run query over registered table
+        let count_sql = format!("SELECT count(*) FROM \"{}\"", table.name);
+        let res = execute::run_query(&conn, &count_sql, None).unwrap();
+        let row_count = res.rows[0][0].as_i64().unwrap();
+        println!("Registered Excel rows count: {}", row_count);
+        assert!(row_count > 0);
+    }
 }

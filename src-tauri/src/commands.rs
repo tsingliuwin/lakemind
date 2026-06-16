@@ -55,6 +55,13 @@ pub async fn register_folder(path: String, state: State<'_, AppState>) -> Result
             let _ = guard.execute("INSTALL delta;", []);
             let _ = guard.execute("LOAD delta;", []);
         }
+        let needs_excel = entries
+            .iter()
+            .any(|e| e.kind == crate::model::SourceKind::Excel);
+        if needs_excel {
+            let _ = guard.execute("INSTALL excel;", []);
+            let _ = guard.execute("LOAD excel;", []);
+        }
 
         let mut created = Vec::with_capacity(entries.len());
         for e in &entries {
@@ -328,6 +335,13 @@ pub async fn import_file_to_workspace(
             let _ = guard.execute("INSTALL delta;", []);
             let _ = guard.execute("LOAD delta;", []);
         }
+        let needs_excel = entries
+            .iter()
+            .any(|e| e.kind == crate::model::SourceKind::Excel);
+        if needs_excel {
+            let _ = guard.execute("INSTALL excel;", []);
+            let _ = guard.execute("LOAD excel;", []);
+        }
         let mut created = Vec::with_capacity(entries.len());
         for e in &entries {
             match register::register(&guard, e) {
@@ -450,6 +464,8 @@ async fn switch_workspace_db(workspace_path: &str, state: &AppState) -> Result<P
         "PRAGMA memory_limit='4GB';\n\
          PRAGMA threads=8;",
     ).map_err(|e| e.to_string())?;
+    let _ = new_conn.execute("INSTALL excel;", []);
+    let _ = new_conn.execute("LOAD excel;", []);
     
     *conn_guard = new_conn;
     
@@ -505,6 +521,13 @@ pub async fn register_workspace_sources_inner(
         if needs_delta {
             let _ = guard.execute("INSTALL delta;", []);
             let _ = guard.execute("LOAD delta;", []);
+        }
+        let needs_excel = entries
+            .iter()
+            .any(|e| e.kind == crate::model::SourceKind::Excel);
+        if needs_excel {
+            let _ = guard.execute("INSTALL excel;", []);
+            let _ = guard.execute("LOAD excel;", []);
         }
 
         // 3. Process entries incrementally
