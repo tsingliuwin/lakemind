@@ -279,7 +279,11 @@ export default function LeftNav(props: {
                         position: "relative"
                       }}
                     >
-                      <span style="margin-right: 6px; font-size: 14px;">📁</span>
+                      <span style="margin-right: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary);">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                      </span>
                       <span style="flex: 1; text-align: left;">{ws.name}</span>
                       
                       {/* Action buttons shown on hover */}
@@ -345,10 +349,12 @@ export default function LeftNav(props: {
                             class="tree-leaf task-leaf"
                             classList={{ selected: props.activeTaskId === task.id }}
                             onClick={() => props.onSelectTask?.(task.id)}
-                            style="padding-left: 20px; display: flex; align-items: center;"
+                            style="padding-left: 20px; display: flex; align-items: center; position: relative;"
                           >
-                            <span class="task-icon" style="margin-right: 8px; font-size: 12px; color: var(--text-secondary);">📄</span>
                             <span class="leaf-label">{task.name}</span>
+                            <span class="task-time" style="font-size: 10px; color: var(--text-dim); margin-left: auto; padding-left: 8px; flex-shrink: 0;">
+                              {formatRelativeTime(task.createdAt)}
+                            </span>
                             <button 
                               class="task-delete-btn" 
                               onClick={(e) => { 
@@ -368,8 +374,13 @@ export default function LeftNav(props: {
                       <For each={groups()}>
                         {(group) => (
                           <div class="tree-subgroup" style="margin-left: 20px;">
-                            <div class="tree-group-label" title={group[0]}>
-                              📁 {shortDir(group[0])}
+                            <div class="tree-group-label" title={group[0]} style="display: flex; align-items: center; gap: 6px;">
+                              <span style="display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim);">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                                </svg>
+                              </span>
+                              <span>{shortDir(group[0])}</span>
                             </div>
                             <For each={group[1]}>
                               {(t) => (
@@ -719,4 +730,15 @@ function formatCount(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
   if (n >= 1_000) return (n / 1_000).toFixed(0) + "K";
   return String(n);
+}
+
+function formatRelativeTime(ts: number): string {
+  const diffMs = Date.now() - ts;
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return "刚刚";
+  if (diffMins < 60) return `${diffMins}分钟`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}小时`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}天`;
 }

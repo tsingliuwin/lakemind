@@ -2357,6 +2357,7 @@ select:hover:not(:disabled) {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.12s ease;
+  white-space: nowrap;
 }
 
 .ws-trigger-btn:hover {
@@ -2521,15 +2522,25 @@ select:hover:not(:disabled) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   border-top: 1px solid var(--border-faint);
   padding-top: 10px;
 }
 
-.footer-left,
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .footer-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
 }
 
 .pill-btn {
@@ -2579,6 +2590,7 @@ select:hover:not(:disabled) {
   gap: 6px;
   color: var(--text-secondary);
   height: 24px;
+  white-space: nowrap;
 }
 
 .select-btn.active {
