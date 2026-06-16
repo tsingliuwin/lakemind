@@ -723,6 +723,57 @@ select:hover:not(:disabled) {
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   padding-left: 6px;
 }
+.tree-section-header {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 5px 8px 5px 18px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  gap: 6px;
+  user-select: none;
+  margin-top: 4px;
+  margin-bottom: 2px;
+  border-radius: var(--radius-sm);
+  transition: all 0.12s ease;
+}
+.tree-section-header:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+.tree-section-arrow {
+  font-size: 8px;
+  display: inline-block;
+  width: 10px;
+  text-align: center;
+  color: var(--text-dim);
+  transition: transform 0.1s ease;
+}
+.tree-section-header:hover .tree-section-arrow {
+  color: var(--text-secondary);
+}
+.tree-section-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.tree-section-header:hover .tree-section-icon {
+  color: var(--text-secondary);
+}
+.tree-section-label {
+  flex: 1;
+  text-align: left;
+}
+.empty-section-item {
+  padding: 4px 8px 4px 28px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-style: italic;
+  text-align: left;
+}
 .kind-badge {
   font-size: 9px;
   font-weight: 600;
@@ -753,6 +804,16 @@ select:hover:not(:disabled) {
   color: var(--type-int);
   background: rgba(59, 130, 246, 0.1);
   border: 1px solid rgba(59, 130, 246, 0.2);
+}
+.kind-badge[data-kind="table"] {
+  color: var(--accent-blue);
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+.kind-badge[data-kind="view"] {
+  color: var(--accent-green);
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.2);
 }
 .leaf-label {
   flex: 1;

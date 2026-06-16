@@ -16,7 +16,7 @@ use tauri::State;
 
 use crate::duckdb::{execute, register, scan, schema};
 use crate::error::{AppError, AppResult};
-use crate::model::{ColumnInfo, SourceTable, SqlResult};
+use crate::model::{ColumnInfo, SourceKind, SourceTable, SqlResult};
 use crate::state::AppState;
 
 /// Scan a folder (or single file) and register every detected SOURCE as a
@@ -642,4 +642,74 @@ pub async fn delete_task(task_id: String) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
         
     Ok(())
+}
+
+#[tauri::command]
+pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
+    let registry = state.sources.lock().await.clone();
+    run_blocking(state, move |conn| {
+        // Query to get user-defined tables and views in DuckDB schema 'main' that are not internal
+        let mut stmt = conn.prepare(
+            "SELECT table_name, 'table' as type FROM duckdb_tables() WHERE schema_name = 'main' AND NOT internal
+             UNION ALL
+             SELECT view_name as table_name, 'view' as type FROM duckdb_views() WHERE schema_name = 'main' AND NOT internal
+             ORDER BY table_name"
+        )?;
+
+        struct DbTable {
+            name: String,
+            kind: String,
+        }
+
+        let rows = stmt.query_map([], |row| {
+            Ok(DbTable {
+                name: row.get(0)?,
+                kind: row.get(1)?,
+            })
+        })?;
+
+        let mut db_tables = Vec::new();
+        for r in rows {
+            if let Ok(item) = r {
+                db_tables.push(item);
+            }
+        }
+
+        let mut result = Vec::new();
+        for item in db_tables {
+            // Check if it is in the registered sources
+            if let Some(existing) = registry.iter().find(|t| t.name == item.name) {
+                result.push(existing.clone());
+            } else {
+                // It's a custom process table or view
+                let cols = match schema::describe_view(conn, &item.name) {
+                    Ok(c) => c,
+                    Err(_) => Vec::new(),
+                };
+
+                let count_sql = format!("SELECT count(*) FROM \"{}\"", item.name.replace('"', "\"\""));
+                let count = conn.query_row::<i64, _, _>(&count_sql, [], |r| r.get(0)).ok();
+
+                let source_kind = if item.kind == "view" {
+                    SourceKind::View
+                } else {
+                    SourceKind::Table
+                };
+
+                result.push(SourceTable {
+                    name: item.name.clone(),
+                    label: item.name.clone(),
+                    kind: source_kind,
+                    path: String::new(),
+                    scan_path: String::new(),
+                    partition_keys: Vec::new(),
+                    row_count_estimate: count,
+                    columns: cols,
+                });
+            }
+        }
+
+        Ok(result)
+    })
+    .await
 }

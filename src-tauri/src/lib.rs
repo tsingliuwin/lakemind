@@ -38,6 +38,7 @@ pub fn run() {
             commands::save_sql_task,
             commands::save_chat_task,
             commands::delete_task,
+            commands::list_duckdb_tables,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

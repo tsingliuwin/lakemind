@@ -65,6 +65,9 @@ fn build_create_view_sql(e: &ScanEntry) -> String {
             // Delta needs the delta extension; commands.rs ensures it is loaded.
             format!("delta('{scan}')")
         }
+        crate::model::SourceKind::Table | crate::model::SourceKind::View => {
+            unreachable!("Table/View sources are not registered from raw paths")
+        }
     };
     format!("CREATE VIEW \"{}\" AS SELECT * FROM {};", e.view_name, inner)
 }

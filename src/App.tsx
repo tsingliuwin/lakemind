@@ -63,6 +63,7 @@ export default function App() {
   });
   const [tasks, setTasks] = createSignal<QueryTask[]>([]);
   const [activeTaskId, setActiveTaskId] = createSignal<string | null>(null);
+  const [fileTrigger, setFileTrigger] = createSignal<number>(0);
 
   // Load workspaces on startup
   onMount(async () => {
@@ -124,9 +125,10 @@ export default function App() {
         setError(null);
       }
 
-      // 2. Scan and register files in workspace
-      const registeredSources = await invoke<SourceTable[]>("register_workspace_sources", { workspacePath: ws.path });
-      setSources(registeredSources);
+      // 2. Scan and register files in workspace, then load all DuckDB tables
+      await invoke<SourceTable[]>("register_workspace_sources", { workspacePath: ws.path });
+      const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
+      setSources(dbTables);
       setSelectedTable(null);
     } catch (err) {
       console.error("Failed to load workspace tasks & sources:", err);
@@ -506,23 +508,20 @@ export default function App() {
     setConsoleState((s) => (s === "folded" ? "default" : s === "default" ? "expanded" : "folded"));
   }
 
-  function mergeSources(incoming: SourceTable[]) {
-    if (incoming.length === 0) return;
-    setSources((prev) => {
-      const map = new Map(prev.map((t) => [t.name, t]));
-      for (const t of incoming) map.set(t.name, t);
-      return [...map.values()];
-    });
-  }
-
   async function handleDropFiles(paths: string[]) {
     if (busy()) return;
     setBusy(true);
     setError(null);
     try {
+      let imported = false;
       for (const p of paths) {
         const res = await importFileToWorkspace(currentWorkspace().path, p);
-        mergeSources(res);
+        if (res.length > 0) imported = true;
+      }
+      if (imported) {
+        const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
+        setSources(dbTables);
+        setFileTrigger((t) => t + 1);
       }
     } catch (e) {
       setError(String(e));
@@ -537,9 +536,14 @@ export default function App() {
     setError(null);
     try {
       const res = await importFileToWorkspace(currentWorkspace().path, filePath);
-      mergeSources(res);
       if (res.length > 0) {
-        selectTable(res[0]);
+        const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
+        setSources(dbTables);
+        const newTable = dbTables.find(t => res.some(r => r.name === t.name));
+        if (newTable) {
+          selectTable(newTable);
+        }
+        setFileTrigger((t) => t + 1);
       }
     } catch (e) {
       setError(String(e));
@@ -557,7 +561,11 @@ export default function App() {
         setBusy(true);
         setError(null);
         const res = await importFileToWorkspace(currentWorkspace().path, path);
-        mergeSources(res);
+        if (res.length > 0) {
+          const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
+          setSources(dbTables);
+          setFileTrigger((t) => t + 1);
+        }
       }
     } catch (e) {
       setError(String(e));
@@ -577,6 +585,11 @@ export default function App() {
     try {
       const res = await executeSql(q, rowCap());
       setResult(res);
+      
+      // Refresh list of DuckDB tables in case query changed schemas
+      const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
+      setSources(dbTables);
+
       entry = {
         id: ++logSeq,
         ts: started,
@@ -720,6 +733,7 @@ export default function App() {
             onAddWorkspace={addWorkspace}
             onImportFile={handleImportFile}
             sources={sources()}
+            fileTrigger={fileTrigger()}
             selected={selectedTable()?.name ?? null}
             busy={busy()}
             onSelect={selectTable}

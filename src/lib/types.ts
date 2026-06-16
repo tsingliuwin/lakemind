@@ -1,7 +1,7 @@
 // 通信类型定义 —— 与 src-tauri/src/model.rs 一一对应。
 // 修改 M1 通信格式时请同步两侧。
 
-export type SourceKind = "parquet" | "csv" | "json" | "delta";
+export type SourceKind = "parquet" | "csv" | "json" | "delta" | "table" | "view";
 
 export interface ColumnInfo {
   name: string;

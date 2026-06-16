@@ -182,6 +182,7 @@ fn build_entry(
         SourceKind::Csv => "*.csv".to_string(),
         SourceKind::Json => "*.json*".to_string(),
         SourceKind::Delta => String::new(),
+        SourceKind::Table | SourceKind::View => unreachable!("Table/View sources are not resolved as physical globs"),
     };
     let glob = forward_slashes(&dir.join(glob_tail));
     let _ = root; // root retained for potential relative-path formatting later

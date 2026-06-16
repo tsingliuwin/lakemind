@@ -13,6 +13,8 @@ pub enum SourceKind {
     Csv,
     Json,
     Delta,
+    Table,
+    View,
 }
 
 /// A single column's metadata, produced by `DESCRIBE`.

@@ -1,8 +1,8 @@
 import { createSignal, onCleanup, onMount } from "solid-js";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 /**
- * Full-window drag-and-drop target. Listens to Tauri v2's native webview
+ * Full-window drag-and-drop target. Listens to Tauri v2's native window
  * drag/drop events (so dropping OS files works, unlike HTML5 DnD which only
  * sees sanitized payloads). On `drop`, hands each path to `onDropFiles`.
  *
@@ -16,7 +16,15 @@ export default function DropZone(props: {
   const [dragging, setDragging] = createSignal(false);
 
   onMount(async () => {
-    const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+    // Prevent default browser dragover/drop behaviors to allow dropping files in WebView2
+    const preventDefault = (e: DragEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("dragover", preventDefault);
+    window.addEventListener("drop", preventDefault);
+
+    // Listen to native Tauri window drag/drop events
+    const unlisten = await getCurrentWindow().onDragDropEvent((event) => {
       const payload = event.payload;
       if (payload.type === "enter" || payload.type === "over") {
         setDragging(true);
@@ -28,7 +36,10 @@ export default function DropZone(props: {
         props.onDropFiles(payload.paths);
       }
     });
+
     onCleanup(() => {
+      window.removeEventListener("dragover", preventDefault);
+      window.removeEventListener("drop", preventDefault);
       void unlisten();
     });
   });
