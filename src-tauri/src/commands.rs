@@ -21,41 +21,53 @@ use crate::state::AppState;
 
 /// Scan a folder (or single file) and register every detected SOURCE as a
 /// DuckDB VIEW. Returns the freshly registered tables.
+///
+/// Concurrency model: the pure-FS scan runs OUTSIDE the connection lock, so a
+/// slow directory walk never blocks `execute_sql`. Only the `CREATE VIEW` +
+/// schema/row-count introspection happen inside the (short) lock window. The
+/// Delta extension is loaded lazily and only if a Delta source is actually
+/// present — offline users with no Delta data are never blocked on the network.
 #[tauri::command]
 pub async fn register_folder(path: String, state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
-    // Clone the Arcs out of `state` so the closures can be `'static` and move
-    // onto the blocking thread pool. `tauri::State` itself borrows, so it
-    // cannot cross the spawn boundary directly.
     let conn = state.conn.clone();
     let sources = state.sources.clone();
 
     let join = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<SourceTable>> {
         let root = PathBuf::from(&path);
         if !root.exists() {
-            return Err(AppError::new(format!("path does not exist: {path}")));
+            return Err(AppError::new(format!("路径不存在: {path}")));
         }
 
-        let guard = conn.blocking_lock();
-
-        // Load the Delta extension up front; no-op if unused. `bundled`
-        // DuckDB ships the parquet/csv/json readers built-in, but delta needs
-        // the autoloaded extension. We let DuckDB fetch it from its repo
-        // (online); offline users get a clear error from the register step.
-        let _ = guard.execute("INSTALL delta; LOAD delta;", []);
-
+        // 1. Pure filesystem scan — no DuckDB lock needed. This is the slow
+        //    part on big trees and must not block concurrent queries.
         let entries = scan::scan_path(&root);
+
+        // 2. Short critical section: load delta only if needed, then create
+        //    the views + introspect. Hold the lock only across these DB ops.
+        let guard = conn.blocking_lock();
+        let needs_delta = entries
+            .iter()
+            .any(|e| e.kind == crate::model::SourceKind::Delta);
+        if needs_delta {
+            // Best-effort: try INSTALL then LOAD. Offline failure degrades
+            // gracefully (those Delta sources just fail to register, others
+            // still succeed). Never panics or hangs on the network.
+            let _ = guard.execute("INSTALL delta;", []);
+            let _ = guard.execute("LOAD delta;", []);
+        }
+
         let mut created = Vec::with_capacity(entries.len());
         for e in &entries {
             match register::register(&guard, e) {
                 Ok(t) => created.push(t),
                 // A single failing source (e.g. a malformed CSV) must not abort
-                // the whole scan; skip it and surface nothing — list_sources
-                // will reflect only the successful views.
+                // the whole scan; skip it but log the reason.
                 Err(err) => eprintln!("skip source {}: {err}", e.label),
             }
         }
+        drop(guard); // release the connection lock before touching the registry
 
-        // Merge into the registry (dedupe by view name).
+        // 3. Merge into the registry (separate lock, after DB lock released).
         let mut registry = sources.blocking_lock();
         for t in &created {
             registry.retain(|existing| existing.name != t.name);
@@ -231,7 +243,40 @@ fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Resu
     Ok(())
 }
 
-/// Copy a folder or file to the active workspace directory, then scan and register as views.
+/// Recursively total the byte size of a path (file or directory tree).
+fn path_total_size(p: &std::path::Path) -> u64 {
+    let md = match std::fs::symlink_metadata(p) {
+        Ok(m) => m,
+        Err(_) => return 0,
+    };
+    if md.is_file() {
+        return md.len();
+    }
+    let mut total: u64 = 0;
+    for entry in walkdir::WalkDir::new(p).follow_links(false) {
+        if let Ok(e) = entry {
+            if e.file_type().is_file() {
+                if let Ok(m) = e.metadata() {
+                    total += m.len();
+                }
+            }
+        }
+    }
+    total
+}
+
+/// Above this threshold (bytes) a dropped folder/file is registered IN-PLACE
+/// (zero-copy) instead of being physically copied into the workspace. Prevents
+/// a 50GB lake from being duplicated onto the local disk on import.
+const WORKSPACE_COPY_THRESHOLD: u64 = 200 * 1024 * 1024; // 200 MB
+
+/// Bring a folder/file into the workspace, then scan + register as views.
+///
+/// Two modes by size:
+/// - **small (≤ threshold)**: physically copy into the workspace directory
+///   (matches the "工作区放 CSV" product intent for manageable files).
+/// - **large (> threshold)**: register IN-PLACE via zero-copy CREATE VIEW to
+///   avoid duplicating gigabytes on disk.
 #[tauri::command]
 pub async fn import_file_to_workspace(
     workspace: String,
@@ -244,41 +289,45 @@ pub async fn import_file_to_workspace(
     let join = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<SourceTable>> {
         let src_path = PathBuf::from(&path);
         if !src_path.exists() {
-            return Err(AppError::new(format!("Source path does not exist: {path}")));
+            return Err(AppError::new(format!("源路径不存在: {path}")));
         }
 
-        // 1. Resolve workspace dir
-        let ws_dir = resolve_workspace_dir(&workspace)
-            .map_err(|e| AppError::new(e))?;
-        
-        // Ensure workspace dir exists
+        // Decide copy-vs-inplace based on total size.
+        let total = path_total_size(&src_path);
+        let ws_dir = resolve_workspace_dir(&workspace).map_err(AppError::new)?;
         std::fs::create_dir_all(&ws_dir)
-            .map_err(|e| AppError::new(format!("Failed to create workspace directory: {e}")))?;
+            .map_err(|e| AppError::new(format!("无法创建工作区目录: {e}")))?;
 
-        // 2. Determine target path inside workspace
-        let file_name = src_path.file_name()
-            .ok_or_else(|| AppError::new("Invalid file name".to_string()))?;
-        let dst_path = ws_dir.join(file_name);
-
-        // 3. Copy if not already inside the workspace dir
-        let canonical_src = src_path.canonicalize().ok().unwrap_or_else(|| src_path.clone());
-        let canonical_ws = ws_dir.canonicalize().ok().unwrap_or_else(|| ws_dir.clone());
-        
-        let target_path = if canonical_src.starts_with(&canonical_ws) {
-            // Already inside workspace directory, use src_path
+        let target_path = if total > WORKSPACE_COPY_THRESHOLD {
+            // Large: register in-place, do NOT copy.
             src_path
         } else {
-            // Copy to workspace
-            copy_recursive(&src_path, &dst_path)
-                .map_err(|e| AppError::new(format!("Failed to copy file/folder to workspace: {e}")))?;
-            dst_path
+            let canonical_src = src_path.canonicalize().unwrap_or_else(|_| src_path.clone());
+            let canonical_ws = ws_dir.canonicalize().unwrap_or_else(|_| ws_dir.clone());
+            if canonical_src.starts_with(&canonical_ws) {
+                // Already inside the workspace dir.
+                src_path
+            } else {
+                let file_name = src_path
+                    .file_name()
+                    .ok_or_else(|| AppError::new("无效文件名".to_string()))?;
+                let dst_path = ws_dir.join(file_name);
+                copy_recursive(&src_path, &dst_path)
+                    .map_err(|e| AppError::new(format!("拷贝到工作区失败: {e}")))?;
+                dst_path
+            }
         };
 
-        // 4. Scan and register the copied folder/file in DuckDB
-        let guard = conn.blocking_lock();
-        let _ = guard.execute("INSTALL delta; LOAD delta;", []);
-
+        // Scan (FS, no lock) then short critical section for CREATE VIEW.
         let entries = scan::scan_path(&target_path);
+        let guard = conn.blocking_lock();
+        let needs_delta = entries
+            .iter()
+            .any(|e| e.kind == crate::model::SourceKind::Delta);
+        if needs_delta {
+            let _ = guard.execute("INSTALL delta;", []);
+            let _ = guard.execute("LOAD delta;", []);
+        }
         let mut created = Vec::with_capacity(entries.len());
         for e in &entries {
             match register::register(&guard, e) {
@@ -286,8 +335,8 @@ pub async fn import_file_to_workspace(
                 Err(err) => eprintln!("skip source {}: {err}", e.label),
             }
         }
+        drop(guard);
 
-        // Merge into the registry (dedupe by view name)
         let mut registry = sources.blocking_lock();
         for t in &created {
             registry.retain(|existing| existing.name != t.name);
@@ -309,90 +358,29 @@ pub struct FileItem {
     pub name: String,
     pub path: String,
     pub is_dir: bool,
-    pub is_modified: bool,
 }
 
-fn get_git_modified_files(dir: &std::path::Path) -> Option<std::collections::HashSet<String>> {
-    use std::process::Command;
-    let output = Command::new("git")
-        .arg("status")
-        .arg("--porcelain")
-        .current_dir(dir)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut modified = std::collections::HashSet::new();
-    for line in stdout.lines() {
-        if line.len() > 3 {
-            let rel_file = line[3..].trim();
-            if let Ok(abs_path) = dir.join(rel_file).canonicalize() {
-                modified.insert(abs_path.to_string_lossy().to_string());
-            } else {
-                modified.insert(dir.join(rel_file).to_string_lossy().to_string());
-            }
-        }
-    }
-    Some(modified)
-}
-
-fn is_path_modified(p: &std::path::Path, modified_files: &std::collections::HashSet<String>) -> bool {
-    let p_str = p.to_string_lossy().to_string();
-    let resolved_p_str = p.canonicalize().ok()
-        .map(|cp| cp.to_string_lossy().to_string())
-        .unwrap_or(p_str);
-
-    if modified_files.contains(&resolved_p_str) {
-        return true;
-    }
-    if p.is_dir() {
-        let prefix = if resolved_p_str.ends_with('/') || resolved_p_str.ends_with('\\') {
-            resolved_p_str.clone()
-        } else {
-            #[cfg(target_os = "windows")]
-            { format!("{}\\", resolved_p_str) }
-            #[cfg(not(target_os = "windows"))]
-            { format!("{}/", resolved_p_str) }
-        };
-        for m in modified_files {
-            if m.starts_with(&prefix) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Read the direct children of a workspace folder and check their git modification status
+/// Read the direct children of a workspace folder (no git status — that was a
+/// misplaced code-IDE concern; LakeMind analyzes data files, not source repos).
 #[tauri::command]
 pub async fn read_directory(path: String) -> Result<Vec<FileItem>, String> {
     let resolved_path = resolve_workspace_dir(&path)?;
     if !resolved_path.exists() {
-        return Err(format!("Directory does not exist: {}", resolved_path.display()));
+        return Err(format!("目录不存在: {}", resolved_path.display()));
     }
-    
-    // Get git modified files
-    let modified_files = get_git_modified_files(&resolved_path).unwrap_or_default();
 
     let mut items = Vec::new();
     let entries = std::fs::read_dir(&resolved_path)
-        .map_err(|e| format!("Failed to read directory: {}", e))?;
+        .map_err(|e| format!("读取目录失败: {e}"))?;
     for entry in entries {
         if let Ok(entry) = entry {
             let p = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
             let is_dir = p.is_dir();
-            
-            // Check modified status
-            let has_modified = is_path_modified(&p, &modified_files);
-            
             items.push(FileItem {
                 name,
                 path: p.to_string_lossy().to_string(),
                 is_dir,
-                is_modified: has_modified,
             });
         }
     }

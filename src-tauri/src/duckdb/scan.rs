@@ -78,7 +78,9 @@ pub fn scan_path(root: &Path) -> Vec<ScanEntry> {
 
         let path = entry.path().to_path_buf();
         match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
-            Some("parquet") => parquet_files.push(path),
+            // `.parq` is a widespread Parquet extension alias (Spark, etc.);
+            // DuckDB's read_parquet reads it identically. Treat both as Parquet.
+            Some("parquet") | Some("parq") => parquet_files.push(path),
             Some("csv") | Some("tsv") => csv_files.push(path),
             Some("json") | Some("ndjson") => json_files.push(path),
             _ => {}
@@ -95,6 +97,10 @@ pub fn scan_path(root: &Path) -> Vec<ScanEntry> {
     // Parquet: prefer one globbed view for all shards. If Hive partition keys
     // appear in the relative path, surface them (read_parquet handles them).
     if !parquet_files.is_empty() {
+        // Detect the actual extension present (`.parquet` vs `.parq`); DuckDB's
+        // read_parquet does NOT support shell brace expansion like {a,b}, so we
+        // must emit a glob matching the extension(s) actually on disk.
+        let exts = present_parquet_exts(&parquet_files);
         // Common case: a single directory of shards → one view named after it.
         let parents: std::collections::BTreeSet<PathBuf> =
             parquet_files.iter().map(|p| p.parent().unwrap_or(Path::new("")).to_path_buf()).collect();
@@ -109,21 +115,21 @@ pub fn scan_path(root: &Path) -> Vec<ScanEntry> {
                     keys = hive_keys_of(&grand.join("**"), &root_str);
                 }
             }
-            out.push(build_entry("parquet_root", &dir, SourceKind::Parquet, &root_str, keys));
+            out.push(build_entry("parquet_root", &dir, SourceKind::Parquet, &root_str, keys, &exts));
         } else {
             // Multiple directories (likely partitioned): glob the whole root.
             let keys = hive_keys_glob(&root_str);
-            out.push(build_entry("parquet_glob", &root_str, SourceKind::Parquet, &root_str, keys));
+            out.push(build_entry("parquet_glob", &root_str, SourceKind::Parquet, &root_str, keys, &exts));
         }
     }
 
     // CSV: group by directory.
     for (label, dir) in group_by_dir(&csv_files) {
-        out.push(build_entry(&label, &dir, SourceKind::Csv, &root_str, Vec::new()));
+        out.push(build_entry(&label, &dir, SourceKind::Csv, &root_str, Vec::new(), &[]));
     }
     // JSON: group by directory.
     for (label, dir) in group_by_dir(&json_files) {
-        out.push(build_entry(&label, &dir, SourceKind::Json, &root_str, Vec::new()));
+        out.push(build_entry(&label, &dir, SourceKind::Json, &root_str, Vec::new(), &[]));
     }
 
     // Deduplicate by scan_path (a file might be caught twice on edge cases).
@@ -151,6 +157,12 @@ fn build_entry(
     kind: SourceKind,
     root: &Path,
     partition_keys: Vec<String>,
+    // For Parquet: the extensions actually present (e.g. ["parq"] or
+    // ["parquet","parq"]). Used to build a DuckDB-compatible glob — DuckDB's
+    // read_parquet does NOT support shell brace expansion, so when both
+    // extensions coexist we glob `*` (the directory was already filtered to
+    // parquet files by the scan). Ignored for non-parquet kinds.
+    parquet_exts: &[&str],
 ) -> ScanEntry {
     let label = dir
         .file_name()
@@ -158,12 +170,20 @@ fn build_entry(
         .map(sanitize_label)
         .unwrap_or_else(|| base_label.to_string());
     let view_name = to_view_name(&label);
-    let glob = forward_slashes(&dir.join(match kind {
-        SourceKind::Parquet => "*.parquet",
-        SourceKind::Csv => "*.csv",
-        SourceKind::Json => "*.json*",
-        SourceKind::Delta => "",
-    }));
+    let glob_tail = match kind {
+        // Single extension → "*.<ext>"; mixed → "*" (all files here are parquet).
+        SourceKind::Parquet => {
+            if parquet_exts.len() == 1 {
+                format!("*.{}", parquet_exts[0])
+            } else {
+                "*".to_string()
+            }
+        }
+        SourceKind::Csv => "*.csv".to_string(),
+        SourceKind::Json => "*.json*".to_string(),
+        SourceKind::Delta => String::new(),
+    };
+    let glob = forward_slashes(&dir.join(glob_tail));
     let _ = root; // root retained for potential relative-path formatting later
     let partition_keys = if matches!(kind, SourceKind::Parquet) && !partition_keys.is_empty() {
         partition_keys
@@ -181,7 +201,29 @@ fn build_entry(
 }
 
 fn entry_for(dir: &Path, _src: &Path, kind: SourceKind, root: &Path) -> ScanEntry {
-    build_entry("", dir, kind, root, Vec::new())
+    build_entry("", dir, kind, root, Vec::new(), &[])
+}
+
+/// Distinct Parquet extensions present among `files`, in sorted order.
+/// E.g. returns `["parq"]` or `["parquet","parq"]`.
+fn present_parquet_exts(files: &[PathBuf]) -> Vec<&'static str> {
+    let has_parquet = files.iter().any(|p| ext_eq(p, "parquet"));
+    let has_parq = files.iter().any(|p| ext_eq(p, "parq"));
+    let mut out: Vec<&'static str> = Vec::new();
+    if has_parquet {
+        out.push("parquet");
+    }
+    if has_parq {
+        out.push("parq");
+    }
+    out
+}
+
+fn ext_eq(p: &Path, ext: &str) -> bool {
+    p.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case(ext))
+        .unwrap_or(false)
 }
 
 /// Hive partition keys present in `dir`'s path relative to `root`.

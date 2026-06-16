@@ -80,7 +80,90 @@ mod tests {
 
         let table = register::register(&conn, &entries[0]).unwrap();
         assert!(table.row_count_estimate.is_some());
-        assert!(table.row_count_estimate.unwrap() >= 1);
+        // write_parquet produced 5 rows (range(5)); the fast path must report
+        // the true row count, not the number of row groups (H4 regression guard).
+        assert_eq!(table.row_count_estimate.unwrap(), 5);
+    }
+
+    /// Real-data acceptance against E:\rustproject\demomind (5 sharded .parq,
+    /// ~900MB total, no Hive partitions — the H4 bug's exact trigger shape).
+    /// Marked #[ignore] so it only runs on a machine that has the data.
+    #[test]
+    #[ignore]
+    fn acceptance_demomind() {
+        let demo = std::path::PathBuf::from(r"E:\rustproject\demomind");
+        if !demo.exists() {
+            eprintln!("skipped: demomind not present at {}", demo.display());
+            return;
+        }
+
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        let t_scan = std::time::Instant::now();
+        let entries = scan::scan_path(&demo);
+        let scan_ms = t_scan.elapsed().as_millis();
+        println!("=== SCAN: {} entries in {} ms", entries.len(), scan_ms);
+        for e in &entries {
+            println!(
+                "  - {} [{:?}] partition_keys={:?} scan_path={}",
+                e.label, e.kind, e.partition_keys, e.scan_path
+            );
+        }
+
+        for e in &entries {
+            let t_reg = std::time::Instant::now();
+            let table = register::register(&conn, e).unwrap();
+            let reg_ms = t_reg.elapsed().as_millis();
+
+            // Ground truth: an actual count(*) over the view.
+            let truth: i64 = conn
+                .query_row(&format!("SELECT count(*) FROM \"{}\"", table.name), [], |r| r.get(0))
+                .unwrap();
+
+            println!(
+                "=== REGISTER {}: {} cols, estimate={}, truth={}, match={}, register={} ms",
+                table.name,
+                table.columns.len(),
+                table.row_count_estimate.unwrap_or(-1),
+                truth,
+                table.row_count_estimate == Some(truth),
+                reg_ms
+            );
+            for c in table.columns.iter().take(8) {
+                println!("    {} : {}", c.name, c.r#type);
+            }
+
+            // Probe parquet_metadata() semantics to settle the H4 count formula.
+            // The 427× over-count (== column count) implies each row-group is
+            // exposed as N rows (one per column chunk); we need the per-row-group
+            // count taken DISTINCTLY, not summed across column chunks.
+            let scan_glob = e.scan_path.replace('\'', "''");
+            let probe_sqls = [
+                ("row count of parquet_metadata", format!("SELECT count(*) FROM parquet_metadata('{}')", scan_glob)),
+                ("sum(row_group_num_rows)", format!("SELECT sum(row_group_num_rows) FROM parquet_metadata('{}')", scan_glob)),
+                ("distinct row_group_id", format!("SELECT count(DISTINCT row_group_id) FROM parquet_metadata('{}')", scan_glob)),
+                ("distinct row_group_num_rows", format!("SELECT sum(row_group_num_rows) FROM (SELECT DISTINCT row_group_id, row_group_num_rows FROM parquet_metadata('{}'))", scan_glob)),
+            ];
+            for (label, sql) in probe_sqls {
+                let n: i64 = match conn.query_row(&sql, [], |r| r.get::<_, duckdb::types::Value>(0)) {
+                    Ok(v) => probe_value_to_i64(v),
+                    Err(err) => {
+                        println!("    PROBE {} = ERR {}", label, err);
+                        continue;
+                    }
+                };
+                println!("    PROBE {} = {}", label, n);
+            }
+
+            // Execute a capped SELECT to measure read throughput.
+            let t_q = std::time::Instant::now();
+            let res =
+                execute::run_query(&conn, &format!("SELECT * FROM \"{}\"", table.name), Some(1000)).unwrap();
+            let q_ms = t_q.elapsed().as_millis();
+            println!(
+                "=== QUERY: {} rows returned (truncated={}) in {} ms",
+                res.row_count, res.truncated, q_ms
+            );
+        }
     }
 
     // --- helpers ------------------------------------------------------------
@@ -121,5 +204,26 @@ mod tests {
             path.to_string_lossy().replace('\\', "/")
         );
         conn.execute(&sql, []).unwrap();
+    }
+
+    /// Coerce a DuckDB scalar (from a count/sum probe) into i64.
+    fn probe_value_to_i64(v: duckdb::types::Value) -> i64 {
+        use duckdb::types::Value as V;
+        match v {
+            V::Null => -1,
+            V::TinyInt(i) => i as i64,
+            V::SmallInt(i) => i as i64,
+            V::Int(i) => i as i64,
+            V::BigInt(i) => i,
+            V::HugeInt(i) => i as i64,
+            V::UTinyInt(u) => u as i64,
+            V::USmallInt(u) => u as i64,
+            V::UInt(u) => u as i64,
+            V::UBigInt(u) => u as i64,
+            V::Double(f) if f.is_finite() => f as i64,
+            V::Float(f) if f.is_finite() => f as i64,
+            V::Decimal(d) => d.to_string().parse().unwrap_or(-1),
+            _ => -1,
+        }
     }
 }

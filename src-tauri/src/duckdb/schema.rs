@@ -38,26 +38,35 @@ pub fn describe_view(conn: &Connection, view: &str) -> AppResult<Vec<ColumnInfo>
 /// Estimate the row count of a SOURCE without materializing rows.
 ///
 /// Strategy:
-/// 1. Parquet → `SELECT count(*) FROM parquet_metadata('...')` (row-group
-///    footers only). This is the fast path that keeps 50GB to seconds.
-/// 2. Delta → try the same parquet_metadata trick over its underlying parquet
-///    files; if that fails, fall back to `count(*)` on the view.
+/// 1. Parquet → `parquet_metadata()` footer scan, summing `row_group_num_rows`
+///    over DISTINCT (filename, row_group_id) so multi-column files don't
+///    over-count by the column count. This is the fast path (footers only).
+/// 2. Delta → fall back to `count(*)` on the view.
 /// 3. CSV/JSON → `SELECT count(*) FROM <view>` (DuckDB metadata pushdown).
 pub fn estimate_row_count(conn: &Connection, e: &ScanEntry) -> AppResult<Option<i64>> {
     match e.kind {
         SourceKind::Parquet => {
             let scan = e.scan_path.replace('\'', "''");
-            let sql = if e.partition_keys.is_empty() {
-                format!("SELECT count(*) FROM parquet_metadata('{}')", scan)
-            } else {
-                format!("SELECT sum(row_group_num_rows) FROM parquet_metadata('{}')", scan)
-            };
+            // `parquet_metadata()` emits ONE ROW PER COLUMN-CHUNK, not per
+            // row-group. So `sum(row_group_num_rows)` over-counts by the number
+            // of columns (verified on demomind: 427 cols → 427× over-count).
+            // The fix: sum `row_group_num_rows` over DISTINCT (filename,
+            // row_group_id) so each row-group contributes its row count exactly
+            // once. `filename` is needed because row_group_id is per-file and
+            // collides across files in a multi-shard lake.
+            let sql = format!(
+                "SELECT sum(row_group_num_rows) FROM \
+                 (SELECT DISTINCT filename, row_group_id, row_group_num_rows \
+                  FROM parquet_metadata('{}'))",
+                scan
+            );
             match conn.query_row(&sql, [], |r| {
-                // count(*) → BIGINT (i64). Be tolerant: read via Value then convert.
                 let v: duckdb::types::Value = r.get(0)?;
                 Ok(value_to_i64(v))
             }) {
                 Ok(Some(n)) => Ok(Some(n)),
+                // Fallback: a real count(*) on the registered view (still
+                // metadata-pushdown-fast for parquet, just not the footer-only path).
                 _ => count_view(conn, &e.view_name).map(Some),
             }
         }

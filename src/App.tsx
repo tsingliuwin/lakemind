@@ -1,4 +1,4 @@
-import { createSignal, Show } from "solid-js";
+import { createSignal, Show, Switch, Match } from "solid-js";
 import DropZone from "./components/DropZone";
 import LeftNav from "./components/LeftNav";
 import TitleBar from "./components/TitleBar";
@@ -9,7 +9,9 @@ import BottomConsole, { type ConsoleState } from "./components/BottomConsole";
 import SettingsPage from "./components/SettingsPage";
 import HomePanel from "./components/HomePanel";
 import { executeSql } from "./lib/duckdb";
-import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace } from "./lib/types";
+import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage } from "./lib/types";
+import { mockAgentReply } from "./lib/mock";
+import ChatView from "./components/ChatView";
 import "./App.css";
 
 /**
@@ -99,32 +101,80 @@ export default function App() {
     }
   }
 
-  function createTask(prompt: string) {
-    const id = `task-${Date.now()}`;
+  function createTask(prompt: string, kind: TaskKind = "chat") {
+    const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     let name = prompt.trim();
     if (name.length > 20) {
       name = name.slice(0, 18) + "...";
     }
     name = name.replace(/\n/g, " ");
+    if (!name) name = kind === "chat" ? "新对话" : "新查询";
 
     const newTask: QueryTask = {
       id,
       name,
-      sql: prompt.trim(),
-      createdAt: Date.now()
+      sql: kind === "sql" ? prompt.trim() : "",
+      createdAt: Date.now(),
+      kind,
+      messages: kind === "chat" ? [] : undefined,
     };
 
     setTasks((prev) => [...prev, newTask]);
     setActiveTaskId(id);
-    injectSql(newTask.sql);
+    if (kind === "sql") {
+      setSql(newTask.sql);
+      setResult(null);
+      setError(null);
+    }
   }
 
   function selectTask(id: string) {
     const task = tasks().find((t) => t.id === id);
-    if (task) {
-      setActiveTaskId(id);
-      injectSql(task.sql);
+    if (!task) return;
+    setActiveTaskId(id);
+    if ((task.kind ?? "sql") === "sql") {
+      setSql(task.sql);
+      setResult(null);
+      setError(null);
     }
+    // chat task：消息由 task 自带，主区读 task.messages 渲染，无需 injectSql。
+  }
+
+  /** 当前激活的 task（派生值）。 */
+  function activeTask(): QueryTask | null {
+    const id = activeTaskId();
+    if (!id) return null;
+    return tasks().find((t) => t.id === id) ?? null;
+  }
+
+  /** ChatView 发送消息：追加 user 消息 → Mock 回复 → 追加 assistant 消息。 */
+  async function sendChatMessage(prompt: string) {
+    const id = activeTaskId();
+    if (!id) return;
+    const userMsg: ChatMessage = {
+      id: `msg-${Date.now()}`,
+      role: "user",
+      content: prompt,
+      ts: Date.now(),
+    };
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === id ? { ...t, messages: [...(t.messages ?? []), userMsg] } : t,
+      ),
+    );
+    // MOCK：M2 接真 Agent 时替换 mockAgentReply。
+    const reply = await mockAgentReply(prompt);
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === id ? { ...t, messages: [...(t.messages ?? []), reply] } : t,
+      ),
+    );
+  }
+
+  /** ChatCard「在 SQL 面板打开」：新建 SQL task 注入 SQL 并自动执行。 */
+  function openInSqlPanel(sql: string) {
+    createTask(sql, "sql");
+    void run();
   }
 
   function deleteTask(id: string) {
@@ -355,7 +405,7 @@ export default function App() {
         consoleOpen={consoleState() !== "folded"}
         onToggleInspector={() => setInspectorOpen((v) => !v)}
         onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
-        onNewQuery={() => createTask("SELECT 1 AS n;")}
+        onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
         selectedTable={selectedTable()}
         onOpenSettings={onSettings}
       />
@@ -378,7 +428,7 @@ export default function App() {
             busy={busy()}
             onSelect={selectTable}
             onOpenSettings={onSettings}
-            onNewQuery={() => createTask("SELECT 1 AS n;")}
+            onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
             inspectorOpen={inspectorOpen()}
             consoleOpen={consoleState() !== "folded"}
             onToggleInspector={() => setInspectorOpen((v) => !v)}
@@ -387,7 +437,7 @@ export default function App() {
           />
 
           <main class="main">
-            <Show 
+            <Show
               when={activeTaskId() !== null}
               fallback={
                 <HomePanel
@@ -395,23 +445,40 @@ export default function App() {
                   workspaces={workspaces()}
                   onSelectWorkspace={selectWorkspace}
                   onAddWorkspace={addWorkspace}
-                  onCreateTask={createTask}
+                  onCreateTask={(prompt) => createTask(prompt, "chat")}
                 />
               }
             >
-              <SqlEditor
-                initialSql={sql()}
-                rowCap={rowCap()}
-                busy={busy()}
-                onSql={handleSqlChange}
-                onRowCap={setRowCap}
-                onRun={run}
-                onCopy={copySql}
-              />
-              <Show when={error()}>
-                <pre class="error-box">{error()}</pre>
-              </Show>
-              <ResultTable result={result()} />
+              {/* activeTaskId 非空时，按 task.kind 在 ChatView 与 SqlEditor 间切换。
+                  SqlEditor 通过自身的 createEffect 同步 initialSql，
+                  切换 SQL task 时编辑器内容会正确更新，无需 keyed 重建。 */}
+              <Switch>
+                <Match when={(activeTask()?.kind ?? "sql") === "chat"}>
+                  <ChatView
+                    messages={activeTask()?.messages ?? []}
+                    workspace={currentWorkspace().name}
+                    onSend={sendChatMessage}
+                    onOpenInSqlPanel={openInSqlPanel}
+                  />
+                </Match>
+                <Match when={(activeTask()?.kind ?? "sql") === "sql"}>
+                  <div class="sql-view">
+                    <SqlEditor
+                      initialSql={sql()}
+                      rowCap={rowCap()}
+                      busy={busy()}
+                      onSql={handleSqlChange}
+                      onRowCap={setRowCap}
+                      onRun={run}
+                      onCopy={copySql}
+                    />
+                    <Show when={error()}>
+                      <pre class="error-box">{error()}</pre>
+                    </Show>
+                    <ResultTable result={result()} />
+                  </div>
+                </Match>
+              </Switch>
             </Show>
           </main>
 

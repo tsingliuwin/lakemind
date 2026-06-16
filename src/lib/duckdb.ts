@@ -22,14 +22,16 @@ export async function describeTable(name: string): Promise<ColumnInfo[]> {
   return invoke<ColumnInfo[]>("describe_table", { name });
 }
 
+/** 硬上限：即使 UI 误传 0/负数/超大值，也绝不会发起可能 OOM 的全量查询。
+ * 1,000,000 行 × 行虚拟滚动是当前 M1 的安全边界；真·流式分块留到 M2/M3。 */
+const ROW_CAP_HARD_MAX = 1_000_000;
+
 /**
- * Run an ad-hoc SELECT. `rowCap` of `0` (or falsy) means uncapped; otherwise
- * the result is truncated to that many rows.
+ * 执行一条即席 SELECT。`rowCap` 是行数上限，结果超过会被截断并置 truncated 标志。
+ * 不存在"无限制"路径——0/负数/缺省都会被夹到硬上限，杜绝前后端 OOM。
  */
 export async function executeSql(sql: string, rowCap: number): Promise<SqlResult> {
-  // The Rust side treats `null` as uncapped; we convert 0 → null here so the
-  // UI can represent "no limit" with the number 0.
-  const cap = rowCap && rowCap > 0 ? rowCap : null;
+  const cap = rowCap && rowCap > 0 ? Math.min(rowCap, ROW_CAP_HARD_MAX) : ROW_CAP_HARD_MAX;
   return invoke<SqlResult>("execute_sql", { sql, rowCap: cap });
 }
 

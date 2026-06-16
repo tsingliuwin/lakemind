@@ -24,7 +24,10 @@ pub fn register(conn: &Connection, e: &ScanEntry) -> AppResult<SourceTable> {
     // Populate metadata. Schema is essentially free; row-count uses the
     // parquet_metadata fast path where possible.
     let columns = schema::describe_view(conn, &e.view_name)?;
-    let row_count_estimate = schema::estimate_row_count(conn, e)?;
+    // Row-count estimation is best-effort: if it fails (e.g. glob mismatch,
+    // metadata read error on a malformed file), do NOT abort registration —
+    // the VIEW is still usable, just report an unknown count as None.
+    let row_count_estimate = schema::estimate_row_count(conn, e).unwrap_or(None);
 
     Ok(SourceTable {
         name: e.view_name.clone(),

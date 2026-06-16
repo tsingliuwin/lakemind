@@ -1,4 +1,4 @@
-import { For, Show, onMount, onCleanup } from "solid-js";
+import { For, Show, createEffect, onMount, onCleanup } from "solid-js";
 import { EditorView, keymap } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -57,6 +57,19 @@ export default function SqlEditor(props: {
     });
     view = new EditorView({ state, parent: host });
     onCleanup(() => view?.destroy());
+  });
+
+  // 当外部 initialSql 变化（如切换 SQL task、对话卡片「在 SQL 面板打开」注入）
+  // 时，把编辑器文档同步到新内容。修复初始实现只在 mount 读一次的 bug。
+  createEffect(() => {
+    const next = props.initialSql;
+    const v = view;
+    if (!v) return;
+    if (next !== v.state.doc.toString()) {
+      v.dispatch({
+        changes: { from: 0, to: v.state.doc.length, insert: next },
+      });
+    }
   });
 
   return (

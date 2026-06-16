@@ -349,8 +349,11 @@ export default function LeftNav(props: {
                             class="tree-leaf task-leaf"
                             classList={{ selected: props.activeTaskId === task.id }}
                             onClick={() => props.onSelectTask?.(task.id)}
-                            style="padding-left: 20px; display: flex; align-items: center; position: relative;"
+                            style="padding-left: 20px; display: flex; align-items: center; gap: 6px; position: relative;"
                           >
+                            <span class="task-kind-icon" title={(task.kind ?? "sql") === "chat" ? "对话" : "SQL 查询"}>
+                              {(task.kind ?? "sql") === "chat" ? "💬" : "📊"}
+                            </span>
                             <span class="leaf-label">{task.name}</span>
                             <span class="task-time" style="font-size: 10px; color: var(--text-dim); margin-left: auto; padding-left: 8px; flex-shrink: 0;">
                               {formatRelativeTime(task.createdAt)}

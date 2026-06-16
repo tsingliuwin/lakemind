@@ -24,14 +24,16 @@ export default function ResultTable(props: { result: SqlResult | null }) {
       (name, i) =>
         ({
           id: name,
-          accessorFn: (row: Row) => row.values[i],
+          accessorFn: (row: Row) => row[i],
           header: () => name,
           cell: (info) => renderCell(info.getValue()),
         }) as ColumnDef<Row, unknown>,
     );
   });
 
-  const data = createMemo<Row[]>(() => (props.result?.rows ?? []).map((values) => ({ values })));
+  // 直接复用后端传来的 rows（JsonValue[][]），不再 map 出一份 {values} 包装对象，
+  // 否则 10万行会额外产生 10万个对象拷贝，叠加 TanStack row model 三份内存。
+  const data = createMemo<Row[]>(() => props.result?.rows ?? []);
 
   const table = createSolidTable({
     get data() {
@@ -119,9 +121,8 @@ export default function ResultTable(props: { result: SqlResult | null }) {
   );
 }
 
-interface Row {
-  values: JsonValue[];
-}
+/** 一行 = 一个单元格 JSON 值数组（直接对齐后端 SqlResult.rows）。 */
+type Row = JsonValue[];
 
 /** Render a JSON cell value into something compact and readable. */
 function renderCell(v: unknown): JSX.Element {
