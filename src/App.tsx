@@ -1,4 +1,4 @@
-import { createSignal, Show, Switch, Match } from "solid-js";
+import { createSignal, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import DropZone from "./components/DropZone";
 import LeftNav from "./components/LeftNav";
 import TitleBar from "./components/TitleBar";
@@ -63,6 +63,29 @@ export default function App() {
   const [tasks, setTasks] = createSignal<QueryTask[]>([]);
   const [activeTaskId, setActiveTaskId] = createSignal<string | null>(null);
 
+  onMount(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const isN = e.key.toLowerCase() === "n";
+      const isS = e.key.toLowerCase() === "s";
+      const isCtrlOrCmd = e.ctrlKey || e.metaKey;
+      if (isCtrlOrCmd && isN) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          createTask("", "chat");
+        } else {
+          createTask("SELECT 1 AS n;", "sql");
+        }
+      } else if (isCtrlOrCmd && isS) {
+        e.preventDefault();
+        saveActiveTask();
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    onCleanup(() => {
+      window.removeEventListener("keydown", handleGlobalKeyDown);
+    });
+  });
+
   function addWorkspace(path: string) {
     if (!path) return;
     // Extract folder name from absolute path
@@ -117,6 +140,7 @@ export default function App() {
       createdAt: Date.now(),
       kind,
       messages: kind === "chat" ? [] : undefined,
+      saved: false,
     };
 
     setTasks((prev) => [...prev, newTask]);
@@ -171,6 +195,75 @@ export default function App() {
     );
   }
 
+  async function createChatTaskAndSend(prompt: string) {
+    const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    let name = prompt.trim();
+    if (name.length > 20) {
+      name = name.slice(0, 18) + "...";
+    }
+    name = name.replace(/\n/g, " ");
+    if (!name) name = "新对话";
+
+    const userMsg: ChatMessage = {
+      id: `msg-${Date.now()}`,
+      role: "user",
+      content: prompt,
+      ts: Date.now(),
+    };
+
+    const newTask: QueryTask = {
+      id,
+      name,
+      createdAt: Date.now(),
+      kind: "chat",
+      messages: [userMsg],
+    };
+
+    setTasks((prev) => [...prev, newTask]);
+    setActiveTaskId(id);
+
+    const reply = await mockAgentReply(prompt);
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === id ? { ...t, messages: [...(t.messages ?? []), reply] } : t,
+      ),
+    );
+  }
+
+  async function sendChatMessageFromHome(id: string, prompt: string) {
+    const userMsg: ChatMessage = {
+      id: `msg-${Date.now()}`,
+      role: "user",
+      content: prompt,
+      ts: Date.now(),
+    };
+
+    let name = prompt.trim();
+    if (name.length > 20) {
+      name = name.slice(0, 18) + "...";
+    }
+    name = name.replace(/\n/g, " ");
+
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              name,
+              messages: [userMsg],
+            }
+          : t
+      )
+    );
+
+    const reply = await mockAgentReply(prompt);
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === id ? { ...t, messages: [...(t.messages ?? []), reply] } : t,
+      ),
+    );
+  }
+
   /** ChatCard「在 SQL 面板打开」：新建 SQL task 注入 SQL 并自动执行。 */
   function openInSqlPanel(sql: string) {
     createTask(sql, "sql");
@@ -183,6 +276,44 @@ export default function App() {
       setActiveTaskId(null);
     }
   }
+
+  function saveActiveTask() {
+    const activeId = activeTaskId();
+    if (!activeId) return;
+    const task = tasks().find((t) => t.id === activeId);
+    if (!task || task.kind !== "sql") return;
+
+    const isDefaultOrEmpty = !task.sql.trim() || task.sql.trim() === "SELECT 1 AS n;";
+    if (isDefaultOrEmpty) {
+      alert("默认查询或空文件无需保存！");
+      return;
+    }
+
+    let name = task.sql.trim();
+    const lines = name.split("\n");
+    name = lines[0].trim();
+    if (name.length > 20) {
+      name = name.slice(0, 18) + "...";
+    }
+    if (!name) name = "已保存查询";
+
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === activeId ? { ...t, name, saved: true } : t
+      )
+    );
+  }
+
+  const visibleTasks = () => {
+    return tasks().filter((task) => {
+      if (task.kind === "chat") {
+        return (task.messages?.length ?? 0) > 0;
+      } else {
+        const isDefaultOrEmpty = !task.sql.trim() || task.sql.trim() === "SELECT 1 AS n;";
+        return !!task.saved && !isDefaultOrEmpty;
+      }
+    });
+  };
 
   function handleSqlChange(newSql: string) {
     setSql(newSql);
@@ -478,7 +609,7 @@ export default function App() {
             workspace={currentWorkspace().name}
             workspacePath={currentWorkspace().path}
             workspaces={workspaces()}
-            tasks={tasks()}
+            tasks={visibleTasks()}
             activeTaskId={activeTaskId()}
             onSelectTask={selectTask}
             onDeleteTask={deleteTask}
@@ -492,6 +623,7 @@ export default function App() {
             onSelect={selectTable}
             onOpenSettings={onSettings}
             onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
+            onNewChat={() => createTask("", "chat")}
             inspectorOpen={inspectorOpen()}
             consoleOpen={consoleState() !== "folded"}
             onToggleInspector={() => setInspectorOpen((v) => !v)}
@@ -501,14 +633,21 @@ export default function App() {
 
           <main class="main">
             <Show
-              when={activeTaskId() !== null}
+              when={activeTaskId() !== null && (activeTask()?.kind !== "chat" || (activeTask()?.messages?.length ?? 0) > 0)}
               fallback={
                 <HomePanel
                   workspace={currentWorkspace().name}
                   workspaces={workspaces()}
                   onSelectWorkspace={selectWorkspace}
                   onAddWorkspace={addWorkspace}
-                  onCreateTask={(prompt) => createTask(prompt, "chat")}
+                  onCreateTask={(prompt) => {
+                    const active = activeTask();
+                    if (active && active.kind === "chat" && (active.messages?.length ?? 0) === 0) {
+                      void sendChatMessageFromHome(active.id, prompt);
+                    } else {
+                      void createChatTaskAndSend(prompt);
+                    }
+                  }}
                   onAddSource={handleSelectAndRegisterSource}
                 />
               }
@@ -535,6 +674,8 @@ export default function App() {
                       onRowCap={setRowCap}
                       onRun={run}
                       onCopy={copySql}
+                      onSave={saveActiveTask}
+                      onClose={() => deleteTask(activeTaskId()!)}
                     />
                     <Show when={error()}>
                       <pre class="error-box">{error()}</pre>

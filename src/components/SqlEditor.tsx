@@ -22,6 +22,8 @@ export default function SqlEditor(props: {
   onRowCap: (cap: number) => void;
   onRun: () => void;
   onCopy: () => void;
+  onSave?: () => void;
+  onClose?: () => void;
 }) {
   let host!: HTMLDivElement;
   let view: EditorView | undefined;
@@ -36,6 +38,13 @@ export default function SqlEditor(props: {
             key: "Mod-Enter",
             run: () => {
               props.onRun();
+              return true;
+            },
+          },
+          {
+            key: "Mod-s",
+            run: () => {
+              props.onSave?.();
               return true;
             },
           },
@@ -89,10 +98,20 @@ export default function SqlEditor(props: {
             </select>
           </label>
           <button class="icon-btn" title={t("copySql")} onClick={() => props.onCopy()}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style={{ width: "14px", height: "14px" }}>
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
             </svg>
+          </button>
+          <button class="icon-btn" title="保存查询 (Ctrl+S)" onClick={() => props.onSave?.()}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style={{ width: "14px", height: "14px" }}>
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+              <path d="M17 21v-8H7v8"></path>
+              <path d="M7 3v5h8"></path>
+            </svg>
+          </button>
+          <button class="icon-btn" title="关闭并放弃查询" onClick={() => props.onClose?.()} style="color: var(--accent-red);">
+            ✕
           </button>
           <button class="run-btn" disabled={props.busy} onClick={() => props.onRun()}>
             <Show when={props.busy} fallback={

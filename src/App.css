@@ -514,6 +514,16 @@ select:hover:not(:disabled) {
   color: var(--text-secondary);
   font-size: 14px;
   transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.icon-btn svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  flex-shrink: 0;
 }
 .icon-btn:hover:not(:disabled) {
   background: var(--bg-hover);

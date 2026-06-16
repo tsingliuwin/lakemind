@@ -112,6 +112,8 @@ export interface QueryTask {
   kind?: TaskKind;
   /** chat task 的消息历史。 */
   messages?: ChatMessage[];
+  /** 仅 sql：该查询是否已保存 */
+  saved?: boolean;
 }
 
 export interface Workspace {

@@ -29,6 +29,7 @@ export default function LeftNav(props: {
   onSelect: (table: SourceTable) => void;
   onOpenSettings: () => void;
   onNewQuery?: () => void;
+  onNewChat?: () => void;
   inspectorOpen?: boolean;
   consoleOpen?: boolean;
   onToggleInspector?: () => void;
@@ -196,13 +197,22 @@ export default function LeftNav(props: {
 
           {/* Quick Action links */}
           <div class="ln-quick-actions">
-            <button class="ln-action-btn" title="新建任务 (Ctrl+N)" onClick={() => props.onNewQuery?.()} disabled={props.busy}>
+            <button class="ln-action-btn" title="新建对话 (Ctrl+Shift+N)" onClick={() => props.onNewChat?.()} disabled={props.busy}>
+              <span class="action-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+                </svg>
+              </span>
+              <span class="action-label">新建对话</span>
+              <span class="action-shortcut">⇧⌘ N</span>
+            </button>
+            <button class="ln-action-btn" title="新建查询 (Ctrl+N)" onClick={() => props.onNewQuery?.()} disabled={props.busy}>
               <span class="action-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M12 5v14M5 12h14"/>
                 </svg>
               </span>
-              <span class="action-label">新建任务</span>
+              <span class="action-label">新建查询</span>
               <span class="action-shortcut">⌘ N</span>
             </button>
             <button class="ln-action-btn" title={`${t("search")} (Ctrl+K)`} disabled={props.busy}>
