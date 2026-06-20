@@ -1,80 +1,183 @@
-//! Tauri command handlers — the M1 wire surface.
+//! Tauri command handlers.
 //!
-//! Four commands, each a thin async wrapper that locks the shared DuckDB
-//! connection and dispatches the blocking work onto `spawn_blocking`:
-//!
-//! | Command          | Purpose                                            |
-//! |------------------|----------------------------------------------------|
-//! | `register_folder`| Scan a dropped path and create all SOURCE views    |
-//! | `list_sources`   | Return the current SOURCE registry                 |
-//! | `describe_table` | Column metadata for one view                       |
-//! | `execute_sql`    | Run an ad-hoc SELECT (row-capped) and return rows  |
+//! Groups:
+//! * **Lake**  — import / register sources into the workspace's DuckLake, with a
+//!   configurable zero-copy threshold (small → materialized TABLE, large → VIEW).
+//!   Every registration is mirrored into the SQLite `sources` mapping table so
+//!   the file↔table↔storage relationship is persistent and queryable.
+//! * **Query** — describe / execute SQL (run inside `USE lake`, so `FROM s_x` works).
+//! * **Config** — get/set user settings (e.g. the zero-copy threshold).
+//! * **FS** — native directory picker, read a workspace folder.
+//! * **Workspace / Task** — registry + per-workspace SQL/chat task persistence.
 
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use tauri::State;
 
+use crate::db::{self, SourceRecord};
 use crate::duckdb::{execute, register, scan, schema};
 use crate::error::{AppError, AppResult};
-use crate::model::{ColumnInfo, SourceKind, SourceTable, SqlResult};
+use crate::model::{SourceKind, SourceTable, SqlResult, StorageKind};
 use crate::state::AppState;
 
-/// Scan a folder (or single file) and register every detected SOURCE as a
-/// DuckDB VIEW. Returns the freshly registered tables.
-///
-/// Concurrency model: the pure-FS scan runs OUTSIDE the connection lock, so a
-/// slow directory walk never blocks `execute_sql`. Only the `CREATE VIEW` +
-/// schema/row-count introspection happen inside the (short) lock window. The
-/// Delta extension is loaded lazily and only if a Delta source is actually
-/// present — offline users with no Delta data are never blocked on the network.
+// ===========================================================================
+// Query commands
+// ===========================================================================
+
+/// Column metadata for a single registered table/view.
 #[tauri::command]
-pub async fn register_folder(path: String, state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
+pub async fn describe_table(name: String, state: State<'_, AppState>) -> Result<Vec<crate::model::ColumnInfo>, String> {
+    run_blocking(state, move |conn| {
+        let view = sanitize_ident(&name)?;
+        schema::describe_view(conn, &view)
+    })
+    .await
+}
+
+/// Run an ad-hoc SELECT and return a row-capped [`SqlResult`].
+#[tauri::command]
+pub async fn execute_sql(sql: String, row_cap: Option<usize>, state: State<'_, AppState>) -> Result<SqlResult, String> {
+    run_blocking(state, move |conn| execute::run_query(conn, sql.trim(), row_cap)).await
+}
+
+/// Return the in-memory source cache for the current workspace.
+#[tauri::command]
+pub async fn list_sources(state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
+    Ok(state.sources.lock().await.clone())
+}
+
+/// SQL fragments to discover user-created tables/views inside the attached lake
+/// (surfaces `custom` sources not tracked in the `sources` mapping). Queried
+/// separately so one failing (e.g. `duckdb_views()` under DuckLake) cannot drop
+/// the registered sources we already collected.
+const CUSTOM_TABLE_SQLS: [&str; 2] = [
+    "SELECT table_name FROM duckdb_tables() WHERE database_name = 'lake' AND schema_name = 'main' AND NOT internal",
+    "SELECT table_name FROM duckdb_views() WHERE database_name = 'lake' AND schema_name = 'main' AND NOT internal",
+];
+
+/// All tables/views for the current workspace: registered sources (from the
+/// SQLite `sources` mapping, enriched with live column metadata) plus any custom
+/// tables the user created via SQL (`storage = custom`). Best-effort throughout
+/// — a missing lake object or a flaky catalog query never drops the set of
+/// registered sources we already know about.
+#[tauri::command]
+pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
+    let ws_path = state.workspace_path.lock().await.clone();
+    eprintln!("list_duckdb_tables: called, ws_path={:?}", ws_path);
+    run_blocking(state, move |conn| {
+        let sqlite = db::get_db_conn()?;
+        let records = db::list_sources(&sqlite, &ws_path)?;
+        eprintln!("list_duckdb_tables: {} source record(s) in mapping", records.len());
+
+        // 1. Registered sources (authoritative). A record whose lake object has
+        //    gone missing is skipped here; it is rebuilt on the next sync.
+        let mut result = Vec::new();
+        let mut known: HashSet<String> = HashSet::new();
+        for rec in &records {
+            known.insert(rec.table_name.clone());
+            match build_source_table_from_record(conn, rec) {
+                Ok(t) => result.push(t),
+                Err(e) => eprintln!("list: skip source {} (metadata failed): {}", rec.table_name, e),
+            }
+        }
+
+        // 2. Custom tables/views not tracked in `sources`. Best-effort: each SQL
+        //    is prepared/run independently; a failure (e.g. duckdb_views() under
+        //    DuckLake) is logged and skipped, never propagated.
+        for sql in CUSTOM_TABLE_SQLS {
+            let Ok(mut stmt) = conn.prepare(sql) else {
+                continue;
+            };
+            let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else {
+                continue;
+            };
+            for name in rows.flatten() {
+                if known.contains(&name) {
+                    continue;
+                }
+                known.insert(name.clone());
+                let cols = schema::describe_view(conn, &name).unwrap_or_default();
+                let count = count_rows(conn, &name);
+                result.push(SourceTable {
+                    name: name.clone(),
+                    label: name,
+                    kind: SourceKind::View,
+                    storage: StorageKind::Custom,
+                    path: String::new(),
+                    scan_path: String::new(),
+                    partition_keys: Vec::new(),
+                    row_count_estimate: count,
+                    columns: cols,
+                });
+            }
+        }
+        eprintln!("list_duckdb_tables: returning {} table(s)", result.len());
+        Ok(result)
+    })
+    .await
+}
+
+// ===========================================================================
+// Lake import + sync
+// ===========================================================================
+
+/// Bring a folder/file into the current workspace, then scan + register as
+/// DuckLake tables/views. Size-based strategy (threshold from config):
+///   * small (≤ threshold) → copy into workspace dir + materialized TABLE
+///   * large (> threshold) → register in place + zero-copy VIEW
+#[tauri::command]
+pub async fn import_file_to_workspace(
+    workspace: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SourceTable>, String> {
+    let src_path = PathBuf::from(&path);
+    if !src_path.exists() {
+        return Err(format!("源路径不存在: {path}"));
+    }
+
+    let ws_dir = resolve_workspace_dir(&workspace)?;
+    std::fs::create_dir_all(&ws_dir).map_err(|e| format!("无法创建工作区目录: {e}"))?;
+
+    // Always copy the source into the workspace so it shows up in the Files tree
+    // and the project stays self-contained. (Zero-copy for very large files is a
+    // future optimization — see `decide_storage`.)
+    let target_path = copy_into_workspace_if_needed(&src_path, &ws_dir)?;
+
     let conn = state.conn.clone();
     let sources = state.sources.clone();
+    let ws_path_str = workspace.clone();
 
     let join = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<SourceTable>> {
-        let root = PathBuf::from(&path);
-        if !root.exists() {
-            return Err(AppError::new(format!("路径不存在: {path}")));
-        }
+        let entries = scan::scan_path(&target_path, false);
 
-        // 1. Pure filesystem scan — no DuckDB lock needed. This is the slow
-        //    part on big trees and must not block concurrent queries.
-        let entries = scan::scan_path(&root, false);
-
-        // 2. Short critical section: load delta only if needed, then create
-        //    the views + introspect. Hold the lock only across these DB ops.
         let guard = conn.blocking_lock();
-        let needs_delta = entries
-            .iter()
-            .any(|e| e.kind == crate::model::SourceKind::Delta);
-        if needs_delta {
-            // Best-effort: try INSTALL then LOAD. Offline failure degrades
-            // gracefully (those Delta sources just fail to register, others
-            // still succeed). Never panics or hangs on the network.
-            let _ = guard.execute("INSTALL delta;", []);
-            let _ = guard.execute("LOAD delta;", []);
-        }
-        let needs_excel = entries
-            .iter()
-            .any(|e| e.kind == crate::model::SourceKind::Excel);
-        if needs_excel {
-            let _ = guard.execute("INSTALL excel;", []);
-            let _ = guard.execute("LOAD excel;", []);
-        }
+        load_extensions_if_needed(&guard, &entries);
 
-        let mut created = Vec::with_capacity(entries.len());
+        let sqlite = db::get_db_conn()?;
+        let now = now_ms();
+        let mut created = Vec::new();
         for e in &entries {
-            match register::register(&guard, e) {
-                Ok(t) => created.push(t),
-                // A single failing source (e.g. a malformed CSV) must not abort
-                // the whole scan; skip it but log the reason.
+            let storage = decide_storage(e);
+            // For TABLE storage we materialize from a workspace-local copy (already
+            // produced above for the whole import); for VIEW we read in place.
+            let work = if storage == StorageKind::Table {
+                materialize_into_workspace(e, &ws_dir)?
+            } else {
+                e.clone()
+            };
+            match register::register(&guard, &work, storage) {
+                Ok(t) => {
+                    let rec = source_record_from(&t, now);
+                    let _ = db::upsert_source(&sqlite, &ws_path_str, &rec);
+                    created.push(t);
+                }
                 Err(err) => eprintln!("skip source {}: {err}", e.label),
             }
         }
-        drop(guard); // release the connection lock before touching the registry
+        drop(guard);
 
-        // 3. Merge into the registry (separate lock, after DB lock released).
         let mut registry = sources.blocking_lock();
         for t in &created {
             registry.retain(|existing| existing.name != t.name);
@@ -91,33 +194,371 @@ pub async fn register_folder(path: String, state: State<'_, AppState>) -> Result
     }
 }
 
-/// Return all currently registered SOURCE tables.
+/// Switch to a workspace (re-attach its DuckLake) and incrementally sync sources
+/// against the filesystem: register new files, drop orphans, rebuild any lake
+/// object that went missing. Returns the workspace's full source list.
 #[tauri::command]
-pub async fn list_sources(state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
-    let registry = state.sources.lock().await;
-    Ok(registry.clone())
+pub async fn register_workspace_sources(
+    workspace_path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SourceTable>, String> {
+    register_workspace_sources_inner(workspace_path, &state).await
 }
 
-/// Column metadata for a single registered view.
-#[tauri::command]
-pub async fn describe_table(name: String, state: State<'_, AppState>) -> Result<Vec<ColumnInfo>, String> {
-    run_blocking(state, move |conn| {
-        let view = sanitize_ident(&name)?;
-        schema::describe_view(conn, &view)
+pub async fn register_workspace_sources_inner(
+    workspace_path: String,
+    state: &AppState,
+) -> Result<Vec<SourceTable>, String> {
+    let ws_dir = resolve_workspace_dir(&workspace_path)?;
+    let ws_dir_for_scan = ws_dir.clone();
+    let ws_path_for_sync = workspace_path.clone();
+
+    // 1. Rebuild the session connection and attach this workspace's DuckLake.
+    switch_workspace_lake(state, workspace_path.clone(), ws_dir.clone()).await?;
+
+    let conn = state.conn.clone();
+    let sources_cache = state.sources.clone();
+
+    let join = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<SourceTable>> {
+        // 2. Scan the workspace dir for the files currently present.
+        let entries = scan::scan_path(&ws_dir_for_scan, true);
+
+        let sqlite = db::get_db_conn()?;
+        let existing = db::list_sources(&sqlite, &ws_path_for_sync)?;
+        let existing_by_name: std::collections::HashMap<String, &SourceRecord> =
+            existing.iter().map(|r| (r.table_name.clone(), r)).collect();
+        let entry_names: HashSet<&str> = entries.iter().map(|e| e.view_name.as_str()).collect();
+        let now = now_ms();
+
+        let guard = conn.blocking_lock();
+        load_extensions_if_needed(&guard, &entries);
+
+        let mut result: Vec<SourceTable> = Vec::new();
+
+        // 3. Register new sources (present on disk, not yet mapped).
+        for e in &entries {
+            if existing_by_name.contains_key(&e.view_name) {
+                continue;
+            }
+            let storage = decide_storage(e);
+            let work = if storage == StorageKind::Table {
+                materialize_into_workspace(e, &ws_dir_for_scan)?
+            } else {
+                e.clone()
+            };
+            match register::register(&guard, &work, storage) {
+                Ok(t) => {
+                    let rec = source_record_from(&t, now);
+                    let _ = db::upsert_source(&sqlite, &ws_path_for_sync, &rec);
+                    result.push(t);
+                }
+                Err(err) => eprintln!("register {} failed: {err}", e.label),
+            }
+        }
+
+        // 4. Drop orphan sources (mapped, but file no longer present).
+        for rec in &existing {
+            if !entry_names.contains(rec.table_name.as_str()) {
+                drop_lake_object(&guard, &rec.table_name);
+                let _ = db::delete_source_by_table(&sqlite, &ws_path_for_sync, &rec.table_name);
+            }
+        }
+
+        // 5. For sources still present, verify the lake object exists; rebuild if
+        //    it vanished (e.g. lake file was deleted), otherwise hydrate from the
+        //    mapping record + live metadata.
+        for rec in &existing {
+            if !entry_names.contains(rec.table_name.as_str()) {
+                continue;
+            }
+            if !table_exists_in_lake(&guard, &rec.table_name) {
+                if let Some(e) = entries.iter().find(|x| x.view_name == rec.table_name) {
+                    let storage = StorageKind::from_db_str(&rec.storage);
+                    let work = if storage == StorageKind::Table {
+                        materialize_into_workspace(e, &ws_dir_for_scan)?
+                    } else {
+                        e.clone()
+                    };
+                    if let Ok(t) = register::register(&guard, &work, storage) {
+                        let new_rec = source_record_from(&t, rec.created_at);
+                        let _ = db::upsert_source(&sqlite, &ws_path_for_sync, &new_rec);
+                        result.push(t);
+                        continue;
+                    }
+                }
+            }
+            if let Ok(t) = build_source_table_from_record(&guard, rec) {
+                result.push(t);
+            }
+        }
+        drop(guard);
+
+        // 6. Refresh the in-memory cache.
+        let mut cache = sources_cache.blocking_lock();
+        cache.clear();
+        cache.extend(result.iter().cloned());
+        Ok(result)
     })
-    .await
+    .await;
+
+    match join {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(e) => Err(format!("task join error: {e}")),
+    }
 }
 
-/// Run an ad-hoc SELECT and return a row-capped [`SqlResult`].
+// ===========================================================================
+// Config commands
+// ===========================================================================
+
+/// Read a config value (None if unset).
 #[tauri::command]
-pub async fn execute_sql(sql: String, row_cap: Option<usize>, state: State<'_, AppState>) -> Result<SqlResult, String> {
-    run_blocking(state, move |conn| execute::run_query(conn, sql.trim(), row_cap)).await
+pub async fn get_app_config(key: String) -> Result<Option<String>, String> {
+    let conn = db::get_db_conn()?;
+    db::get_config(&conn, &key)
 }
 
-// --- internals -------------------------------------------------------------
+/// Write a config value.
+#[tauri::command]
+pub async fn set_app_config(key: String, value: String) -> Result<(), String> {
+    let conn = db::get_db_conn()?;
+    db::set_config(&conn, &key, &value)
+}
 
-/// Lock the connection on a blocking thread, then run `f`. This keeps the
-/// async runtime free while a long DuckDB query is executing.
+// ===========================================================================
+// Filesystem commands
+// ===========================================================================
+
+/// Open a native platform directory picker and return the selected path.
+#[tauri::command]
+pub async fn select_directory() -> Result<Option<String>, String> {
+    Ok(select_directory_native())
+}
+
+#[derive(serde::Serialize)]
+pub struct FileItem {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+}
+
+/// Read the direct children of a workspace folder.
+#[tauri::command]
+pub async fn read_directory(path: String) -> Result<Vec<FileItem>, String> {
+    let resolved_path = resolve_workspace_dir(&path)?;
+    if !resolved_path.exists() {
+        return Err(format!("目录不存在: {}", resolved_path.display()));
+    }
+
+    let mut items = Vec::new();
+    let entries = std::fs::read_dir(&resolved_path).map_err(|e| format!("读取目录失败: {e}"))?;
+    for entry in entries {
+        if let Ok(entry) = entry {
+            let p = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            let is_dir = p.is_dir();
+            items.push(FileItem {
+                name,
+                path: p.to_string_lossy().to_string(),
+                is_dir,
+            });
+        }
+    }
+    items.sort_by(|a, b| {
+        if a.is_dir != b.is_dir {
+            b.is_dir.cmp(&a.is_dir)
+        } else {
+            a.name.cmp(&b.name)
+        }
+    });
+    Ok(items)
+}
+
+// ===========================================================================
+// Workspace registry
+// ===========================================================================
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct Workspace {
+    pub name: String,
+    pub path: String,
+}
+
+#[tauri::command]
+pub async fn load_workspaces() -> Result<Vec<Workspace>, String> {
+    let conn = db::get_db_conn()?;
+    let mut stmt = conn
+        .prepare("SELECT name, path FROM workspaces ORDER BY created_at ASC")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok(Workspace { name: row.get(0)?, path: row.get(1)? }))
+        .map_err(|e| e.to_string())?;
+    let mut list = Vec::new();
+    for r in rows {
+        if let Ok(w) = r {
+            list.push(w);
+        }
+    }
+    Ok(list)
+}
+
+#[tauri::command]
+pub async fn add_workspace(name: String, path: String) -> Result<(), String> {
+    let conn = db::get_db_conn()?;
+    let now = now_ms();
+    conn.execute(
+        "INSERT OR REPLACE INTO workspaces (path, name, created_at) VALUES (?, ?, ?)",
+        rusqlite::params![path, name, now],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn remove_workspace(path: String) -> Result<(), String> {
+    let conn = db::get_db_conn()?;
+    let _ = conn.execute("PRAGMA foreign_keys = ON;", []);
+
+    // Clean up content files for all tasks under this workspace.
+    let mut stmt = conn
+        .prepare("SELECT id, kind FROM tasks WHERE workspace_path = ?")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([&path], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?;
+
+    let lakemind_dir = db::get_lakemind_dir()?;
+    for r in rows {
+        if let Ok((id, kind)) = r {
+            delete_task_content_files(&lakemind_dir, &id, &kind);
+        }
+    }
+
+    // Deleting the workspace cascades to its tasks and sources (FK ON DELETE CASCADE).
+    conn.execute("DELETE FROM workspaces WHERE path = ?", [&path])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ===========================================================================
+// Task persistence
+// ===========================================================================
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct QueryTask {
+    pub id: String,
+    pub name: String,
+    pub sql: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    pub kind: String,
+    pub messages: Option<serde_json::Value>,
+    pub saved: bool,
+}
+
+#[tauri::command]
+pub async fn load_workspace_tasks(workspace_path: String) -> Result<Vec<QueryTask>, String> {
+    let conn = db::get_db_conn()?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, kind, created_at, saved FROM tasks WHERE workspace_path = ? ORDER BY created_at ASC")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([&workspace_path], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i32>(4)? != 0,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let lakemind_dir = db::get_lakemind_dir()?;
+    let mut tasks = Vec::new();
+    for r in rows {
+        if let Ok((id, name, kind, created_at, saved)) = r {
+            let mut sql = String::new();
+            let mut messages = None;
+            if kind == "sql" {
+                let filepath = lakemind_dir.join("sqls").join(format!("{id}.sql"));
+                if filepath.exists() {
+                    sql = std::fs::read_to_string(filepath).unwrap_or_default();
+                }
+            } else if kind == "chat" {
+                let filepath = lakemind_dir.join("chats").join(format!("{id}.json"));
+                if filepath.exists() {
+                    let json_str = std::fs::read_to_string(filepath).unwrap_or_default();
+                    messages = serde_json::from_str(&json_str).ok();
+                }
+            }
+            tasks.push(QueryTask { id, name, sql, created_at, kind, messages, saved });
+        }
+    }
+    Ok(tasks)
+}
+
+#[tauri::command]
+pub async fn save_sql_task(workspace_path: String, task_id: String, name: String, sql: String) -> Result<(), String> {
+    let conn = db::get_db_conn()?;
+    let now = now_ms();
+    conn.execute(
+        "INSERT OR REPLACE INTO tasks (id, workspace_path, name, kind, created_at, saved)
+         VALUES (?, ?, ?, 'sql', COALESCE((SELECT created_at FROM tasks WHERE id = ?), ?), 1)",
+        rusqlite::params![task_id, workspace_path, name, task_id, now],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let lakemind_dir = db::get_lakemind_dir()?;
+    let filepath = lakemind_dir.join("sqls").join(format!("{task_id}.sql"));
+    std::fs::write(filepath, sql).map_err(|e| format!("Failed to write SQL file: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn save_chat_task(
+    workspace_path: String,
+    task_id: String,
+    name: String,
+    messages: serde_json::Value,
+) -> Result<(), String> {
+    let conn = db::get_db_conn()?;
+    let now = now_ms();
+    conn.execute(
+        "INSERT OR REPLACE INTO tasks (id, workspace_path, name, kind, created_at, saved)
+         VALUES (?, ?, ?, 'chat', COALESCE((SELECT created_at FROM tasks WHERE id = ?), ?), 1)",
+        rusqlite::params![task_id, workspace_path, name, task_id, now],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let lakemind_dir = db::get_lakemind_dir()?;
+    let filepath = lakemind_dir.join("chats").join(format!("{task_id}.json"));
+    let json_str = serde_json::to_string(&messages).map_err(|e| e.to_string())?;
+    std::fs::write(filepath, json_str).map_err(|e| format!("Failed to write chat JSON file: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_task(task_id: String) -> Result<(), String> {
+    let conn = db::get_db_conn()?;
+    let kind: Option<String> = conn
+        .query_row("SELECT kind FROM tasks WHERE id = ?", [&task_id], |row| row.get(0))
+        .ok();
+    if let Some(k) = &kind {
+        let lakemind_dir = db::get_lakemind_dir()?;
+        delete_task_content_files(&lakemind_dir, &task_id, k);
+    }
+    conn.execute("DELETE FROM tasks WHERE id = ?", [&task_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ===========================================================================
+// Internals — connection switching, import strategy, helpers
+// ===========================================================================
+
+/// Lock the connection on a blocking thread, then run `f`.
 async fn run_blocking<T, F>(state: State<'_, AppState>, f: F) -> Result<T, String>
 where
     T: Send + 'static,
@@ -135,14 +576,203 @@ where
     }
 }
 
+/// Rebuild the session connection and attach `ws_dir`'s DuckLake as the default
+/// catalog. Also records the active workspace key on the state.
+async fn switch_workspace_lake(state: &AppState, workspace_path: String, ws_dir: PathBuf) -> Result<(), String> {
+    let dir_for_conn = ws_dir.clone();
+    let new_conn = tauri::async_runtime::spawn_blocking(move || AppState::open_workspace(&dir_for_conn))
+        .await
+        .map_err(|e| format!("join error: {e}"))?
+        .map_err(|e| e.to_string())?;
+
+    {
+        let mut c = state.conn.lock().await;
+        *c = new_conn;
+    }
+    *state.workspace_dir.lock().await = ws_dir;
+    *state.workspace_path.lock().await = workspace_path;
+    state.sources.lock().await.clear();
+    Ok(())
+}
+
+/// Decide how to store a scan entry.
+///
+/// **Zero-copy VIEWs are not yet wired up** — every import is materialized into
+/// a DuckLake table so the source file lands in the workspace dir (visible in
+/// the Files tree) and the project stays self-contained. When zero-copy for very
+/// large files lands later, this will branch on `e.file_size` vs the configured
+/// threshold (`db::get_zero_copy_threshold`) and return `View` for large sources
+/// (and for Delta, which is already an external table format).
+fn decide_storage(_e: &scan::ScanEntry) -> StorageKind {
+    StorageKind::Table
+}
+
+/// Copy a scan entry's source file/dir into the workspace (if not already
+/// inside it) and remap its path/scan_path to the copy. For TABLE materialization.
+fn materialize_into_workspace(e: &scan::ScanEntry, ws_dir: &Path) -> AppResult<scan::ScanEntry> {
+    let src = PathBuf::from(&e.path);
+    let canonical_src = src.canonicalize().unwrap_or_else(|_| src.clone());
+    let canonical_ws = ws_dir.canonicalize().unwrap_or_else(|_| ws_dir.to_path_buf());
+    if canonical_src.starts_with(&canonical_ws) {
+        return Ok(e.clone()); // already inside the workspace
+    }
+    let name = src
+        .file_name()
+        .ok_or_else(|| AppError::new("无效文件名"))?;
+    let dst = ws_dir.join(name);
+    copy_recursive(&src, &dst)?;
+
+    let mut work = e.clone();
+    let old_dir = e.path.clone();
+    let new_dir = crate::duckdb::pathutil::forward_slashes(&dst);
+    work.path = new_dir.clone();
+    // scan_path is `<old_dir>/<glob_tail>`; swap the directory prefix.
+    work.scan_path = if !old_dir.is_empty() {
+        e.scan_path.replacen(&old_dir, &new_dir, 1)
+    } else {
+        e.scan_path.clone()
+    };
+    Ok(work)
+}
+
+/// Copy `src` into the workspace dir if it isn't already inside it. Returns the
+/// path to register from.
+fn copy_into_workspace_if_needed(src: &Path, ws_dir: &Path) -> Result<PathBuf, String> {
+    let canonical_src = src.canonicalize().unwrap_or_else(|_| src.to_path_buf());
+    let canonical_ws = ws_dir.canonicalize().unwrap_or_else(|_| ws_dir.to_path_buf());
+    if canonical_src.starts_with(&canonical_ws) {
+        return Ok(src.to_path_buf());
+    }
+    let name = src
+        .file_name()
+        .ok_or_else(|| "无效文件名".to_string())?;
+    let dst = ws_dir.join(name);
+    copy_recursive(src, &dst).map_err(|e| format!("拷贝到工作区失败: {e}"))?;
+    Ok(dst)
+}
+
+fn drop_lake_object(conn: &duckdb::Connection, name: &str) {
+    let _ = conn.execute(&format!("DROP VIEW IF EXISTS \"{}\";", name), []);
+    let _ = conn.execute(&format!("DROP TABLE IF EXISTS \"{}\";", name), []);
+}
+
+/// True if a table or view named `name` exists in the attached lake. Tables and
+/// views are queried separately so a flaky `duckdb_views()` (seen under DuckLake)
+/// cannot make an existing table look absent (which would trigger needless
+/// rebuilds on every sync).
+fn table_exists_in_lake(conn: &duckdb::Connection, name: &str) -> bool {
+    let n = name.replace('"', "\"\"");
+    let table_sql = format!(
+        "SELECT count(*) FROM duckdb_tables() WHERE database_name='lake' AND schema_name='main' AND table_name=\"{n}\""
+    );
+    if conn.query_row(&table_sql, [], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0 {
+        return true;
+    }
+    let view_sql = format!(
+        "SELECT count(*) FROM duckdb_views() WHERE database_name='lake' AND schema_name='main' AND table_name=\"{n}\""
+    );
+    conn.query_row(&view_sql, [], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0
+}
+
+fn count_rows(conn: &duckdb::Connection, name: &str) -> Option<i64> {
+    let n = name.replace('"', "\"\"");
+    conn.query_row(&format!("SELECT count(*) FROM \"{n}\""), [], |r| r.get::<_, i64>(0))
+        .ok()
+}
+
+/// Lazily INSTALL+LOAD the delta/excel extensions only if such a source is present.
+fn load_extensions_if_needed(conn: &duckdb::Connection, entries: &[scan::ScanEntry]) {
+    let needs_delta = entries.iter().any(|e| e.kind == SourceKind::Delta);
+    if needs_delta {
+        let _ = conn.execute("INSTALL delta;", []);
+        let _ = conn.execute("LOAD delta;", []);
+    }
+    let needs_excel = entries.iter().any(|e| e.kind == SourceKind::Excel);
+    if needs_excel {
+        let _ = conn.execute("INSTALL excel;", []);
+        let _ = conn.execute("LOAD excel;", []);
+    }
+}
+
+/// Hydrate a [`SourceTable`] from a mapping record + live DuckLake metadata.
+fn build_source_table_from_record(conn: &duckdb::Connection, rec: &SourceRecord) -> AppResult<SourceTable> {
+    let columns = schema::describe_view(conn, &rec.table_name).unwrap_or_default();
+    let count = count_rows(conn, &rec.table_name);
+    Ok(SourceTable {
+        name: rec.table_name.clone(),
+        label: rec.label.clone(),
+        kind: str_to_kind(&rec.kind),
+        storage: StorageKind::from_db_str(&rec.storage),
+        path: rec.file_path.clone(),
+        scan_path: rec.scan_path.clone(),
+        partition_keys: rec.partition_keys.clone(),
+        row_count_estimate: count,
+        columns,
+    })
+}
+
+/// Build a mapping record from a freshly-registered source.
+fn source_record_from(t: &SourceTable, created_at: i64) -> SourceRecord {
+    SourceRecord {
+        table_name: t.name.clone(),
+        label: t.label.clone(),
+        kind: kind_to_str(&t.kind).to_string(),
+        storage: t.storage.to_db_str().to_string(),
+        file_path: t.path.clone(),
+        scan_path: t.scan_path.clone(),
+        partition_keys: t.partition_keys.clone(),
+        created_at,
+    }
+}
+
+fn kind_to_str(k: &SourceKind) -> &'static str {
+    match k {
+        SourceKind::Parquet => "parquet",
+        SourceKind::Csv => "csv",
+        SourceKind::Json => "json",
+        SourceKind::Delta => "delta",
+        SourceKind::Excel => "excel",
+        SourceKind::Table => "table",
+        SourceKind::View => "view",
+    }
+}
+
+fn str_to_kind(s: &str) -> SourceKind {
+    match s {
+        "parquet" => SourceKind::Parquet,
+        "csv" => SourceKind::Csv,
+        "json" => SourceKind::Json,
+        "delta" => SourceKind::Delta,
+        "excel" => SourceKind::Excel,
+        "view" => SourceKind::View,
+        _ => SourceKind::Table,
+    }
+}
+
+fn delete_task_content_files(lakemind_dir: &Path, task_id: &str, kind: &str) {
+    if kind == "sql" {
+        let _ = std::fs::remove_file(lakemind_dir.join("sqls").join(format!("{task_id}.sql")));
+    } else if kind == "chat" {
+        let _ = std::fs::remove_file(lakemind_dir.join("chats").join(format!("{task_id}.json")));
+    }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
 /// Reject anything that would let a caller break out of a quoted identifier.
-/// We only ever embed sanitized names, but defence in depth is cheap.
 fn sanitize_ident(name: &str) -> Result<String, AppError> {
-  if name.is_empty() || name.contains('"') || name.contains('\0') {
+    if name.is_empty() || name.contains('"') || name.contains('\0') {
         return Err(AppError::new("invalid table name"));
     }
     Ok(name.to_string())
 }
+
+// --- path helpers ---------------------------------------------------------
 
 fn get_home_dir() -> Option<PathBuf> {
     std::env::var("HOME")
@@ -163,7 +793,6 @@ fn resolve_workspace_dir(workspace: &str) -> Result<PathBuf, String> {
     if path.is_absolute() {
         return Ok(path);
     }
-    
     let mut home = get_home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
     home.push(".lakemind");
     home.push(workspace);
@@ -221,13 +850,7 @@ fn select_directory_native() -> Option<String> {
     None
 }
 
-/// Open a native platform directory picker and return the selected directory path.
-#[tauri::command]
-pub async fn select_directory() -> Result<Option<String>, String> {
-    Ok(select_directory_native())
-}
-
-fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+fn copy_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     if src.is_dir() {
         std::fs::create_dir_all(dst)?;
         for entry in std::fs::read_dir(src)? {
@@ -251,7 +874,8 @@ fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Resu
 }
 
 /// Recursively total the byte size of a path (file or directory tree).
-fn path_total_size(p: &std::path::Path) -> u64 {
+#[allow(dead_code)]
+fn path_total_size(p: &Path) -> u64 {
     let md = match std::fs::symlink_metadata(p) {
         Ok(m) => m,
         Err(_) => return 0,
@@ -270,586 +894,4 @@ fn path_total_size(p: &std::path::Path) -> u64 {
         }
     }
     total
-}
-
-/// Above this threshold (bytes) a dropped folder/file is registered IN-PLACE
-/// (zero-copy) instead of being physically copied into the workspace. Prevents
-/// a 50GB lake from being duplicated onto the local disk on import.
-const WORKSPACE_COPY_THRESHOLD: u64 = 200 * 1024 * 1024; // 200 MB
-
-/// Bring a folder/file into the workspace, then scan + register as views.
-///
-/// Two modes by size:
-/// - **small (≤ threshold)**: physically copy into the workspace directory
-///   (matches the "工作区放 CSV" product intent for manageable files).
-/// - **large (> threshold)**: register IN-PLACE via zero-copy CREATE VIEW to
-///   avoid duplicating gigabytes on disk.
-#[tauri::command]
-pub async fn import_file_to_workspace(
-    workspace: String,
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<SourceTable>, String> {
-    let conn = state.conn.clone();
-    let sources = state.sources.clone();
-
-    let join = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<SourceTable>> {
-        let src_path = PathBuf::from(&path);
-        if !src_path.exists() {
-            return Err(AppError::new(format!("源路径不存在: {path}")));
-        }
-
-        // Decide copy-vs-inplace based on total size.
-        let total = path_total_size(&src_path);
-        let ws_dir = resolve_workspace_dir(&workspace).map_err(AppError::new)?;
-        std::fs::create_dir_all(&ws_dir)
-            .map_err(|e| AppError::new(format!("无法创建工作区目录: {e}")))?;
-
-        let target_path = if total > WORKSPACE_COPY_THRESHOLD {
-            // Large: register in-place, do NOT copy.
-            src_path
-        } else {
-            let canonical_src = src_path.canonicalize().unwrap_or_else(|_| src_path.clone());
-            let canonical_ws = ws_dir.canonicalize().unwrap_or_else(|_| ws_dir.clone());
-            if canonical_src.starts_with(&canonical_ws) {
-                // Already inside the workspace dir.
-                src_path
-            } else {
-                let file_name = src_path
-                    .file_name()
-                    .ok_or_else(|| AppError::new("无效文件名".to_string()))?;
-                let dst_path = ws_dir.join(file_name);
-                copy_recursive(&src_path, &dst_path)
-                    .map_err(|e| AppError::new(format!("拷贝到工作区失败: {e}")))?;
-                dst_path
-            }
-        };
-
-        // Scan (FS, no lock) then short critical section for CREATE VIEW.
-        let entries = scan::scan_path(&target_path, false);
-        let guard = conn.blocking_lock();
-        let needs_delta = entries
-            .iter()
-            .any(|e| e.kind == crate::model::SourceKind::Delta);
-        if needs_delta {
-            let _ = guard.execute("INSTALL delta;", []);
-            let _ = guard.execute("LOAD delta;", []);
-        }
-        let needs_excel = entries
-            .iter()
-            .any(|e| e.kind == crate::model::SourceKind::Excel);
-        if needs_excel {
-            let _ = guard.execute("INSTALL excel;", []);
-            let _ = guard.execute("LOAD excel;", []);
-        }
-        let mut created = Vec::with_capacity(entries.len());
-        for e in &entries {
-            match register::register(&guard, e) {
-                Ok(t) => created.push(t),
-                Err(err) => eprintln!("skip source {}: {err}", e.label),
-            }
-        }
-        drop(guard);
-
-        let mut registry = sources.blocking_lock();
-        for t in &created {
-            registry.retain(|existing| existing.name != t.name);
-            registry.push(t.clone());
-        }
-        Ok(created)
-    })
-    .await;
-
-    match join {
-        Ok(Ok(created)) => Ok(created),
-        Ok(Err(e)) => Err(e.to_string()),
-        Err(join_err) => Err(format!("task join error: {join_err}")),
-    }
-}
-
-#[derive(serde::Serialize)]
-pub struct FileItem {
-    pub name: String,
-    pub path: String,
-    pub is_dir: bool,
-}
-
-/// Read the direct children of a workspace folder (no git status — that was a
-/// misplaced code-IDE concern; LakeMind analyzes data files, not source repos).
-#[tauri::command]
-pub async fn read_directory(path: String) -> Result<Vec<FileItem>, String> {
-    let resolved_path = resolve_workspace_dir(&path)?;
-    if !resolved_path.exists() {
-        return Err(format!("目录不存在: {}", resolved_path.display()));
-    }
-
-    let mut items = Vec::new();
-    let entries = std::fs::read_dir(&resolved_path)
-        .map_err(|e| format!("读取目录失败: {e}"))?;
-    for entry in entries {
-        if let Ok(entry) = entry {
-            let p = entry.path();
-            let name = entry.file_name().to_string_lossy().to_string();
-            let is_dir = p.is_dir();
-            items.push(FileItem {
-                name,
-                path: p.to_string_lossy().to_string(),
-                is_dir,
-            });
-        }
-    }
-    // Sort: directories first, then alphabetical
-    items.sort_by(|a, b| {
-        if a.is_dir != b.is_dir {
-            b.is_dir.cmp(&a.is_dir)
-        } else {
-            a.name.cmp(&b.name)
-        }
-    });
-    Ok(items)
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct Workspace {
-    pub name: String,
-    pub path: String,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct QueryTask {
-    pub id: String,
-    pub name: String,
-    pub sql: String,
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    pub kind: String,
-    pub messages: Option<serde_json::Value>,
-    pub saved: bool,
-}
-
-#[tauri::command]
-pub async fn load_workspaces() -> Result<Vec<Workspace>, String> {
-    let conn = crate::db::get_db_conn()?;
-    let mut stmt = conn
-        .prepare("SELECT name, path FROM workspaces ORDER BY created_at ASC")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(Workspace {
-                name: row.get(0)?,
-                path: row.get(1)?,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-    let mut list = Vec::new();
-    for r in rows {
-        if let Ok(w) = r {
-            list.push(w);
-        }
-    }
-    Ok(list)
-}
-
-async fn switch_workspace_db(workspace_path: &str, state: &AppState) -> Result<PathBuf, String> {
-    let resolved_path = resolve_workspace_dir(workspace_path)?;
-    std::fs::create_dir_all(&resolved_path).map_err(|e| e.to_string())?;
-    let db_path = resolved_path.join("lake.duckdb");
-    
-    let mut conn_guard = state.conn.lock().await;
-    // Drop/close the existing connection first by replacing it with a temporary in-memory connection.
-    // This releases any active file lock on `lake.duckdb` if we are switching to/reopening the same workspace.
-    *conn_guard = duckdb::Connection::open_in_memory().map_err(|e| e.to_string())?;
-    let new_conn = duckdb::Connection::open(&db_path).map_err(|e| e.to_string())?;
-    new_conn.execute_batch(
-        "PRAGMA memory_limit='4GB';\n\
-         PRAGMA threads=8;",
-    ).map_err(|e| e.to_string())?;
-    let _ = new_conn.execute("INSTALL excel;", []);
-    let _ = new_conn.execute("LOAD excel;", []);
-    
-    *conn_guard = new_conn;
-    
-    let mut sources_guard = state.sources.lock().await;
-    sources_guard.clear();
-    
-    Ok(resolved_path)
-}
-
-#[tauri::command]
-pub async fn register_workspace_sources(
-    workspace_path: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<SourceTable>, String> {
-    register_workspace_sources_inner(workspace_path, &state).await
-}
-
-pub async fn register_workspace_sources_inner(
-    workspace_path: String,
-    state: &AppState,
-) -> Result<Vec<SourceTable>, String> {
-    let resolved_path = switch_workspace_db(&workspace_path, state).await?;
-
-    let conn = state.conn.clone();
-    let sources = state.sources.clone();
-
-    let join = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<SourceTable>> {
-        let entries = scan::scan_path(&resolved_path, true);
-
-        let guard = conn.blocking_lock();
-        
-        // 1. Drop tables for files that are no longer present in the workspace directory
-        let mut list_stmt = guard.prepare(
-            "SELECT table_name FROM duckdb_tables() WHERE schema_name = 'main' AND table_name LIKE 's_%'"
-        )?;
-        let rows = list_stmt.query_map([], |r| r.get::<_, String>(0))?;
-        let mut tables_to_drop = Vec::new();
-        for r in rows {
-            if let Ok(name) = r {
-                if !entries.iter().any(|e| e.view_name == name) {
-                    tables_to_drop.push(name);
-                }
-            }
-        }
-        for name in tables_to_drop {
-            let _ = guard.execute(&format!("DROP TABLE IF EXISTS \"{}\";", name), []);
-        }
-
-        // 2. Load delta extension if any delta table is scanned
-        let needs_delta = entries
-            .iter()
-            .any(|e| e.kind == crate::model::SourceKind::Delta);
-        if needs_delta {
-            let _ = guard.execute("INSTALL delta;", []);
-            let _ = guard.execute("LOAD delta;", []);
-        }
-        let needs_excel = entries
-            .iter()
-            .any(|e| e.kind == crate::model::SourceKind::Excel);
-        if needs_excel {
-            let _ = guard.execute("INSTALL excel;", []);
-            let _ = guard.execute("LOAD excel;", []);
-        }
-
-        // 3. Process entries incrementally
-        let mut created = Vec::with_capacity(entries.len());
-        
-        let mut check_stmt = guard.prepare(
-            "SELECT count(*) FROM duckdb_tables() WHERE schema_name = 'main' AND table_name = ?"
-        )?;
-
-        for e in &entries {
-            let table_exists: bool = check_stmt
-                .query_row([&e.view_name], |r| r.get::<_, i64>(0))
-                .unwrap_or(0) > 0;
-
-            if table_exists {
-                // Read columns and estimate count directly without full copy
-                if let Ok(columns) = schema::describe_view(&guard, &e.view_name) {
-                    let row_count_estimate = schema::estimate_row_count(&guard, e).unwrap_or(None);
-                    created.push(SourceTable {
-                        name: e.view_name.clone(),
-                        label: e.label.clone(),
-                        kind: e.kind.clone(),
-                        path: e.path.clone(),
-                        scan_path: e.scan_path.clone(),
-                        partition_keys: e.partition_keys.clone(),
-                        row_count_estimate,
-                        columns,
-                    });
-                } else {
-                    // Fallback to register if describe failed
-                    match register::register(&guard, e) {
-                        Ok(t) => created.push(t),
-                        Err(err) => eprintln!("skip source {}: {err}", e.label),
-                    }
-                }
-            } else {
-                // Register / Ingest the new file
-                match register::register(&guard, e) {
-                    Ok(t) => created.push(t),
-                    Err(err) => eprintln!("skip source {}: {err}", e.label),
-                }
-            }
-        }
-        drop(guard);
-
-        let mut registry = sources.blocking_lock();
-        for t in &created {
-            registry.retain(|existing| existing.name != t.name);
-            registry.push(t.clone());
-        }
-        Ok(created)
-    })
-    .await;
-
-    match join {
-        Ok(Ok(created)) => Ok(created),
-        Ok(Err(e)) => Err(e.to_string()),
-        Err(join_err) => Err(format!("task join error: {join_err}")),
-    }
-}
-
-#[tauri::command]
-pub async fn add_workspace(name: String, path: String) -> Result<(), String> {
-    let conn = crate::db::get_db_conn()?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
-    conn.execute(
-        "INSERT OR REPLACE INTO workspaces (path, name, created_at) VALUES (?, ?, ?)",
-        rusqlite::params![path, name, now],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn remove_workspace(path: String) -> Result<(), String> {
-    let conn = crate::db::get_db_conn()?;
-    
-    // Enable foreign keys cascade deletion
-    let _ = conn.execute("PRAGMA foreign_keys = ON;", []);
-
-    // Clean up content files for all tasks under this workspace
-    let mut stmt = conn
-        .prepare("SELECT id, kind FROM tasks WHERE workspace_path = ?")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([&path], |row| {
-            let id: String = row.get(0)?;
-            let kind: String = row.get(1)?;
-            Ok((id, kind))
-        })
-        .map_err(|e| e.to_string())?;
-        
-    let lakemind_dir = crate::db::get_lakemind_dir()?;
-    for r in rows {
-        if let Ok((id, kind)) = r {
-            if kind == "sql" {
-                let filepath = lakemind_dir.join("sqls").join(format!("{}.sql", id));
-                let _ = std::fs::remove_file(filepath);
-            } else if kind == "chat" {
-                let filepath = lakemind_dir.join("chats").join(format!("{}.json", id));
-                let _ = std::fs::remove_file(filepath);
-            }
-        }
-    }
-    
-    // Delete the workspace record (which triggers ON DELETE CASCADE for tasks)
-    conn.execute("DELETE FROM workspaces WHERE path = ?", [&path])
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn load_workspace_tasks(workspace_path: String) -> Result<Vec<QueryTask>, String> {
-    let conn = crate::db::get_db_conn()?;
-    let mut stmt = conn
-        .prepare("SELECT id, name, kind, created_at, saved FROM tasks WHERE workspace_path = ? ORDER BY created_at ASC")
-        .map_err(|e| e.to_string())?;
-        
-    let rows = stmt
-        .query_map([&workspace_path], |row| {
-            let id: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            let kind: String = row.get(2)?;
-            let created_at: i64 = row.get(3)?;
-            let saved: i32 = row.get(4)?;
-            Ok((id, name, kind, created_at, saved != 0))
-        })
-        .map_err(|e| e.to_string())?;
-        
-    let lakemind_dir = crate::db::get_lakemind_dir()?;
-    let mut tasks = Vec::new();
-    for r in rows {
-        if let Ok((id, name, kind, created_at, saved)) = r {
-            let mut sql = String::new();
-            let mut messages = None;
-            
-            if kind == "sql" {
-                let filepath = lakemind_dir.join("sqls").join(format!("{}.sql", id));
-                if filepath.exists() {
-                    sql = std::fs::read_to_string(filepath).unwrap_or_default();
-                }
-            } else if kind == "chat" {
-                let filepath = lakemind_dir.join("chats").join(format!("{}.json", id));
-                if filepath.exists() {
-                    let json_str = std::fs::read_to_string(filepath).unwrap_or_default();
-                    messages = serde_json::from_str(&json_str).ok();
-                }
-            }
-            
-            tasks.push(QueryTask {
-                id,
-                name,
-                sql,
-                created_at,
-                kind,
-                messages,
-                saved,
-            });
-        }
-    }
-    Ok(tasks)
-}
-
-#[tauri::command]
-pub async fn save_sql_task(
-    workspace_path: String,
-    task_id: String,
-    name: String,
-    sql: String,
-) -> Result<(), String> {
-    let conn = crate::db::get_db_conn()?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
-    
-    // Upsert task in SQLite index
-    conn.execute(
-        "INSERT OR REPLACE INTO tasks (id, workspace_path, name, kind, created_at, saved)
-         VALUES (?, ?, ?, 'sql', COALESCE((SELECT created_at FROM tasks WHERE id = ?), ?), 1)",
-        rusqlite::params![task_id, workspace_path, name, task_id, now],
-    )
-    .map_err(|e| e.to_string())?;
-    
-    // Write SQL text to physical file
-    let lakemind_dir = crate::db::get_lakemind_dir()?;
-    let filepath = lakemind_dir.join("sqls").join(format!("{}.sql", task_id));
-    std::fs::write(filepath, sql).map_err(|e| format!("Failed to write SQL file: {e}"))?;
-    
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn save_chat_task(
-    workspace_path: String,
-    task_id: String,
-    name: String,
-    messages: serde_json::Value,
-) -> Result<(), String> {
-    let conn = crate::db::get_db_conn()?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
-    
-    // Upsert task in SQLite index
-    conn.execute(
-        "INSERT OR REPLACE INTO tasks (id, workspace_path, name, kind, created_at, saved)
-         VALUES (?, ?, ?, 'chat', COALESCE((SELECT created_at FROM tasks WHERE id = ?), ?), 1)",
-        rusqlite::params![task_id, workspace_path, name, task_id, now],
-    )
-    .map_err(|e| e.to_string())?;
-    
-    // Write Chat history JSON to physical file
-    let lakemind_dir = crate::db::get_lakemind_dir()?;
-    let filepath = lakemind_dir.join("chats").join(format!("{}.json", task_id));
-    let json_str = serde_json::to_string(&messages).map_err(|e| e.to_string())?;
-    std::fs::write(filepath, json_str).map_err(|e| format!("Failed to write chat JSON file: {e}"))?;
-    
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn delete_task(task_id: String) -> Result<(), String> {
-    let conn = crate::db::get_db_conn()?;
-    
-    // Find the task kind to delete its content file
-    let kind: Option<String> = conn
-        .query_row(
-            "SELECT kind FROM tasks WHERE id = ?",
-            [&task_id],
-            |row| row.get(0),
-        )
-        .ok();
-        
-    if let Some(k) = kind {
-        let lakemind_dir = crate::db::get_lakemind_dir()?;
-        if k == "sql" {
-            let filepath = lakemind_dir.join("sqls").join(format!("{}.sql", task_id));
-            let _ = std::fs::remove_file(filepath);
-        } else if k == "chat" {
-            let filepath = lakemind_dir.join("chats").join(format!("{}.json", task_id));
-            let _ = std::fs::remove_file(filepath);
-        }
-    }
-    
-    // Delete record in SQLite
-    conn.execute("DELETE FROM tasks WHERE id = ?", [&task_id])
-        .map_err(|e| e.to_string())?;
-        
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
-    let registry = state.sources.lock().await.clone();
-    run_blocking(state, move |conn| {
-        // Query to get user-defined tables and views in DuckDB schema 'main' that are not internal
-        let mut stmt = conn.prepare(
-            "SELECT table_name, 'table' as type FROM duckdb_tables() WHERE schema_name = 'main' AND NOT internal
-             UNION ALL
-             SELECT view_name as table_name, 'view' as type FROM duckdb_views() WHERE schema_name = 'main' AND NOT internal
-             ORDER BY table_name"
-        )?;
-
-        struct DbTable {
-            name: String,
-            kind: String,
-        }
-
-        let rows = stmt.query_map([], |row| {
-            Ok(DbTable {
-                name: row.get(0)?,
-                kind: row.get(1)?,
-            })
-        })?;
-
-        let mut db_tables = Vec::new();
-        for r in rows {
-            if let Ok(item) = r {
-                db_tables.push(item);
-            }
-        }
-
-        let mut result = Vec::new();
-        for item in db_tables {
-            // Check if it is in the registered sources
-            if let Some(existing) = registry.iter().find(|t| t.name == item.name) {
-                result.push(existing.clone());
-            } else {
-                // It's a custom process table or view
-                let cols = match schema::describe_view(conn, &item.name) {
-                    Ok(c) => c,
-                    Err(_) => Vec::new(),
-                };
-
-                let count_sql = format!("SELECT count(*) FROM \"{}\"", item.name.replace('"', "\"\""));
-                let count = conn.query_row::<i64, _, _>(&count_sql, [], |r| r.get(0)).ok();
-
-                let source_kind = if item.kind == "view" {
-                    SourceKind::View
-                } else {
-                    SourceKind::Table
-                };
-
-                result.push(SourceTable {
-                    name: item.name.clone(),
-                    label: item.name.clone(),
-                    kind: source_kind,
-                    path: String::new(),
-                    scan_path: String::new(),
-                    partition_keys: Vec::new(),
-                    row_count_estimate: count,
-                    columns: cols,
-                });
-            }
-        }
-
-        Ok(result)
-    })
-    .await
 }

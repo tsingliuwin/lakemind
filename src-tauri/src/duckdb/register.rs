@@ -1,30 +1,29 @@
-//! SOURCE registration: turn a [`ScanEntry`] into a DuckDB table.
+//! SOURCE registration: turn a [`ScanEntry`] into a DuckLake table or view.
 //!
-//! This handles file-to-table conversion with multi-strategy loading for robustness.
+//! Two storage modes, chosen by the caller (commands layer) using the
+//! configurable zero-copy threshold:
+//!   * [`StorageKind::Table`] — materialize into a DuckLake table (small files).
+//!     Multi-strategy loaders so messy CSV/Excel exports still ingest cleanly.
+//!   * [`StorageKind::View`]  — zero-copy VIEW over the external `read_*` path
+//!     (large files). The source file is NOT copied; the view reads it in place.
+//!
+//! Both run inside the current session, whose default catalog is the workspace's
+//! DuckLake (`USE lake`), so unqualified `s_xxx` names land in the lake either way.
 
 use duckdb::Connection;
 
 use crate::duckdb::scan::ScanEntry;
 use crate::duckdb::schema;
 use crate::error::AppResult;
-use crate::model::SourceTable;
+use crate::model::{SourceKind, SourceTable, StorageKind};
 
-/// Create the table for one scan entry and return a fully-populated
-/// `SourceTable` (with columns + row-count estimate already filled in).
-pub fn register(conn: &Connection, e: &ScanEntry) -> AppResult<SourceTable> {
-    match e.kind {
-        crate::model::SourceKind::Csv => {
-            load_csv_as_table(conn, &e.view_name, &e.scan_path)?;
-        }
-        crate::model::SourceKind::Excel => {
-            load_xlsx_as_table(conn, &e.view_name, &e.scan_path)?;
-        }
-        _ => {
-            let drop_sql = format!("DROP TABLE IF EXISTS \"{}\";", e.view_name);
-            conn.execute(&drop_sql, [])?;
-            let sql = build_create_table_sql(e);
-            conn.execute(&sql, [])?;
-        }
+/// Create the table/view for one scan entry and return a fully-populated
+/// `SourceTable` (with columns + row-count already filled in).
+pub fn register(conn: &Connection, e: &ScanEntry, storage: StorageKind) -> AppResult<SourceTable> {
+    match storage {
+        StorageKind::View => create_view(conn, e)?,
+        StorageKind::Table => create_table(conn, e)?,
+        StorageKind::Custom => unreachable!("custom sources are not registered from scan entries"),
     }
 
     let columns = schema::describe_view(conn, &e.view_name)?;
@@ -34,6 +33,7 @@ pub fn register(conn: &Connection, e: &ScanEntry) -> AppResult<SourceTable> {
         name: e.view_name.clone(),
         label: e.label.clone(),
         kind: e.kind.clone(),
+        storage,
         path: e.path.clone(),
         scan_path: e.scan_path.clone(),
         partition_keys: e.partition_keys.clone(),
@@ -42,7 +42,51 @@ pub fn register(conn: &Connection, e: &ScanEntry) -> AppResult<SourceTable> {
     })
 }
 
-/// Helper function to create a table and check if it has a valid schema (at least 2 columns).
+/// Zero-copy: `CREATE VIEW s_xxx AS SELECT * FROM read_xxx('外部路径')`.
+fn create_view(conn: &Connection, e: &ScanEntry) -> AppResult<()> {
+    // A name could previously exist as either flavor; drop both to be safe.
+    conn.execute(&format!("DROP VIEW IF EXISTS \"{}\";", e.view_name), [])?;
+    conn.execute(&format!("DROP TABLE IF EXISTS \"{}\";", e.view_name), [])?;
+    let sql = format!("CREATE VIEW \"{}\" AS {};", e.view_name, build_select_sql(e));
+    conn.execute(&sql, [])?;
+    Ok(())
+}
+
+/// Materialized: `CREATE TABLE s_xxx AS SELECT ...`, with multi-strategy
+/// loaders for CSV/Excel.
+fn create_table(conn: &Connection, e: &ScanEntry) -> AppResult<()> {
+    match e.kind {
+        SourceKind::Csv => load_csv_as_table(conn, &e.view_name, &e.scan_path)?,
+        SourceKind::Excel => load_xlsx_as_table(conn, &e.view_name, &e.scan_path)?,
+        _ => {
+            conn.execute(&format!("DROP TABLE IF EXISTS \"{}\";", e.view_name), [])?;
+            let sql = format!("CREATE TABLE \"{}\" AS {};", e.view_name, build_select_sql(e));
+            conn.execute(&sql, [])?;
+        }
+    }
+    Ok(())
+}
+
+/// Build the `SELECT * FROM read_xxx('...')` body shared by the table & view paths.
+/// Partition clause is added for Parquet when Hive keys were detected.
+fn build_select_sql(e: &ScanEntry) -> String {
+    let scan = e.scan_path.replace('\'', "''");
+    let partition_clause = if e.partition_keys.is_empty() {
+        String::new()
+    } else {
+        ", hive_partitioning = 1".to_string()
+    };
+    match e.kind {
+        SourceKind::Parquet => format!("SELECT * FROM read_parquet('{scan}'{partition_clause})"),
+        SourceKind::Csv => format!("SELECT * FROM read_csv_auto('{scan}', header = true)"),
+        SourceKind::Json => format!("SELECT * FROM read_json_auto('{scan}')"),
+        SourceKind::Excel => format!("SELECT * FROM read_xlsx('{scan}')"),
+        SourceKind::Delta => format!("SELECT * FROM delta('{scan}')"),
+        SourceKind::Table | SourceKind::View => unreachable!("Table/View are not raw-path sources"),
+    }
+}
+
+/// Helper function to create a table and check if it has a valid schema (≥ 2 columns).
 fn try_create_and_validate(conn: &Connection, table_name: &str, source_fn: &str) -> AppResult<bool> {
     let drop_sql = format!("DROP TABLE IF EXISTS \"{}\";", table_name);
     let _ = conn.execute(&drop_sql, []);
@@ -238,8 +282,7 @@ fn load_xlsx_as_table(conn: &Connection, table_name: &str, file_path: &str) -> A
         // Pick the candidate with the highest header_score.
         // If header_scores are equal, pick the one with fewer columns (cleaner range).
         candidates.sort_by(|a, b| {
-            b.header_score.cmp(&a.header_score)
-                .then_with(|| a.col_count.cmp(&b.col_count))
+            b.header_score.cmp(&a.header_score).then_with(|| a.col_count.cmp(&b.col_count))
         });
 
         let best = &candidates[0];
@@ -254,35 +297,4 @@ fn load_xlsx_as_table(conn: &Connection, table_name: &str, file_path: &str) -> A
     let create_sql = format!("CREATE TABLE \"{table_name}\" AS SELECT * FROM {varchar_source};");
     conn.execute(&create_sql, [])?;
     Ok(())
-}
-
-/// Compose the `CREATE TABLE` statement for other entries (Parquet, JSON, Delta).
-fn build_create_table_sql(e: &ScanEntry) -> String {
-    let scan = e.scan_path.replace('\'', "''");
-    let partition_clause = if e.partition_keys.is_empty() {
-        String::new()
-    } else {
-        format!(", hive_partitioning = 1")
-    };
-    let inner = match e.kind {
-        crate::model::SourceKind::Parquet => {
-            format!("read_parquet('{scan}'{partition_clause})")
-        }
-        crate::model::SourceKind::Csv => {
-            format!("read_csv_auto('{scan}', header = true)")
-        }
-        crate::model::SourceKind::Json => {
-            format!("read_json_auto('{scan}')")
-        }
-        crate::model::SourceKind::Excel => {
-            format!("read_xlsx('{scan}')")
-        }
-        crate::model::SourceKind::Delta => {
-            format!("delta('{scan}')")
-        }
-        crate::model::SourceKind::Table | crate::model::SourceKind::View => {
-            unreachable!("Table/View sources are not registered from raw paths")
-        }
-    };
-    format!("CREATE TABLE \"{}\" AS SELECT * FROM {};", e.view_name, inner)
 }

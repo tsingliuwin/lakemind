@@ -15,6 +15,8 @@ export interface SourceTable {
   /** Human-friendly name shown in the tree. */
   label: string;
   kind: SourceKind;
+  /** How this source is stored: materialized DuckLake table / zero-copy view / user custom. */
+  storage?: "table" | "view" | "custom";
   /** Original filesystem path the user dropped. */
   path: string;
   /** Glob / path expression handed to DuckDB's `read_*` function. */

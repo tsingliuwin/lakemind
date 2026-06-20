@@ -62,6 +62,31 @@ export default function LeftNav(props: {
   const [activeActionWsPath, setActiveActionWsPath] = createSignal<string | null>(null);
   const [fileSearchQuery] = createSignal("");
 
+  // File ↔ Data cross-highlighting (linkage). Clicking a table highlights its
+  // backing file in the Files tree, and clicking a file highlights its table.
+  const [highlightFile, setHighlightFile] = createSignal<string | null>(null);
+  const [highlightTable, setHighlightTable] = createSignal<string | null>(null);
+
+  const fileToTable = createMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of props.sources) {
+      if (s.path) m.set(s.path, s.name);
+    }
+    return m;
+  });
+
+  const handleSelectTable = (t: SourceTable) => {
+    setHighlightTable(t.name);
+    setHighlightFile(t.path || null);
+    props.onSelect(t);
+  };
+
+  const handleFileClick = (item: FileItem) => {
+    setHighlightFile(item.path);
+    setHighlightTable(fileToTable().get(item.path) ?? null);
+    props.onImportFile?.(item.path);
+  };
+
   // Subsections expanded states
   const [tasksSectionExpanded, setTasksSectionExpanded] = createSignal(true);
   const [filesSectionExpanded, setFilesSectionExpanded] = createSignal(true);
@@ -135,22 +160,24 @@ export default function LeftNav(props: {
             const isExpanded = !!expandedPaths()[item.path];
             return (
               <div class="fe-tree-node">
-                <div 
-                  class="fe-node-row" 
+                <div
+                  class="fe-node-row"
                   classList={{ "is-dir": item.is_dir }}
-                  style={{ 
-                    display: "flex", 
-                    "align-items": "center", 
-                    padding: "4px 8px", 
+                  style={{
+                    display: "flex",
+                    "align-items": "center",
+                    padding: "4px 8px",
                     "border-radius": "4px",
                     cursor: "pointer",
-                    transition: "background 0.1s"
+                    transition: "background 0.1s",
+                    background: highlightFile() === item.path ? "rgba(80, 160, 255, 0.14)" : undefined,
+                    "box-shadow": highlightFile() === item.path ? "inset 2px 0 0 var(--accent-blue, #50a0ff)" : undefined,
                   }}
                   onClick={() => {
                     if (item.is_dir) {
                       toggleFolder(item.path);
                     } else {
-                      props.onImportFile?.(item.path);
+                      handleFileClick(item);
                     }
                   }}
                 >
@@ -487,14 +514,16 @@ export default function LeftNav(props: {
                       <For each={groups()}>
                         {(group) => (
                           <div class="tree-subgroup" style="margin-left: 28px;">
-                            <div class="tree-group-label" title={group[0]} style="display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 0;">
-                              <span style="display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim);">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
-                                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                                </svg>
-                              </span>
-                              <span>{shortDir(group[0])}</span>
-                            </div>
+                            <Show when={groups().length > 1}>
+                              <div class="tree-group-label" title={group[0]} style="display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 0;">
+                                <span style="display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim);">
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                                  </svg>
+                                </span>
+                                <span>{shortDir(group[0])}</span>
+                              </div>
+                            </Show>
                             <For each={group[1]}>
                               {(t) => (
                                 <button
@@ -502,11 +531,27 @@ export default function LeftNav(props: {
                                   classList={{ selected: props.selected === t.name }}
                                   disabled={props.busy}
                                   title={t.scanPath}
-                                  onClick={() => props.onSelect(t)}
-                                  style="padding-left: 8px;"
+                                  onClick={() => handleSelectTable(t)}
+                                  style={{
+                                    "padding-left": "8px",
+                                    background:
+                                      highlightTable() === t.name && props.selected !== t.name
+                                        ? "rgba(80, 160, 255, 0.12)"
+                                        : undefined,
+                                    "box-shadow":
+                                      highlightTable() === t.name && props.selected !== t.name
+                                        ? "inset 2px 0 0 var(--accent-blue, #50a0ff)"
+                                        : undefined,
+                                  }}
                                 >
                                   <span class="kind-badge" data-kind={t.kind}>{t.kind}</span>
                                   <span class="leaf-label">{t.label}</span>
+                                  <Show when={t.storage === "view"}>
+                                    <span class="leaf-storage" title="零拷贝视图(直接读源文件,不复制)">👁</span>
+                                  </Show>
+                                  <Show when={t.storage === "custom"}>
+                                    <span class="leaf-storage" title="用户自建表/视图">✦</span>
+                                  </Show>
                                   <Show when={t.rowCountEstimate != null}>
                                     <span class="leaf-count">{formatCount(t.rowCountEstimate!)}</span>
                                   </Show>

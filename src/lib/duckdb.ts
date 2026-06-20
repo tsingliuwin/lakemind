@@ -1,4 +1,4 @@
-// Thin typed wrappers over the four M1 Tauri commands.
+// Typed wrappers over the Tauri command surface.
 // Each maps 1:1 to a `#[tauri::command]` in src-tauri/src/commands.rs.
 
 import { invoke } from "@tauri-apps/api/core";
@@ -6,11 +6,6 @@ import type { ColumnInfo, SourceTable, SqlResult } from "./types";
 
 // Re-export the wire types so components can import them from a single module.
 export type { ColumnInfo, SourceTable, SqlResult };
-
-/** Scan a dropped folder/file and register every detected SOURCE as a view. */
-export async function registerFolder(path: string): Promise<SourceTable[]> {
-  return invoke<SourceTable[]>("register_folder", { path });
-}
 
 /** Return all currently registered SOURCE tables. */
 export async function listSources(): Promise<SourceTable[]> {

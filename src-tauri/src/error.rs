@@ -55,5 +55,13 @@ impl From<serde_json::Error> for AppError {
     }
 }
 
+impl From<String> for AppError {
+    /// Let `?` propagate `Result<_, String>` (the `db` helpers return String
+    /// errors) into `AppResult` without manual `.map_err` at every call site.
+    fn from(s: String) -> Self {
+        AppError(s)
+    }
+}
+
 /// Convenience alias used across command implementations.
 pub type AppResult<T> = std::result::Result<T, AppError>;
