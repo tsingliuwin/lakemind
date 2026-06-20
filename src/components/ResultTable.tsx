@@ -12,8 +12,7 @@ const CELL_W = 160;
 /**
  * Result grid wrapper. The actual virtualized grid lives in a sub-component
  * (`VirtualGrid`) that is only created when `result` is non-null, inside the
- * `<Show>`. This sidesteps the TanStack solid-virtual scroll-element bootstrap
- * problem:
+ * `<Show>`. This sidesteps the solid-virtual scroll-element bootstrap problem:
  *
  *   `createVirtualizer` sets up its internal `createComputed` + `onMount` at
  *   component creation time. `onMount` calls `_willUpdate()`, which reads
@@ -29,6 +28,11 @@ const CELL_W = 160;
  *   By placing the virtualizer in a sub-component that only exists when the
  *   `<Show>` is truthy, the scroll container is unconditionally present at
  *   `onMount` time, and the bootstrap cycle succeeds.
+ *
+ *   Note: a `signal`-based scrollRef does NOT fix this — `getScrollElement`
+ *   is a plain function value, only read inside `_willUpdate()`, and SolidJS
+ *   reactivity only tracks synchronous reads in a tracking context. The signal
+ *   changes but the function is never called, so nothing happens.
  */
 export default function ResultTable(props: { result: SqlResult | null }) {
   return (
@@ -72,9 +76,7 @@ function VirtualGrid(props: { result: SqlResult }) {
     getCoreRowModel: getCoreRowModel(),
   });
 
-  const tableWidth = createMemo(() => {
-    return ROW_IDX_W + CELL_W * props.result.columns.length;
-  });
+  const tableWidth = createMemo(() => ROW_IDX_W + CELL_W * props.result.columns.length);
 
   // At this point scrollRef is still `undefined` (assigned below in JSX).
   // But by the time `onMount` fires inside solid-virtual, the JSX has been
@@ -91,8 +93,7 @@ function VirtualGrid(props: { result: SqlResult }) {
 
   // Reset scroll position when result identity changes.
   createEffect(() => {
-    // Track identity — `columns` is a cheap proxy for "different result".
-    props.result.columns;
+    props.result;
     scrollRef?.scrollTo({ top: 0, left: 0 });
   });
 
@@ -124,6 +125,7 @@ function VirtualGrid(props: { result: SqlResult }) {
             return (
               <div
                 class="result-row"
+                role="row"
                 style={{
                   position: "absolute",
                   top: "0",
@@ -132,7 +134,6 @@ function VirtualGrid(props: { result: SqlResult }) {
                   height: `${vRow.size}px`,
                   transform: `translateY(${vRow.start}px)`,
                 }}
-                role="row"
               >
                 <div class="result-cell row-idx">{vRow.index + 1}</div>
                 <For each={row.getVisibleCells()}>
