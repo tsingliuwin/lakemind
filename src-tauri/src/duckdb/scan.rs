@@ -71,7 +71,16 @@ pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
         // tables, not user sources. Descending into it would re-register every
         // table with an extra `s_` prefix on each sync (s_x → s_s_x → s_s_s_x → …).
         .filter_entry(|e| {
-            !(e.file_type().is_dir() && e.file_name() == std::ffi::OsStr::new("lake_data"))
+            // Prune DuckLake's own output: the hidden `.lake/` store (catalog +
+            // data) and, defensively, a legacy top-level `lake_data/`. Descending
+            // into either re-registers materialized parquet as new sources on
+            // every sync (s_x → s_s_x → s_s_s_x → …).
+            if e.file_type().is_dir() {
+                let name = e.file_name();
+                return name != std::ffi::OsStr::new(".lake")
+                    && name != std::ffi::OsStr::new("lake_data");
+            }
+            true
         })
         .filter_map(|e| e.ok())
         .take(MAX_FILES)

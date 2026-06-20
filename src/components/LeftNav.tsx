@@ -181,9 +181,18 @@ export default function LeftNav(props: {
                     }
                   }}
                 >
-                  <span class="fe-node-icon" style="margin-right: 6px; font-size: 11px;">
-                    {item.is_dir ? (isExpanded ? "▾ 📁" : "▸ 📁") : "📄"}
-                  </span>
+                  <Show
+                    when={item.is_dir}
+                    fallback={
+                      <span class="kind-badge" data-kind={fileKind(item.name)} style="margin-right: 6px;">
+                        {fileKind(item.name)}
+                      </span>
+                    }
+                  >
+                    <span class="fe-node-icon" style="margin-right: 6px; font-size: 11px;">
+                      {isExpanded ? "▾ 📁" : "▸ 📁"}
+                    </span>
+                  </Show>
                   <span class="fe-node-name" style="flex: 1; font-size: 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary);">
                     {item.name}
                   </span>
@@ -813,6 +822,18 @@ function shortDir(path: string): string {
   if (!path) return "会话与过程表";
   const segs = path.split(/[\\/]/).filter(Boolean);
   return segs.slice(-1)[0] || path; // Show only the directory name for cleaner ZCode layout
+}
+
+/** Map a filename's extension to the same `kind` label/badge used in the Data tree,
+ * so a file and its registered table share an identical icon. */
+function fileKind(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  if (ext === 'csv' || ext === 'tsv') return 'csv';
+  if (ext === 'parquet' || ext === 'parq') return 'parquet';
+  if (ext === 'json' || ext === 'ndjson') return 'json';
+  if (ext === 'xlsx' || ext === 'xls') return 'excel';
+  if (ext === 'delta') return 'delta';
+  return ext || 'file';
 }
 
 function formatCount(n: number): string {

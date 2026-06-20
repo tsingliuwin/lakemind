@@ -121,24 +121,30 @@ mod tests {
         assert_eq!(table.row_count_estimate.unwrap(), 5);
     }
 
-    /// The workspace scan must NOT descend into DuckLake's own `lake_data/`
-    /// directory — otherwise every materialized table's parquet gets re-registered
-    /// with an extra `s_` prefix on each sync (s_x → s_s_x → …).
+    /// The workspace scan must NOT descend into DuckLake's own output — neither
+    /// the hidden `.lake/` store nor a legacy top-level `lake_data/`. Otherwise
+    /// every materialized table's parquet gets re-registered with an extra `s_`
+    /// prefix on each sync (s_x → s_s_x → …).
     #[test]
     fn scan_prunes_lake_data_dir() {
         let dir = tempdir();
         let ws = dir.path();
         std::fs::write(ws.join("sales.csv"), "id,name\n1,a\n").unwrap();
+        // legacy top-level lake_data
         let ld = ws.join("lake_data").join("main").join("s_sales");
         std::fs::create_dir_all(&ld).unwrap();
         write_parquet(&ld.join("data.parquet"));
+        // hidden .lake store (current layout) — also must not be scanned
+        let hidden = ws.join(".lake").join("lake_data").join("main").join("s_hidden");
+        std::fs::create_dir_all(&hidden).unwrap();
+        write_parquet(&hidden.join("data.parquet"));
 
         let entries = scan::scan_path(ws, true);
         let names: Vec<&str> = entries.iter().map(|e| e.view_name.as_str()).collect();
         assert!(names.contains(&"s_sales"), "real csv source must be found: {:?}", names);
         assert!(
             !names.iter().any(|n| n.starts_with("s_s_")),
-            "lake_data parquet must NOT be re-scanned: {:?}",
+            "lake_data / .lake parquet must NOT be re-scanned: {:?}",
             names
         );
     }
@@ -166,8 +172,8 @@ mod tests {
         register::register(&conn, &entries[0], StorageKind::Table).unwrap();
         let n: i64 = conn.query_row("SELECT count(*) FROM s_people", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 2);
-        assert!(ws.join("lake.ducklake").exists(), "catalog file must exist");
-        assert!(ws.join("lake_data").is_dir(), "data dir must exist");
+        assert!(ws.join(".lake").join("lake.ducklake").exists(), "catalog file must exist");
+        assert!(ws.join(".lake").join("lake_data").is_dir(), "data dir must exist");
 
         // reconnect: the materialized table must survive (DuckLake is persistent)
         drop(conn);

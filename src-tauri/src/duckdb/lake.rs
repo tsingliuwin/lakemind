@@ -19,9 +19,13 @@ use duckdb::Connection;
 
 use crate::error::{AppError, AppResult};
 
-/// DuckLake catalog file name within a workspace directory.
+/// Hidden directory under a workspace that holds ALL DuckDB/DuckLake artifacts
+/// (catalog + data + WAL). Keeping them here leaves the workspace root clean
+/// (only the user's data files) and they never appear in the Files tree.
+pub const LAKE_DIR: &str = ".lake";
+/// DuckLake catalog file name within [`LAKE_DIR`].
 pub const CATALOG_FILE: &str = "lake.ducklake";
-/// DuckLake parquet data directory within a workspace directory.
+/// DuckLake parquet data directory within [`LAKE_DIR`].
 pub const DATA_DIR: &str = "lake_data";
 /// Config key holding the zero-copy threshold in bytes.
 pub const THRESHOLD_CONFIG_KEY: &str = "import.zero_copy_threshold_bytes";
@@ -54,10 +58,13 @@ pub fn ensure_ducklake_loaded(conn: &Connection) -> AppResult<()> {
 pub fn ensure_lake_paths(ws_dir: &Path) -> AppResult<(std::path::PathBuf, std::path::PathBuf)> {
     std::fs::create_dir_all(ws_dir)
         .map_err(|e| AppError::new(format!("无法创建工作区目录: {e}")))?;
-    let data_dir = ws_dir.join(DATA_DIR);
+    let lake_dir = ws_dir.join(LAKE_DIR);
+    std::fs::create_dir_all(&lake_dir)
+        .map_err(|e| AppError::new(format!("无法创建 lake 目录: {e}")))?;
+    let data_dir = lake_dir.join(DATA_DIR);
     std::fs::create_dir_all(&data_dir)
         .map_err(|e| AppError::new(format!("无法创建 lake 数据目录: {e}")))?;
-    Ok((ws_dir.join(CATALOG_FILE), data_dir))
+    Ok((lake_dir.join(CATALOG_FILE), data_dir))
 }
 
 /// ATTACH a workspace's DuckLake and set it as the default catalog (`USE lake`).

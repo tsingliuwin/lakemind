@@ -355,8 +355,18 @@ pub async fn read_directory(path: String) -> Result<Vec<FileItem>, String> {
     let entries = std::fs::read_dir(&resolved_path).map_err(|e| format!("读取目录失败: {e}"))?;
     for entry in entries {
         if let Ok(entry) = entry {
-            let p = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
+            // Hide dotfiles (the `.lake/` store) and any stray DuckDB/DuckLake
+            // artifacts so the Files tree shows only the user's data files.
+            if name.starts_with('.')
+                || name == "lake.duckdb"
+                || name == "lake.ducklake"
+                || name == "lake_data"
+                || name.ends_with(".ducklake.wal")
+            {
+                continue;
+            }
+            let p = entry.path();
             let is_dir = p.is_dir();
             items.push(FileItem {
                 name,
