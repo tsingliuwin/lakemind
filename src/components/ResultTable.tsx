@@ -1,26 +1,55 @@
-import { createMemo, Show, For } from "solid-js";
+import { createMemo, createEffect, Show, For } from "solid-js";
 import { createSolidTable, flexRender, getCoreRowModel } from "@tanstack/solid-table";
+import { createVirtualizer } from "@tanstack/solid-virtual";
 import type { ColumnDef } from "@tanstack/table-core";
 import type { JSX } from "solid-js";
 import type { JsonValue, SqlResult } from "../lib/types";
 
 // Fixed column widths — must match the CSS (.row-idx 54px, .result-cell 160px).
-// We size head/row to a COMPUTED total width (not min-width:max-content, which
-// sums cell content widths and overshoots, leaving empty scroll space).
 const ROW_IDX_W = 54;
 const CELL_W = 160;
 
 /**
- * The result grid. Rows are rendered directly (no virtualization) — simple and
- * avoids the virtualizer's scrollRef/height init bugs that left the body empty.
- * Row caps keep this safe (default 10k; even 1m renders, just slower). If very
- * large results need 60fps later, reintroduce virtualization carefully.
+ * Result grid wrapper. The actual virtualized grid lives in a sub-component
+ * (`VirtualGrid`) that is only created when `result` is non-null, inside the
+ * `<Show>`. This sidesteps the TanStack solid-virtual scroll-element bootstrap
+ * problem:
+ *
+ *   `createVirtualizer` sets up its internal `createComputed` + `onMount` at
+ *   component creation time. `onMount` calls `_willUpdate()`, which reads
+ *   `getScrollElement()` and — if the element exists — attaches a
+ *   ResizeObserver and scroll listeners. Those listeners fire `onChange`,
+ *   which re-calls `_willUpdate()`, keeping the cycle alive.
+ *
+ *   If the scroll container is inside a `<Show>` that starts out false (the
+ *   common case: ResultTable mounts before any query has run), the `ref` is
+ *   never assigned, `getScrollElement()` returns null at `onMount` time, no
+ *   observers are attached, `onChange` never fires → deadlock, 0 rows.
+ *
+ *   By placing the virtualizer in a sub-component that only exists when the
+ *   `<Show>` is truthy, the scroll container is unconditionally present at
+ *   `onMount` time, and the bootstrap cycle succeeds.
  */
 export default function ResultTable(props: { result: SqlResult | null }) {
+  return (
+    <div class="result-wrap">
+      <Show
+        when={props.result}
+        fallback={<div class="result-empty">执行查询以查看结果。</div>}
+      >
+        {(result) => <VirtualGrid result={result()} />}
+      </Show>
+    </div>
+  );
+}
+
+// ─── Sub-component: only created when result is non-null ────────────────────
+
+function VirtualGrid(props: { result: SqlResult }) {
+  let scrollRef: HTMLDivElement | undefined;
+
   const columns = createMemo<ColumnDef<Row, unknown>[]>(() => {
-    const r = props.result;
-    if (!r) return [];
-    return r.columns.map(
+    return props.result.columns.map(
       (name, i) =>
         ({
           id: name,
@@ -31,7 +60,7 @@ export default function ResultTable(props: { result: SqlResult | null }) {
     );
   });
 
-  const data = createMemo<Row[]>(() => props.result?.rows ?? []);
+  const data = createMemo<Row[]>(() => props.result.rows ?? []);
 
   const table = createSolidTable({
     get data() {
@@ -44,34 +73,68 @@ export default function ResultTable(props: { result: SqlResult | null }) {
   });
 
   const tableWidth = createMemo(() => {
-    const r = props.result;
-    if (!r) return 0;
-    return ROW_IDX_W + CELL_W * r.columns.length;
+    return ROW_IDX_W + CELL_W * props.result.columns.length;
+  });
+
+  // At this point scrollRef is still `undefined` (assigned below in JSX).
+  // But by the time `onMount` fires inside solid-virtual, the JSX has been
+  // evaluated and the ref assigned. `_willUpdate()` reads scrollRef → finds
+  // the real element → attaches observers → virtualizer works.
+  const rowVirtualizer = createVirtualizer({
+    get count() {
+      return table.getRowModel().rows.length;
+    },
+    getScrollElement: () => scrollRef ?? null,
+    estimateSize: () => 28,
+    overscan: 12,
+  });
+
+  // Reset scroll position when result identity changes.
+  createEffect(() => {
+    // Track identity — `columns` is a cheap proxy for "different result".
+    props.result.columns;
+    scrollRef?.scrollTo({ top: 0, left: 0 });
   });
 
   return (
-    <div class="result-wrap">
-      <Show
-        when={props.result}
-        fallback={<div class="result-empty">执行查询以查看结果。</div>}
+    <div class="result-scroll" ref={scrollRef}>
+      {/* Sticky header */}
+      <div class="result-head" role="row" style={{ width: `${tableWidth()}px` }}>
+        <div class="result-cell row-idx">#</div>
+        <For each={props.result.columns}>
+          {(name, i) => (
+            <div class="result-cell head-cell" title={props.result.columnTypes[i()]}>
+              {name}
+            </div>
+          )}
+        </For>
+      </div>
+      {/* Virtualized body */}
+      <div
+        style={{
+          height: `${rowVirtualizer.getTotalSize()}px`,
+          position: "relative",
+          width: `${tableWidth()}px`,
+        }}
       >
-        <div class="result-scroll">
-          {/* Sticky header */}
-          <div class="result-head" role="row" style={{ width: `${tableWidth()}px` }}>
-            <div class="result-cell row-idx">#</div>
-            <For each={props.result!.columns}>
-              {(name, i) => (
-                <div class="result-cell head-cell" title={props.result!.columnTypes[i()]}>
-                  {name}
-                </div>
-              )}
-            </For>
-          </div>
-          {/* Body — direct render, no virtualizer */}
-          <For each={table.getRowModel().rows}>
-            {(row, i) => (
-              <div class="result-row" role="row" style={{ width: `${tableWidth()}px` }}>
-                <div class="result-cell row-idx">{i() + 1}</div>
+        <For each={rowVirtualizer.getVirtualItems()}>
+          {(vRow) => {
+            const row = table.getRowModel().rows[vRow.index];
+            if (!row) return null;
+            return (
+              <div
+                class="result-row"
+                style={{
+                  position: "absolute",
+                  top: "0",
+                  left: "0",
+                  width: `${tableWidth()}px`,
+                  height: `${vRow.size}px`,
+                  transform: `translateY(${vRow.start}px)`,
+                }}
+                role="row"
+              >
+                <div class="result-cell row-idx">{vRow.index + 1}</div>
                 <For each={row.getVisibleCells()}>
                   {(cell) => (
                     <div class="result-cell">
@@ -80,10 +143,10 @@ export default function ResultTable(props: { result: SqlResult | null }) {
                   )}
                 </For>
               </div>
-            )}
-          </For>
-        </div>
-      </Show>
+            );
+          }}
+        </For>
+      </div>
     </div>
   );
 }
