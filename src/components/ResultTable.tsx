@@ -5,14 +5,19 @@ import type { ColumnDef } from "@tanstack/table-core";
 import type { JSX } from "solid-js";
 import type { JsonValue, SqlResult } from "../lib/types";
 
+// Fixed column widths — must match the CSS (.row-idx 54px, .result-cell 160px).
+// We size head/body/row to a COMPUTED total width instead of `min-width:
+// max-content`, because max-content sums each cell's *content* width (a long
+// URL can be hundreds of px) and overshoots the actually-rendered columns,
+// leaving empty scroll space to the right of the last column.
+const ROW_IDX_W = 54;
+const CELL_W = 160;
+
 /**
  * The virtualized result grid. Columns come from `SqlResult.columns` and rows
  * from `SqlResult.rows` (already JSON-decoded). Only the visible window is
  * rendered, so 100k rows scroll at 60fps even though the whole array is in
  * memory. This mirrors TanStack's official solid/virtualized-rows example.
- *
- * Layout: a sticky header row plus a scrollable body whose rows are absolutely
- * positioned inside a spacer sized to the total virtual height.
  */
 export default function ResultTable(props: { result: SqlResult | null }) {
   let scrollRef: HTMLDivElement | undefined;
@@ -45,6 +50,12 @@ export default function ResultTable(props: { result: SqlResult | null }) {
     getCoreRowModel: getCoreRowModel(),
   });
 
+  const tableWidth = createMemo(() => {
+    const r = props.result;
+    if (!r) return 0;
+    return ROW_IDX_W + CELL_W * r.columns.length;
+  });
+
   const rowVirtualizer = createVirtualizer({
     get count() {
       return table.getRowModel().rows.length;
@@ -67,7 +78,7 @@ export default function ResultTable(props: { result: SqlResult | null }) {
       >
         <div class="result-scroll" ref={scrollRef}>
           {/* Sticky header */}
-          <div class="result-head" role="row">
+          <div class="result-head" role="row" style={{ width: `${tableWidth()}px` }}>
             <div class="result-cell row-idx">#</div>
             <For each={props.result!.columns}>
               {(name, i) => (
@@ -82,7 +93,7 @@ export default function ResultTable(props: { result: SqlResult | null }) {
             style={{
               height: `${rowVirtualizer.getTotalSize()}px`,
               position: "relative",
-              width: "100%",
+              width: `${tableWidth()}px`,
             }}
           >
             <For each={rowVirtualizer.getVirtualItems()}>
@@ -96,7 +107,7 @@ export default function ResultTable(props: { result: SqlResult | null }) {
                       position: "absolute",
                       top: "0",
                       left: "0",
-                      width: "100%",
+                      width: `${tableWidth()}px`,
                       height: `${vRow.size}px`,
                       transform: `translateY(${vRow.start}px)`,
                     }}

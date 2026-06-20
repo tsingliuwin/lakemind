@@ -84,19 +84,16 @@ export default function SqlEditor(props: {
   return (
     <div class="editor-card">
       <div class="editor-toolbar">
-        <span class="env-tag">{t("sqlEditorTag")}</span>
-        <span class="shortcut-hint">Ctrl/Cmd+Enter</span>
         <div class="right-tools">
-          <label class="rowcap">
-            {t("rowCountLimit")}
-            <select
-              disabled={props.busy}
-              value={props.rowCap}
-              onChange={(e) => props.onRowCap(Number(e.currentTarget.value))}
-            >
-              <For each={[...ROW_CAP_OPTIONS]}>{(o) => <option value={o.value}>{o.label}</option>}</For>
-            </select>
-          </label>
+          <select
+            class="rowcap-select"
+            title={t("rowCountLimit")}
+            disabled={props.busy}
+            value={props.rowCap}
+            onChange={(e) => props.onRowCap(Number(e.currentTarget.value))}
+          >
+            <For each={[...ROW_CAP_OPTIONS]}>{(o) => <option value={o.value}>{o.label}</option>}</For>
+          </select>
           <button class="icon-btn" title={t("copySql")} onClick={() => props.onCopy()}>
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style={{ width: "14px", height: "14px" }}>
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
@@ -113,7 +110,7 @@ export default function SqlEditor(props: {
           <button class="icon-btn" title="关闭并放弃查询" onClick={() => props.onClose?.()} style="color: var(--accent-red);">
             ✕
           </button>
-          <button class="run-btn" disabled={props.busy} onClick={() => props.onRun()}>
+          <button class="run-btn" title={`${t("run")} (Ctrl/Cmd+Enter)`} disabled={props.busy} onClick={() => props.onRun()}>
             <Show when={props.busy} fallback={
               <>
                 <svg viewBox="0 0 24 24" fill="currentColor" style="width: 10px; height: 10px; margin-right: 4px;">

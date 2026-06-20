@@ -1122,6 +1122,20 @@ select:hover:not(:disabled) {
   font-size: 11px;
   color: var(--text-secondary);
 }
+.rowcap-select {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  cursor: pointer;
+}
+.rowcap-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 .run-btn {
   background: var(--accent-blue);
   border-color: var(--accent-blue);
@@ -1204,7 +1218,6 @@ select:hover:not(:disabled) {
 .result-row {
   display: flex;
   border-bottom: 1px solid var(--border-faint);
-  min-width: max-content;
   transition: background-color 0.1s ease;
 }
 .result-row:hover {
