@@ -586,10 +586,6 @@ export default function App() {
     try {
       const res = await executeSql(q, rowCap());
       setResult(res);
-      
-      // Refresh list of DuckDB tables in case query changed schemas
-      const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
-      setSources(dbTables);
 
       entry = {
         id: ++logSeq,
@@ -600,6 +596,15 @@ export default function App() {
         truncated: res.truncated,
         elapsedMs: res.elapsedMs,
       };
+
+      // Refresh the table list in case the query changed schemas. Non-fatal:
+      // a failure here must NOT clobber the query result we just set.
+      try {
+        const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
+        setSources(dbTables);
+      } catch (refreshErr) {
+        console.error("refresh table list failed:", refreshErr);
+      }
     } catch (e) {
       const msg = String(e);
       setResult(null);

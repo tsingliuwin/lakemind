@@ -96,21 +96,21 @@ pub fn attach_workspace_lake(conn: &Connection, ws_dir: &Path) -> AppResult<()> 
         if !wal_mismatch {
             return Err(AppError::new(format!("ATTACH ducklake 失败: {msg}")));
         }
-        // Unclean shutdown left a stale WAL. Drop it and retry against the
-        // already-checkpointed catalog file (no data loss in the common case).
-        eprintln!("ducklake: stale WAL detected, dropping {wal_str} and retrying: {msg}");
+        // Unclean shutdown (e.g. killing `tauri dev`) left a WAL that doesn't match
+        // the catalog — and the catalog may itself be truncated: a half-written
+        // catalog passes ATTACH but later fails mid-query with "Could not read
+        // enough bytes" when its stats are read. Dropping just the WAL and reusing
+        // the (possibly truncated) catalog is not safe; rebuild the whole lake store.
+        // Tables are re-materialized from the workspace source files on the next
+        // `register_workspace_sources`.
+        eprintln!("ducklake: WAL mismatch after crash, rebuilding lake store: {msg}");
+        let _ = std::fs::remove_file(&catalog);
         let _ = std::fs::remove_file(&wal_str);
-        if let Err(second_err) = conn.execute(&sql, []) {
-            // Catalog itself is unusable — rebuild an empty one so the app starts.
-            // Tables are re-materialized from workspace files on the next sync.
-            eprintln!(
-                "ducklake: catalog still unusable after WAL drop, rebuilding empty catalog: {second_err}"
-            );
-            let _ = std::fs::remove_file(&catalog_str);
-            let _ = std::fs::remove_file(&wal_str);
-            conn.execute(&sql, [])
-                .map_err(|e| AppError::new(format!("ATTACH ducklake 失败（已尝试重建 catalog）: {e}")))?;
-        }
+        let _ = std::fs::remove_dir_all(&data_dir);
+        std::fs::create_dir_all(&data_dir)
+            .map_err(|e| AppError::new(format!("无法重建 lake 数据目录: {e}")))?;
+        conn.execute(&sql, [])
+            .map_err(|e| AppError::new(format!("ATTACH ducklake 失败（已尝试重建 lake store）: {e}")))?;
     }
 
     conn.execute("USE lake;", [])
