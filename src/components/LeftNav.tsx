@@ -225,9 +225,7 @@ export default function LeftNav(props: {
       {/* ZCode style top header with Z logo and history arrows */}
       <div class="ln-top-bar">
         <div class="ln-logo-box" title="ZCode 3.0 / LakeMind">
-          <svg class="ln-logo-z" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M4 4H20V7L8 17H20V20H4V17L16 7H4V4Z" fill="currentColor"/>
-          </svg>
+          <img src="/logo.png" alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
         </div>
         <div class="ln-nav-arrows">
           <button class="ln-arrow-btn" title="后退" disabled={props.busy}>

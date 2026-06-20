@@ -53,9 +53,7 @@ export default function SettingsPage(props: {
       <aside class="settings-sidebar">
         <div class="ss-logo-area">
           <div class="ss-logo-box">
-            <svg class="ss-logo-z" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M4 4H20V7L8 17H20V20H4V17L16 7H4V4Z" fill="currentColor"/>
-            </svg>
+            <img src="/logo.png" alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
           </div>
         </div>
 
