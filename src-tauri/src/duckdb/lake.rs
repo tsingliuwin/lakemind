@@ -23,8 +23,9 @@ use crate::error::{AppError, AppResult};
 /// (catalog + data + WAL). Keeping them here leaves the workspace root clean
 /// (only the user's data files) and they never appear in the Files tree.
 pub const LAKE_DIR: &str = ".lake";
-/// DuckLake catalog file name within [`LAKE_DIR`].
-pub const CATALOG_FILE: &str = "lake.ducklake";
+/// DuckLake catalog file (SQLite backend — avoids DuckDB's ART-index corruption
+/// bugs that the default DuckDB catalog hits on crash; see duckdb #18505/#21468).
+pub const CATALOG_FILE: &str = "lake.sqlite";
 /// DuckLake parquet data directory within [`LAKE_DIR`].
 pub const DATA_DIR: &str = "lake_data";
 /// Config key holding the zero-copy threshold in bytes.
@@ -50,6 +51,14 @@ pub fn ensure_ducklake_loaded(conn: &Connection) -> AppResult<()> {
             "无法加载 ducklake 扩展。LakeMind 使用 DuckLake 存储表，首次运行需要联网下载该扩展。\n原始错误: {e}"
         ))
     })?;
+    // SQLite catalog backend: the default DuckDB catalog uses an ART index that
+    // corrupts on crash ("node without metadata in ARTOperator::Insert",
+    // duckdb #18505/#21468/#18190, unfixed even in 1.5). SQLite has no such index.
+    if let Err(e) = conn.execute("INSTALL sqlite;", []) {
+        eprintln!("INSTALL sqlite (ignored if already installed): {e}");
+    }
+    conn.execute("LOAD sqlite;", [])
+        .map_err(|e| AppError::new(format!("无法加载 sqlite 扩展: {e}")))?;
     Ok(())
 }
 
@@ -86,7 +95,7 @@ pub fn attach_workspace_lake(conn: &Connection, ws_dir: &Path) -> AppResult<()> 
     let catalog_str = catalog.to_string_lossy().replace('\\', "/");
     let wal_str = format!("{catalog_str}.wal");
     let data_str = format!("{}/", data_dir.to_string_lossy().replace('\\', "/"));
-    let sql = format!("ATTACH 'ducklake:{catalog_str}' AS lake (DATA_PATH '{data_str}');");
+    let sql = format!("ATTACH 'ducklake:sqlite:{catalog_str}' AS lake (DATA_PATH '{data_str}');");
 
     if let Err(first_err) = conn.execute(&sql, []) {
         let msg = first_err.to_string();

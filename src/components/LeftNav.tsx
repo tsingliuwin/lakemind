@@ -2,7 +2,7 @@ import { For, Show, createMemo, createSignal, onMount, onCleanup, createEffect }
 import { invoke } from "@tauri-apps/api/core";
 import type { SourceTable, QueryTask, Workspace, FileItem } from "../lib/types";
 import { t, currentLanguage, setCurrentLanguage } from "../lib/i18n";
-import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom } from "../lib/theme";
+import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom, logoSrc } from "../lib/theme";
 
 /**
  * Left navigation styled like ZCode 3.0:
@@ -225,7 +225,7 @@ export default function LeftNav(props: {
       {/* ZCode style top header with Z logo and history arrows */}
       <div class="ln-top-bar">
         <div class="ln-logo-box" title="ZCode 3.0 / LakeMind">
-          <img src="/logo.png" alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
+          <img src={logoSrc()} alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
         </div>
         <div class="ln-nav-arrows">
           <button class="ln-arrow-btn" title="后退" disabled={props.busy}>

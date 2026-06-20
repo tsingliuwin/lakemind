@@ -1,6 +1,6 @@
 import { createSignal, Show, onMount, onCleanup } from "solid-js";
 import { t, currentLanguage, setCurrentLanguage } from "../lib/i18n";
-import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom } from "../lib/theme";
+import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom, logoSrc } from "../lib/theme";
 
 type SettingsTab =
   | "general"
@@ -53,7 +53,7 @@ export default function SettingsPage(props: {
       <aside class="settings-sidebar">
         <div class="ss-logo-area">
           <div class="ss-logo-box">
-            <img src="/logo.png" alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
+            <img src={logoSrc()} alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
           </div>
         </div>
 

@@ -2,6 +2,7 @@ import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { SourceTable } from "../lib/types";
 import { t } from "../lib/i18n";
+import { logoSrc } from "../lib/theme";
 
 export default function TitleBar(props: {
   inspectorOpen: boolean;
@@ -52,7 +53,7 @@ export default function TitleBar(props: {
       {/* Titlebar Left: Logo, Name, and ZCode-style Dropdown Menu */}
       {/* Titlebar Left: Logo and Name */}
       <div class="titlebar-left" data-tauri-drag-region>
-        <span class="tb-logo" data-tauri-drag-region><img src="/logo.png" alt="LakeMind" style="width: 14px; height: 14px; object-fit: contain; vertical-align: middle;" /></span>
+        <span class="tb-logo" data-tauri-drag-region><img src={logoSrc()} alt="LakeMind" style="width: 14px; height: 14px; object-fit: contain; vertical-align: middle;" /></span>
         <span class="tb-brand" data-tauri-drag-region>LakeMind</span>
       </div>
 
@@ -194,7 +195,7 @@ export default function TitleBar(props: {
               <button class="modal-close" onClick={() => setAboutOpen(false)}>✕</button>
             </div>
             <div class="modal-body">
-              <div class="about-logo"><img src="/logo.png" alt="LakeMind" style="width: 48px; height: 48px; object-fit: contain;" /></div>
+              <div class="about-logo"><img src={logoSrc()} alt="LakeMind" style="width: 48px; height: 48px; object-fit: contain;" /></div>
               <h4>{t("aboutCore")}</h4>
               <p class="about-desc">{t("aboutDesc")}</p>
               <div class="about-specs">

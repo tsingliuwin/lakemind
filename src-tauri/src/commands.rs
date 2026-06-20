@@ -64,11 +64,9 @@ const CUSTOM_TABLE_SQLS: [&str; 2] = [
 #[tauri::command]
 pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
     let ws_path = state.workspace_path.lock().await.clone();
-    eprintln!("list_duckdb_tables: called, ws_path={:?}", ws_path);
     run_blocking(state, move |conn| {
         let sqlite = db::get_db_conn()?;
         let records = db::list_sources(&sqlite, &ws_path)?;
-        eprintln!("list_duckdb_tables: {} source record(s) in mapping", records.len());
 
         // 1. Registered sources (authoritative). A record whose lake object has
         //    gone missing is skipped here; it is rebuilt on the next sync.
@@ -112,7 +110,6 @@ pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<Source
                 });
             }
         }
-        eprintln!("list_duckdb_tables: returning {} table(s)", result.len());
         Ok(result)
     })
     .await

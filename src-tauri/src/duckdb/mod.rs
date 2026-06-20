@@ -172,7 +172,7 @@ mod tests {
         register::register(&conn, &entries[0], StorageKind::Table).unwrap();
         let n: i64 = conn.query_row("SELECT count(*) FROM s_people", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 2);
-        assert!(ws.join(".lake").join("lake.ducklake").exists(), "catalog file must exist");
+        assert!(ws.join(".lake").join("lake.sqlite").exists(), "catalog file must exist");
         assert!(ws.join(".lake").join("lake_data").is_dir(), "data dir must exist");
 
         // reconnect: the materialized table must survive (DuckLake is persistent)

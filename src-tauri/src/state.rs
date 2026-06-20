@@ -47,9 +47,12 @@ impl AppState {
     /// `ws_dir` as the default catalog. Applies sane PRAGMAs.
     pub fn open_workspace(ws_dir: &std::path::Path) -> AppResult<duckdb::Connection> {
         let conn = duckdb::Connection::open_in_memory()?;
+        // threads=1: DuckLake's SQLite catalog is single-writer. With threads>1
+        // DuckDB parallelizes writes to the catalog's SQLite metadata and hits
+        // "database is locked". Single-thread is fine for local analysis.
         let _ = conn.execute_batch(
             "PRAGMA memory_limit='4GB';\n\
-             PRAGMA threads=8;",
+             PRAGMA threads=1;",
         );
         lake::ensure_ducklake_loaded(&conn)?;
         lake::attach_workspace_lake(&conn, ws_dir)?;

@@ -559,8 +559,6 @@ select:hover:not(:disabled) {
   justify-content: center;
   width: 24px;
   height: 24px;
-  background: #fff;
-  color: #000;
   border-radius: 6px;
   font-weight: 800;
 }
@@ -1691,8 +1689,6 @@ select:hover:not(:disabled) {
   justify-content: center;
   width: 24px;
   height: 24px;
-  background: #fff;
-  color: #000;
   border-radius: 6px;
   font-weight: 800;
 }

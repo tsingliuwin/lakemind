@@ -5,6 +5,9 @@ export type Theme = "geek-dark" | "classic-dark" | "light";
 export const [currentTheme, setCurrentTheme] = createSignal<Theme>("geek-dark");
 export const [currentZoom, setCurrentZoom] = createSignal<number>(100);
 
+/** Logo path for the current theme: white logo on dark themes, dark logo on light. */
+export const logoSrc = () => (currentTheme() === "light" ? "/logo.png" : "/logo_white.png");
+
 // Set theme class on the document root when it changes
 createEffect(() => {
   const t = currentTheme();
