@@ -16,8 +16,10 @@
         "title": "lakemind",
         "width": 1024,
         "height": 768,
-        "decorations": false,
-        "dragDropEnabled": true
+        "decorations": true,
+        "dragDropEnabled": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {
