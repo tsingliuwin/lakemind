@@ -718,10 +718,6 @@ export default function App() {
           onOpenSettings={onSettings}
           onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
           onNewChat={() => createTask("", "chat")}
-          inspectorOpen={inspectorOpen()}
-          consoleOpen={consoleState() !== "folded"}
-          onToggleInspector={() => setInspectorOpen((v) => !v)}
-          onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
           onDisconnect={() => { setSources([]); setSelectedTable(null); setResult(null); setError(null); setTasks([]); setActiveTaskId(null); }}
           leftOpen={leftOpen()}
           onToggleLeft={() => setLeftOpen(!leftOpen())}

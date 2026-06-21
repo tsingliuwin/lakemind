@@ -33,10 +33,6 @@ export default function LeftNav(props: {
   onOpenSettings: () => void;
   onNewQuery?: () => void;
   onNewChat?: () => void;
-  inspectorOpen?: boolean;
-  consoleOpen?: boolean;
-  onToggleInspector?: () => void;
-  onToggleConsole?: () => void;
   onDisconnect?: () => void;
   onImportFile?: (filePath: string) => void;
   leftOpen?: boolean;
@@ -801,28 +797,6 @@ export default function LeftNav(props: {
         </Show>
 
         <div class="ln-footer-actions">
-          <button
-            class="ln-foot-icon-btn"
-            classList={{ active: props.inspectorOpen }}
-            title={props.inspectorOpen ? t("hideInspector") : t("showInspector")}
-            onClick={() => props.onToggleInspector?.()}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-              <line x1="15" y1="3" x2="15" y2="21"></line>
-            </svg>
-          </button>
-          <button
-            class="ln-foot-icon-btn"
-            classList={{ active: props.consoleOpen }}
-            title={props.consoleOpen ? t("hideConsole") : t("showConsole")}
-            onClick={() => props.onToggleConsole?.()}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-              <line x1="3" y1="15" x2="21" y2="15"></line>
-            </svg>
-          </button>
           <button class="ln-foot-icon-btn" title={t("settings")} onClick={() => props.onOpenSettings()}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="3"></circle>

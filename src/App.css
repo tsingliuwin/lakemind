@@ -397,6 +397,28 @@ select:hover:not(:disabled) {
   color: #fff;
 }
 
+.tb-layout-btn {
+  background: transparent;
+  border: none;
+  width: 32px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tb-layout-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tb-layout-btn.active {
+  color: var(--accent-blue);
+}
+
 /* Modals */
 .modal-overlay {
   position: fixed;
@@ -623,6 +645,9 @@ select:hover:not(:disabled) {
 .ln-arrow-btn:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+.ln-arrow-btn.active {
+  color: var(--accent-blue);
 }
 
 /* Quick actions */
