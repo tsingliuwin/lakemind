@@ -57,12 +57,45 @@ export default function TitleBar(props: {
     <div class="titlebar" data-tauri-drag-region>
       {/* Titlebar Left: Logo, Name, and ZCode-style Dropdown Menu */}
       {/* Titlebar Left: Logo and Name */}
-      <div class="titlebar-left" classList={{ "mac-padding": isMac }} data-tauri-drag-region>
-        <Show when={!isMac} fallback={
-          <div class="ln-nav-arrows" style="display: flex; align-items: center; gap: 6px;" data-tauri-drag-region>
-            {/* Sidebar toggle button (macOS) */}
+      <div class="titlebar-left" classList={{ "mac-padding": isMac && !props.leftOpen }} data-tauri-drag-region>
+        <Show when={!props.leftOpen}>
+          <Show when={!isMac} fallback={
+            <div class="ln-nav-arrows" style="display: flex; align-items: center; gap: 6px;" data-tauri-drag-region>
+              {/* Sidebar toggle button (macOS) */}
+              <button 
+                class="ln-arrow-btn" 
+                classList={{ active: props.leftOpen }}
+                title={props.leftOpen ? "隐藏侧边栏" : "显示侧边栏"} 
+                onClick={() => props.onToggleLeft()}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="9" y1="3" x2="9" y2="21"></line>
+                </svg>
+              </button>
+              
+              {/* History arrows */}
+              <button class="ln-arrow-btn" title="后退" disabled={props.busy}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="19" y1="12" x2="5" y2="12"></line>
+                  <polyline points="12 19 5 12 12 5"></polyline>
+                </svg>
+              </button>
+              <button class="ln-arrow-btn" title="前进" disabled={props.busy}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                  <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+              </button>
+            </div>
+          }>
+            <span class="tb-logo" data-tauri-drag-region><img src={logoSrc()} alt="LakeMind" style="width: 14px; height: 14px; object-fit: contain; vertical-align: middle;" /></span>
+            <span class="tb-brand" data-tauri-drag-region>LakeMind</span>
+            
+            {/* Sidebar toggle button (Windows/Linux) */}
             <button 
               class="ln-arrow-btn" 
+              style="margin-left: 8px;"
               classList={{ active: props.leftOpen }}
               title={props.leftOpen ? "隐藏侧边栏" : "显示侧边栏"} 
               onClick={() => props.onToggleLeft()}
@@ -72,38 +105,7 @@ export default function TitleBar(props: {
                 <line x1="9" y1="3" x2="9" y2="21"></line>
               </svg>
             </button>
-            
-            {/* History arrows */}
-            <button class="ln-arrow-btn" title="后退" disabled={props.busy}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="19" y1="12" x2="5" y2="12"></line>
-                <polyline points="12 19 5 12 12 5"></polyline>
-              </svg>
-            </button>
-            <button class="ln-arrow-btn" title="前进" disabled={props.busy}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-                <polyline points="12 5 19 12 12 19"></polyline>
-              </svg>
-            </button>
-          </div>
-        }>
-          <span class="tb-logo" data-tauri-drag-region><img src={logoSrc()} alt="LakeMind" style="width: 14px; height: 14px; object-fit: contain; vertical-align: middle;" /></span>
-          <span class="tb-brand" data-tauri-drag-region>LakeMind</span>
-          
-          {/* Sidebar toggle button (Windows/Linux) */}
-          <button 
-            class="ln-arrow-btn" 
-            style="margin-left: 8px;"
-            classList={{ active: props.leftOpen }}
-            title={props.leftOpen ? "隐藏侧边栏" : "显示侧边栏"} 
-            onClick={() => props.onToggleLeft()}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-              <line x1="9" y1="3" x2="9" y2="21"></line>
-            </svg>
-          </button>
+          </Show>
         </Show>
       </div>
 

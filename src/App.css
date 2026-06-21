@@ -172,20 +172,13 @@ select:hover:not(:disabled) {
    =========================================================================== */
 
 .app-shell {
-  display: grid;
-  grid-template-columns: var(--left-width, 240px) 1fr var(--right-width-actual, 280px);
-  grid-template-rows: 30px 1fr var(--bottom-height-actual, 180px);
-  grid-template-areas:
-    "titlebar titlebar titlebar"
-    "leftnav  main     right"
-    "leftnav  bottom   right";
+  display: flex;
+  flex-direction: row;
   height: 100vh;
+  width: 100vw;
   overflow: hidden;
   position: relative; /* absolute splitters reference frame */
-}
-
-.app-shell.no-inspector {
-  grid-template-columns: var(--left-width, 240px) 1fr 0px;
+  background-color: var(--bg-base);
 }
 
 .app-shell.sidebar-collapsed {
@@ -196,9 +189,31 @@ select:hover:not(:disabled) {
   display: none !important;
 }
 
+/* --- Right Column Container (通顶) --- */
+.right-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-width: 0;
+  background-color: var(--bg-base);
+}
+
+/* --- Right Column Content Layout (Main Editor + Console + Inspector Split) --- */
+.right-content-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr var(--right-width-actual, 280px);
+  grid-template-rows: 1fr var(--bottom-height-actual, 180px);
+  grid-template-areas:
+    "main   right"
+    "bottom right";
+  min-height: 0;
+  position: relative;
+}
+
 /* --- Custom TitleBar (decorations: false) --- */
 .titlebar {
-  grid-area: titlebar;
   height: 30px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-faint);
@@ -549,12 +564,16 @@ select:hover:not(:disabled) {
 
 /* --- ZCode LeftNav Sidebar --- */
 .leftnav {
-  grid-area: leftnav;
+  width: var(--left-width, 240px);
+  min-width: var(--left-width, 240px);
+  max-width: var(--left-width, 240px);
+  height: 100vh;
   display: flex;
   flex-direction: column;
   background: var(--bg-surface);
   border-right: 1px solid var(--border-faint);
   min-height: 0;
+  flex-shrink: 0;
 }
 
 /* Logo and navigation section */
@@ -564,6 +583,12 @@ select:hover:not(:disabled) {
   justify-content: space-between;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-faint);
+  height: 38px;
+}
+.ln-top-bar.mac-nav {
+  height: 30px;
+  padding: 0 14px 0 80px; /* shifts navigation buttons to the right of the traffic lights */
+  justify-content: flex-start;
 }
 .ln-logo-box {
   display: flex;
@@ -1613,7 +1638,7 @@ select:hover:not(:disabled) {
 /* Resizer splitters */
 .resizer-v {
   position: absolute;
-  top: 30px;
+  top: 0;
   bottom: 0;
   width: 6px;
   cursor: col-resize;

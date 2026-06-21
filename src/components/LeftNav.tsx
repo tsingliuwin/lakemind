@@ -39,6 +39,8 @@ export default function LeftNav(props: {
   onToggleConsole?: () => void;
   onDisconnect?: () => void;
   onImportFile?: (filePath: string) => void;
+  leftOpen?: boolean;
+  onToggleLeft?: () => void;
 }) {
   // Group tables by their parent directory for a tree-like feel.
   const groups = createMemo(() => {
@@ -225,27 +227,40 @@ export default function LeftNav(props: {
   return (
     <nav class="leftnav">
       {/* ZCode style top header with Z logo and history arrows */}
-      <Show when={!isMac}>
-        <div class="ln-top-bar">
+      <div class="ln-top-bar" classList={{ "mac-nav": isMac }}>
+        <Show when={!isMac}>
           <div class="ln-logo-box" title="ZCode 3.0 / LakeMind">
             <img src={logoSrc()} alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
           </div>
-          <div class="ln-nav-arrows">
-            <button class="ln-arrow-btn" title="后退" disabled={props.busy}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="19" y1="12" x2="5" y2="12"></line>
-                <polyline points="12 19 5 12 12 5"></polyline>
-              </svg>
-            </button>
-            <button class="ln-arrow-btn" title="前进" disabled={props.busy}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-                <polyline points="12 5 19 12 12 19"></polyline>
-              </svg>
-            </button>
-          </div>
+        </Show>
+        <div class="ln-nav-arrows" data-tauri-drag-region>
+          {/* Sidebar toggle button (always show in the sidebar) */}
+          <button 
+            class="ln-arrow-btn" 
+            classList={{ active: props.leftOpen }}
+            title={props.leftOpen ? "隐藏侧边栏" : "显示侧边栏"} 
+            onClick={() => props.onToggleLeft?.()}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="9" y1="3" x2="9" y2="21"></line>
+            </svg>
+          </button>
+
+          <button class="ln-arrow-btn" title="后退" disabled={props.busy}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="19" y1="12" x2="5" y2="12"></line>
+              <polyline points="12 19 5 12 12 5"></polyline>
+            </svg>
+          </button>
+          <button class="ln-arrow-btn" title="前进" disabled={props.busy}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </button>
         </div>
-      </Show>
+      </div>
 
       {/* Quick Action links */}
       <div class="ln-quick-actions">

@@ -686,157 +686,165 @@ export default function App() {
     >
       <DropZone workspace={currentWorkspace().path} busy={busy()} onDropFiles={handleDropFiles} />
 
-      {/* Vertical Left Resizer */}
+      {/* Vertical Left Resizer: Runs full height since LeftNav and right-container are side-by-side */}
       <Show when={!settingsOpen() && leftOpen()}>
         <div 
           class="resizer-v" 
           classList={{ dragging: isDraggingLeft() }}
-          style={{ left: `${leftWidth() - 3}px` }} 
+          style={{ left: `${leftWidth() - 3}px`, top: 0, height: "100vh" }} 
           onMouseDown={startDraggingLeft}
         />
       </Show>
-      
-      {/* Vertical Right Resizer */}
-      <Show when={inspectorOpen() && !settingsOpen()}>
-        <div 
-          class="resizer-v" 
-          classList={{ dragging: isDraggingRight() }}
-          style={{ right: `${rightWidth() - 3}px` }} 
-          onMouseDown={startDraggingRight}
+
+      {/* Left Column: LeftNav Sidebar */}
+      <Show when={!settingsOpen()}>
+        <LeftNav
+          workspace={currentWorkspace().name}
+          workspacePath={currentWorkspace().path}
+          workspaces={workspaces()}
+          tasks={visibleTasks()}
+          activeTaskId={activeTaskId()}
+          onSelectTask={selectTask}
+          onDeleteTask={deleteTask}
+          onSelectWorkspace={selectWorkspace}
+          onRemoveWorkspace={removeWorkspace}
+          onAddWorkspace={addWorkspace}
+          onImportFile={handleImportFile}
+          sources={sources()}
+          fileTrigger={fileTrigger()}
+          selected={selectedTable()?.name ?? null}
+          busy={busy()}
+          onSelect={selectTable}
+          onOpenSettings={onSettings}
+          onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
+          onNewChat={() => createTask("", "chat")}
+          inspectorOpen={inspectorOpen()}
+          consoleOpen={consoleState() !== "folded"}
+          onToggleInspector={() => setInspectorOpen((v) => !v)}
+          onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
+          onDisconnect={() => { setSources([]); setSelectedTable(null); setResult(null); setError(null); setTasks([]); setActiveTaskId(null); }}
+          leftOpen={leftOpen()}
+          onToggleLeft={() => setLeftOpen(!leftOpen())}
         />
       </Show>
 
-      {/* Horizontal Console Resizer */}
-      <Show when={consoleState() !== "folded" && !settingsOpen()}>
-        <div 
-          class="resizer-h" 
-          classList={{ dragging: isDraggingBottom() }}
-          style={{ 
-            bottom: `${parseFloat(bottomHeightActual()) - 3}px`,
-            left: `${leftWidth()}px`,
-            right: rightWidthActual()
-          }} 
-          onMouseDown={startDraggingBottom}
+      {/* Right Column: Full height reaching top (通顶) */}
+      <div class="right-container">
+        <TitleBar
+          inspectorOpen={inspectorOpen()}
+          consoleOpen={consoleState() !== "folded"}
+          onToggleInspector={() => setInspectorOpen((v) => !v)}
+          onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
+          onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
+          selectedTable={selectedTable()}
+          onOpenSettings={onSettings}
+          busy={busy()}
+          leftOpen={leftOpen()}
+          onToggleLeft={() => setLeftOpen(!leftOpen())}
         />
-      </Show>
 
-      <TitleBar
-        inspectorOpen={inspectorOpen()}
-        consoleOpen={consoleState() !== "folded"}
-        onToggleInspector={() => setInspectorOpen((v) => !v)}
-        onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
-        onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
-        selectedTable={selectedTable()}
-        onOpenSettings={onSettings}
-        busy={busy()}
-        leftOpen={leftOpen()}
-        onToggleLeft={() => setLeftOpen(!leftOpen())}
-      />
-
-      <Show when={settingsOpen()} fallback={
-        <>
-          <LeftNav
-            workspace={currentWorkspace().name}
-            workspacePath={currentWorkspace().path}
-            workspaces={workspaces()}
-            tasks={visibleTasks()}
-            activeTaskId={activeTaskId()}
-            onSelectTask={selectTask}
-            onDeleteTask={deleteTask}
-            onSelectWorkspace={selectWorkspace}
-            onRemoveWorkspace={removeWorkspace}
-            onAddWorkspace={addWorkspace}
-            onImportFile={handleImportFile}
-            sources={sources()}
-            fileTrigger={fileTrigger()}
-            selected={selectedTable()?.name ?? null}
-            busy={busy()}
-            onSelect={selectTable}
-            onOpenSettings={onSettings}
-            onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
-            onNewChat={() => createTask("", "chat")}
-            inspectorOpen={inspectorOpen()}
-            consoleOpen={consoleState() !== "folded"}
-            onToggleInspector={() => setInspectorOpen((v) => !v)}
-            onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
-            onDisconnect={() => { setSources([]); setSelectedTable(null); setResult(null); setError(null); setTasks([]); setActiveTaskId(null); }}
-          />
-
-          <main class="main">
-            <Show
-              when={activeTaskId() !== null && (activeTask()?.kind !== "chat" || (activeTask()?.messages?.length ?? 0) > 0)}
-              fallback={
-                <HomePanel
-                  workspace={currentWorkspace().name}
-                  workspaces={workspaces()}
-                  onSelectWorkspace={selectWorkspace}
-                  onAddWorkspace={addWorkspace}
-                  onCreateTask={(prompt) => {
-                    const active = activeTask();
-                    if (active && active.kind === "chat" && (active.messages?.length ?? 0) === 0) {
-                      void sendChatMessageFromHome(active.id, prompt);
-                    } else {
-                      void createChatTaskAndSend(prompt);
-                    }
-                  }}
-                  onAddSource={handleSelectAndRegisterSource}
-                />
-              }
-            >
-              {/* activeTaskId 非空时，按 task.kind 在 ChatView 与 SqlEditor 间切换。
-                  SqlEditor 通过自身的 createEffect 同步 initialSql，
-                  切换 SQL task 时编辑器内容会正确更新，无需 keyed 重建。 */}
-              <Switch>
-                <Match when={(activeTask()?.kind ?? "sql") === "chat"}>
-                  <ChatView
-                    messages={activeTask()?.messages ?? []}
-                    workspace={currentWorkspace().name}
-                    onSend={sendChatMessage}
-                    onOpenInSqlPanel={openInSqlPanel}
-                  />
-                </Match>
-                <Match when={(activeTask()?.kind ?? "sql") === "sql"}>
-                  <div class="sql-view">
-                    <SqlEditor
-                      initialSql={sql()}
-                      rowCap={rowCap()}
-                      busy={busy()}
-                      onSql={handleSqlChange}
-                      onRowCap={setRowCap}
-                      onRun={run}
-                      onCopy={copySql}
-                      onSave={saveActiveTask}
-                      onClose={() => deleteTask(activeTaskId()!)}
-                    />
-                    <Show when={error()}>
-                      <pre class="error-box">{error()}</pre>
-                    </Show>
-                    <ResultTable result={result()} />
-                  </div>
-                </Match>
-              </Switch>
+        <Show when={settingsOpen()} fallback={
+          <div class="right-content-layout">
+            {/* Vertical Right Resizer (nested inside content layout, starts below TitleBar) */}
+            <Show when={inspectorOpen()}>
+              <div 
+                class="resizer-v" 
+                classList={{ dragging: isDraggingRight() }}
+                style={{ right: `${rightWidth() - 3}px` }} 
+                onMouseDown={startDraggingRight}
+              />
             </Show>
-          </main>
 
-          <Show when={inspectorOpen()}>
-            <RightInspector
-              table={selectedTable()}
-              busy={busy()}
-              onInjectSql={injectSql}
-              onPreview={previewTable}
+            {/* Horizontal Console Resizer (nested inside content layout) */}
+            <Show when={consoleState() !== "folded"}>
+              <div 
+                class="resizer-h" 
+                classList={{ dragging: isDraggingBottom() }}
+                style={{ 
+                  bottom: `${parseFloat(bottomHeightActual()) - 3}px`,
+                  left: 0,
+                  right: rightWidthActual()
+                }} 
+                onMouseDown={startDraggingBottom}
+              />
+            </Show>
+
+            <main class="main">
+              <Show
+                when={activeTaskId() !== null && (activeTask()?.kind !== "chat" || (activeTask()?.messages?.length ?? 0) > 0)}
+                fallback={
+                  <HomePanel
+                    workspace={currentWorkspace().name}
+                    workspaces={workspaces()}
+                    onSelectWorkspace={selectWorkspace}
+                    onAddWorkspace={addWorkspace}
+                    onCreateTask={(prompt) => {
+                      const active = activeTask();
+                      if (active && active.kind === "chat" && (active.messages?.length ?? 0) === 0) {
+                        void sendChatMessageFromHome(active.id, prompt);
+                      } else {
+                        void createChatTaskAndSend(prompt);
+                      }
+                    }}
+                    onAddSource={handleSelectAndRegisterSource}
+                  />
+                }
+              >
+                {/* activeTaskId 非空时，按 task.kind 在 ChatView 与 SqlEditor 间切换。
+                    SqlEditor 通过自身的 createEffect 同步 initialSql，
+                    切换 SQL task 时编辑器内容会正确更新，无需 keyed 重建。 */}
+                <Switch>
+                  <Match when={(activeTask()?.kind ?? "sql") === "chat"}>
+                    <ChatView
+                      messages={activeTask()?.messages ?? []}
+                      workspace={currentWorkspace().name}
+                      onSend={sendChatMessage}
+                      onOpenInSqlPanel={openInSqlPanel}
+                    />
+                  </Match>
+                  <Match when={(activeTask()?.kind ?? "sql") === "sql"}>
+                    <div class="sql-view">
+                      <SqlEditor
+                        initialSql={sql()}
+                        rowCap={rowCap()}
+                        busy={busy()}
+                        onSql={handleSqlChange}
+                        onRowCap={setRowCap}
+                        onRun={run}
+                        onCopy={copySql}
+                        onSave={saveActiveTask}
+                        onClose={() => deleteTask(activeTaskId()!)}
+                      />
+                      <Show when={error()}>
+                        <pre class="error-box">{error()}</pre>
+                      </Show>
+                      <ResultTable result={result()} />
+                    </div>
+                  </Match>
+                </Switch>
+              </Show>
+            </main>
+
+            <Show when={inspectorOpen()}>
+              <RightInspector
+                table={selectedTable()}
+                busy={busy()}
+                onInjectSql={injectSql}
+                onPreview={previewTable}
+              />
+            </Show>
+
+            <BottomConsole
+              logs={logs()}
+              state={consoleState()}
+              onCycleState={cycleConsole}
+              onClear={() => setLogs([])}
             />
-          </Show>
-
-          <BottomConsole
-            logs={logs()}
-            state={consoleState()}
-            onCycleState={cycleConsole}
-            onClear={() => setLogs([])}
-          />
-        </>
-      }>
-        <SettingsPage onClose={() => setSettingsOpen(false)} />
-      </Show>
+          </div>
+        }>
+          <SettingsPage onClose={() => setSettingsOpen(false)} />
+        </Show>
+      </div>
     </div>
   );
 }
