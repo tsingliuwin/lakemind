@@ -6,13 +6,15 @@ const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("
 
 type SettingsTab =
   | "general"
-  | "codeIntel"
+  | "codePreview"
   | "modelSettings"
   | "skills"
   | "mcp"
   | "plugins"
-  | "sync"
-  | "stats";
+  | "commands"
+  | "indexDb"
+  | "stats"
+  | "guide";
 
 export default function SettingsPage(props: {
   onClose: () => void;
@@ -73,65 +75,142 @@ export default function SettingsPage(props: {
             classList={{ active: activeTab() === "general" }}
             onClick={() => setActiveTab("general")}
           >
-            <span class="ss-nav-icon">⚙️</span>
+            <span class="ss-nav-icon">
+              <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="4" cy="5" r="1.5" />
+                <path d="M5.5 5h8M2 5h0.5" />
+                <circle cx="12" cy="11" r="1.5" />
+                <path d="M2 11h8.5M13.5 11h0.5" />
+              </svg>
+            </span>
             <span>{t("settingsGeneral")}</span>
           </button>
+
           <button 
             class="ss-nav-item" 
-            classList={{ active: activeTab() === "codeIntel" }}
-            onClick={() => setActiveTab("codeIntel")}
+            classList={{ active: activeTab() === "codePreview" }}
+            onClick={() => setActiveTab("codePreview")}
           >
-            <span class="ss-nav-icon">💻</span>
-            <span>{t("settingsCodeIntel")}</span>
+            <span class="ss-nav-icon">
+              <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 11L2 8l3-3M11 5l3 3-3 3M9.5 4l-3 8" />
+              </svg>
+            </span>
+            <span>{t("settingsCodePreview")}</span>
           </button>
+
           <button 
             class="ss-nav-item" 
             classList={{ active: activeTab() === "modelSettings" }}
             onClick={() => setActiveTab("modelSettings")}
           >
-            <span class="ss-nav-icon">🧠</span>
-            <span>{t("modelSettingsCenter")}</span>
+            <span class="ss-nav-icon">
+              <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="3" width="12" height="4" rx="1" />
+                <rect x="2" y="9" width="12" height="4" rx="1" />
+                <circle cx="4.5" cy="5" r="0.5" fill="currentColor" />
+                <circle cx="4.5" cy="11" r="0.5" fill="currentColor" />
+              </svg>
+            </span>
+            <span>{t("modelSettings")}</span>
           </button>
+
           <button 
             class="ss-nav-item" 
             classList={{ active: activeTab() === "skills" }}
             onClick={() => setActiveTab("skills")}
           >
-            <span class="ss-nav-icon">🚀</span>
+            <span class="ss-nav-icon">
+              <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 13l7.5-7.5" />
+                <path d="M12.5 1.5l.5 1.5.5-1.5zM14 3.5l-1.5.5 1.5.5zM10.5 3l.5-.5-.5-.5z" />
+                <circle cx="10.5" cy="5.5" r="0.75" fill="currentColor" />
+                <circle cx="7.5" cy="2.5" r="0.75" fill="currentColor" />
+              </svg>
+            </span>
             <span>{t("settingsSkills")}</span>
           </button>
+
           <button 
             class="ss-nav-item" 
             classList={{ active: activeTab() === "mcp" }}
             onClick={() => setActiveTab("mcp")}
           >
-            <span class="ss-nav-icon">🔌</span>
+            <span class="ss-nav-icon">
+              <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 3v4a3 3 0 0 1-6 0V3M4 1v2M8 1v2M6 10v4" />
+              </svg>
+            </span>
             <span>{t("settingsMcp")}</span>
           </button>
+
           <button 
             class="ss-nav-item" 
             classList={{ active: activeTab() === "plugins" }}
             onClick={() => setActiveTab("plugins")}
           >
-            <span class="ss-nav-icon">🧩</span>
+            <span class="ss-nav-icon">
+              <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10 2.5c0-.83-.67-1.5-1.5-1.5S7 1.67 7 2.5v1.2H4.5A1.3 1.3 0 0 0 3.2 5v2.5h1.2c.83 0 1.5.67 1.5 1.5S5.23 10.5 4.4 10.5H3.2V13a1.3 1.3 0 0 0 1.3 1.3H7v-1.2c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v1.2h2.5a1.3 1.3 0 0 0 1.3-1.3V10.5h-1.2c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5h1.2V5A1.3 1.3 0 0 0 12.5 3.7H10V2.5z" />
+              </svg>
+            </span>
             <span>{t("settingsPlugins")}</span>
           </button>
+
           <button 
             class="ss-nav-item" 
-            classList={{ active: activeTab() === "sync" }}
-            onClick={() => setActiveTab("sync")}
+            classList={{ active: activeTab() === "commands" }}
+            onClick={() => setActiveTab("commands")}
           >
-            <span class="ss-nav-icon">☁️</span>
-            <span>{t("settingsSync")}</span>
+            <span class="ss-nav-icon">
+              <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 4l4 4-4 4M9 12h4" />
+              </svg>
+            </span>
+            <span>{t("settingsCommands")}</span>
           </button>
+
+          <button 
+            class="ss-nav-item" 
+            classList={{ active: activeTab() === "indexDb" }}
+            onClick={() => setActiveTab("indexDb")}
+          >
+            <span class="ss-nav-icon">
+              <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 2s4.5 1.5 4.5 4.5v3.5c0 2.5-2.5 4.5-4.5 5-2-.5-4.5-2.5-4.5-5V6.5C3.5 3.5 8 2 8 2z" />
+                <path d="M6 8.5l1.5 1.5 3-3" />
+              </svg>
+            </span>
+            <span>{t("settingsIndexDb")}</span>
+          </button>
+
           <button 
             class="ss-nav-item" 
             classList={{ active: activeTab() === "stats" }}
             onClick={() => setActiveTab("stats")}
           >
-            <span class="ss-nav-icon">📊</span>
+            <span class="ss-nav-icon">
+              <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2.5 13.5h11M4.5 13.5v-3M8 13.5v-6M11.5 13.5V3.5" />
+              </svg>
+            </span>
             <span>{t("settingsStats")}</span>
           </button>
+
+          <div class="ss-guide-container">
+            <button 
+              class="ss-nav-item" 
+              classList={{ active: activeTab() === "guide" }}
+              onClick={() => setActiveTab("guide")}
+            >
+              <span class="ss-nav-icon">
+                <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12.5 3.5c-1.5-1.5-5 0-6 1a25 25 0 0 0-2.5 3.5L2 9.5l2.5 2L6 14l1.5-2c1.5-.8 2.8-1.8 3.8-3.3 1-1 2.5-4.5 1.2-5.7zM4.5 11.5L2 14M9.5 6.5l.5.5" />
+                </svg>
+              </span>
+              <span>{t("settingsGuide")}</span>
+            </button>
+          </div>
         </nav>
 
         <div class="ss-footer">
@@ -139,8 +218,11 @@ export default function SettingsPage(props: {
             <span class="ss-avatar">研</span>
             <span class="ss-username">研途教育</span>
           </div>
-          <button class="ss-gear-btn active" title="Settings" onClick={() => props.onClose()}>
-            <span class="gear-icon">⚙️</span>
+          <button class="ln-foot-icon-btn active" title="Settings" onClick={() => props.onClose()}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
           </button>
         </div>
       </aside>
@@ -157,10 +239,31 @@ export default function SettingsPage(props: {
             <h2>{t("settingsGeneral")}</h2>
             <p class="settings-view-subtitle">{t("generalSettingsDesc")}</p>
           </div>
-          <div class="settings-panel-box single-col">
-            <div class="settings-group">
-              <label class="settings-row-control">
-                <span class="label-title">界面语言 / Language</span>
+          
+          <div class="settings-section-card">
+            <div class="settings-row-control">
+              <div class="settings-row-info">
+                <span class="label-title">界面主题</span>
+                <p class="settings-row-desc">切换应用界面使用的主题外观。</p>
+              </div>
+              <div class="select-wrapper">
+                <select 
+                  value={currentTheme()} 
+                  onChange={(e) => setCurrentTheme(e.currentTarget.value as any)}
+                >
+                  <option value="geek-dark">🌙 极客暗黑</option>
+                  <option value="classic-dark">🌙 经典深色</option>
+                  <option value="light">☀️ 极致浅色</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="settings-row-control">
+              <div class="settings-row-info">
+                <span class="label-title">界面语言</span>
+                <p class="settings-row-desc">选择应用 UI 的显示语言。</p>
+              </div>
+              <div class="select-wrapper">
                 <select 
                   value={currentLanguage()} 
                   onChange={(e) => setCurrentLanguage(e.currentTarget.value as any)}
@@ -168,33 +271,34 @@ export default function SettingsPage(props: {
                   <option value="zh">简体中文</option>
                   <option value="en">English</option>
                 </select>
-              </label>
+              </div>
+            </div>
 
-              <label class="settings-row-control">
-                <span class="label-title">界面主题 / Theme</span>
-                <select 
-                  value={currentTheme()} 
-                  onChange={(e) => setCurrentTheme(e.currentTarget.value as any)}
+            <div class="settings-row-control">
+              <div class="settings-row-info">
+                <span class="label-title">界面缩放</span>
+                <p class="settings-row-desc">调整当前窗口中文本和控件的整体显示大小。</p>
+              </div>
+              <div class="segmented-control">
+                <button 
+                  classList={{ active: currentZoom() === 90 }} 
+                  onClick={() => setCurrentZoom(90)}
                 >
-                  <option value="geek-dark">极客暗黑 (ZCode 3.0)</option>
-                  <option value="classic-dark">经典深色</option>
-                  <option value="light">极致浅色</option>
-                </select>
-              </label>
-
-              <label class="settings-row-control">
-                <span class="label-title">界面缩放 / Zoom</span>
-                <select 
-                  value={currentZoom()} 
-                  onChange={(e) => setCurrentZoom(Number(e.currentTarget.value))}
+                  偏小
+                </button>
+                <button 
+                  classList={{ active: currentZoom() === 100 }} 
+                  onClick={() => setCurrentZoom(100)}
                 >
-                  <option value={80}>80%</option>
-                  <option value={90}>90%</option>
-                  <option value={100}>100%</option>
-                  <option value={110}>110%</option>
-                  <option value={120}>120%</option>
-                </select>
-              </label>
+                  正常
+                </button>
+                <button 
+                  classList={{ active: currentZoom() === 110 }} 
+                  onClick={() => setCurrentZoom(110)}
+                >
+                  偏大
+                </button>
+              </div>
             </div>
           </div>
         </Show>

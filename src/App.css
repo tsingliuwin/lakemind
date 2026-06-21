@@ -1822,7 +1822,7 @@ select:hover:not(:disabled) {
 .ss-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   padding: 6px 8px;
   flex: 1;
   overflow-y: auto;
@@ -1834,14 +1834,14 @@ select:hover:not(:disabled) {
   border: none;
   display: flex;
   align-items: center;
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  border-radius: 8px;
   color: var(--text-secondary);
   font-weight: 500;
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
   transition: all 0.12s ease;
-  gap: 10px;
+  gap: 12px;
   text-align: left;
   justify-content: flex-start;
 }
@@ -1852,22 +1852,52 @@ select:hover:not(:disabled) {
 }
 
 .ss-nav-item.active {
-  background: var(--bg-active);
-  color: #fff;
-  border-left: 2px solid var(--accent-blue);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  padding-left: 10px;
+  background: var(--bg-active) !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 8px !important;
+  padding-left: 12px !important;
 }
 
 .ss-nav-icon {
-  font-size: 14px;
-  color: var(--text-dim);
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  color: inherit;
+  flex-shrink: 0;
 }
 
 .ss-nav-item.active .ss-nav-icon {
-  color: var(--accent-blue);
+  color: inherit;
+}
+
+.ss-nav-svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  display: block;
+}
+
+.ss-gear-svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  display: block;
+}
+
+.ss-guide-container {
+  margin-top: auto;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  overflow: hidden;
+  padding: 1px;
+  margin-bottom: 4px;
+}
+
+.ss-guide-container .ss-nav-item {
+  border-radius: 7px;
 }
 
 .ss-footer {
@@ -1928,35 +1958,6 @@ select:hover:not(:disabled) {
   white-space: nowrap;
 }
 
-.ss-gear-btn {
-  background: transparent !important;
-  border: none !important;
-  padding: 4px;
-  border-radius: 4px;
-  color: var(--text-dim);
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.12s ease;
-}
-
-.ss-gear-btn:hover {
-  background: var(--bg-hover) !important;
-  color: var(--text-secondary) !important;
-}
-
-.ss-gear-btn.active {
-  color: var(--accent-blue) !important;
-  background: transparent !important;
-}
-
-.ss-gear-btn.active:hover {
-  background: var(--bg-hover) !important;
-  color: var(--accent-blue) !important;
-}
 
 /* Settings Right Area Content */
 .settings-content {
@@ -1990,53 +1991,157 @@ select:hover:not(:disabled) {
 
 /* Settings Panels Box Layout */
 .settings-panel-box {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   min-height: 480px;
   flex: 1;
   display: flex;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: none;
   overflow: hidden;
 }
 
 .settings-panel-box.single-col {
-  padding: 24px 30px;
+  padding: 8px 0;
   flex-direction: column;
 }
 
 .settings-panel-box.two-cols {
   flex-direction: row;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }
 
-/* Generic settings row rules (for General Tab) */
-.settings-group {
+/* Generic settings section card and row controls */
+.settings-section-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  margin-bottom: 20px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  max-width: 460px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  max-width: 680px;
 }
 
 .settings-row-control {
   display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-faint);
+  gap: 24px;
+}
+
+.settings-section-card .settings-row-control:last-child {
+  border-bottom: none;
+}
+
+.settings-row-info {
+  display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
 }
 
-.settings-row-control .label-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.settings-row-control select {
-  font-size: 12px;
-  padding: 6px 10px;
-  background: var(--bg-elevated);
-  border-color: var(--border-strong);
+.settings-row-info .label-title {
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text-primary);
-  border-radius: var(--radius-sm);
+}
+
+.settings-row-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Custom styled select dropdown wrapper matching ZCode design */
+.select-wrapper {
+  position: relative;
+  width: 180px;
+}
+
+.select-wrapper select {
   width: 100%;
+  height: 32px;
+  padding: 6px 32px 6px 12px;
+  font-size: 12px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-primary);
+  cursor: pointer;
+  outline: none;
+  transition: all 0.12s ease;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.select-wrapper select:hover {
+  background: var(--bg-active);
+  border-color: var(--text-secondary);
+}
+
+.select-wrapper::after {
+  content: "";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 10px;
+  height: 6px;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23808080' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* Segmented control for Zoom preferences */
+.segmented-control {
+  display: inline-flex;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+  width: 180px;
+  box-sizing: border-box;
+}
+
+.segmented-control button {
+  flex: 1;
+  height: 24px;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.12s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.segmented-control button:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+
+.segmented-control button.active {
+  background: var(--bg-active) !important;
+  color: var(--text-primary) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-strong) !important;
 }
 
 /* Two-column splits inside Model Settings */

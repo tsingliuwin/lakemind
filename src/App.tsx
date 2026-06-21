@@ -702,6 +702,7 @@ export default function App() {
                 busy={busy()}
                 leftOpen={leftOpen()}
                 onToggleLeft={() => setLeftOpen(!leftOpen())}
+                hideLayoutToggles={true}
               />
             }
           />
