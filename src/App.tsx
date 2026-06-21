@@ -1,5 +1,6 @@
 import { createSignal, Show, Switch, Match, onMount, onCleanup, createEffect } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import DropZone from "./components/DropZone";
 import LeftNav from "./components/LeftNav";
 import TitleBar from "./components/TitleBar";
@@ -11,7 +12,6 @@ import SettingsPage from "./components/SettingsPage";
 import HomePanel from "./components/HomePanel";
 import { executeSql, importFileToWorkspace } from "./lib/duckdb";
 import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage } from "./lib/types";
-import { mockAgentReply } from "./lib/mock";
 import ChatView from "./components/ChatView";
 import "./App.css";
 
@@ -66,8 +66,97 @@ export default function App() {
   const [activeTaskId, setActiveTaskId] = createSignal<string | null>(null);
   const [fileTrigger, setFileTrigger] = createSignal<number>(0);
 
-  // Load workspaces on startup
+  // --- model settings sync ---
+  const [availableModels, setAvailableModels] = createSignal<string[]>([]);
+  const [selectedModel, setSelectedModel] = createSignal<string>("");
+
+  async function loadModelsFromSettings() {
+    try {
+      const json = await invoke<string>("load_settings_json");
+      if (json && json !== "{}") {
+        const loaded = JSON.parse(json);
+        const models: string[] = [];
+        if (loaded.providers) {
+          for (const prov of loaded.providers) {
+            if (prov.enabled && prov.models) {
+              for (const m of prov.models) {
+                models.push(m.id);
+              }
+            }
+          }
+        }
+        setAvailableModels(models);
+        if (models.length > 0) {
+          if (!selectedModel() || !models.includes(selectedModel())) {
+            setSelectedModel(models[0]);
+          }
+        } else {
+          setSelectedModel("");
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load settings models:", err);
+    }
+  }
+
+  createEffect(() => {
+    if (!settingsOpen()) {
+      void loadModelsFromSettings();
+    }
+  });
+
   onMount(async () => {
+    void loadModelsFromSettings();
+
+    const unlistenAgent = await listen<any>("agent-event", (event) => {
+      const payload = event.payload;
+      const targetId = payload.taskId;
+      
+      setTasks((prev) =>
+        prev.map((t) => {
+          if (t.id !== targetId) return t;
+          
+          let messages = [...(t.messages ?? [])];
+          if (messages.length === 0) return t;
+          
+          let lastMsg = messages[messages.length - 1];
+          if (lastMsg.role !== "assistant") {
+            lastMsg = {
+              id: `msg-assistant-${Date.now()}`,
+              role: "assistant",
+              content: "",
+              cards: [],
+              ts: Date.now(),
+            };
+            messages.push(lastMsg);
+          } else {
+            lastMsg = { ...lastMsg, cards: lastMsg.cards ? [...lastMsg.cards] : [] };
+            messages[messages.length - 1] = lastMsg;
+          }
+          
+          if (payload.kind === "text") {
+            lastMsg.content += payload.text ?? "";
+          } else if (payload.kind === "error") {
+            lastMsg.content += `\n\n⚠️ **错误**: ${payload.text ?? "未知错误"}`;
+          } else if (payload.kind === "card" && payload.card) {
+            const card = payload.card;
+            const existingIdx = lastMsg.cards.findIndex(c => c.id === card.id);
+            if (existingIdx >= 0) {
+              lastMsg.cards[existingIdx] = card;
+            } else {
+              lastMsg.cards.push(card);
+            }
+          }
+          
+          if (payload.kind === "done" || payload.kind === "error") {
+            void saveChatTaskBackend(targetId, t.name, messages);
+          }
+          
+          return { ...t, messages };
+        })
+      );
+    });
+
     try {
       const list = await invoke<Workspace[]>("load_workspaces");
       if (list && list.length > 0) {
@@ -98,6 +187,7 @@ export default function App() {
     window.addEventListener("keydown", handleGlobalKeyDown);
     onCleanup(() => {
       window.removeEventListener("keydown", handleGlobalKeyDown);
+      unlistenAgent();
     });
   });
 
@@ -202,6 +292,7 @@ export default function App() {
       createdAt: Date.now(),
       kind,
       messages: kind === "chat" ? [] : undefined,
+      modelId: kind === "chat" ? selectedModel() : undefined,
       saved: false,
     };
 
@@ -246,12 +337,18 @@ export default function App() {
     }
   }
 
-  /** ChatView 发送消息：追加 user 消息 → Mock 回复 → 追加 assistant 消息。 */
+  /** ChatView 发送消息：追加 user 消息 → 触发 Rust Agent 循环。 */
   async function sendChatMessage(prompt: string) {
     const id = activeTaskId();
     if (!id) return;
     const task = tasks().find((t) => t.id === id);
     if (!task) return;
+
+    if (availableModels().length === 0) {
+      alert("请先前往设置中心（右上角菜单 -> 模型设置中心）配置并启用大模型供应商及模型。");
+      return;
+    }
+
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: "user",
@@ -267,18 +364,34 @@ export default function App() {
     );
     await saveChatTaskBackend(id, task.name, updatedMessages);
 
-    // MOCK：M2 接真 Agent 时替换 mockAgentReply。
-    const reply = await mockAgentReply(prompt);
-    const finalMessages = [...updatedMessages, reply];
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id ? { ...t, messages: finalMessages } : t,
-      ),
-    );
-    await saveChatTaskBackend(id, task.name, finalMessages);
+    try {
+      const activeModel = task.modelId || selectedModel();
+      const historyToSend = task.messages ?? [];
+      const historyJson = JSON.stringify(historyToSend);
+      
+      await invoke("start_agent_chat", {
+        taskId: id,
+        modelId: activeModel,
+        prompt,
+        historyJson,
+      });
+    } catch (err) {
+      console.error("Failed to start agent chat:", err);
+      const errorMsg: ChatMessage = {
+        id: `msg-err-${Date.now()}`,
+        role: "assistant",
+        content: `⚠️ **无法启动对话**: ${err}`,
+        ts: Date.now(),
+      };
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === id ? { ...t, messages: [...updatedMessages, errorMsg] } : t,
+        ),
+      );
+    }
   }
 
-  async function createChatTaskAndSend(prompt: string) {
+  async function createChatTaskAndSend(prompt: string, modelId?: string) {
     const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     let name = prompt.trim();
     if (name.length > 20) {
@@ -287,12 +400,19 @@ export default function App() {
     name = name.replace(/\n/g, " ");
     if (!name) name = "新对话";
 
+    if (availableModels().length === 0) {
+      alert("请先前往设置中心（右上角菜单 -> 模型设置中心）配置并启用大模型供应商及模型。");
+      return;
+    }
+
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: "user",
       content: prompt,
       ts: Date.now(),
     };
+
+    const targetModel = modelId || selectedModel();
 
     const newTask: QueryTask = {
       id,
@@ -301,23 +421,39 @@ export default function App() {
       createdAt: Date.now(),
       kind: "chat",
       messages: [userMsg],
+      modelId: targetModel,
+      saved: false,
     };
 
     setTasks((prev) => [...prev, newTask]);
     setActiveTaskId(id);
     await saveChatTaskBackend(id, name, [userMsg]);
 
-    const reply = await mockAgentReply(prompt);
-    const finalMessages = [userMsg, reply];
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id ? { ...t, messages: finalMessages } : t,
-      ),
-    );
-    await saveChatTaskBackend(id, name, finalMessages);
+    try {
+      const historyJson = JSON.stringify([]);
+      await invoke("start_agent_chat", {
+        taskId: id,
+        modelId: targetModel,
+        prompt,
+        historyJson,
+      });
+    } catch (err) {
+      console.error("Failed to start agent chat:", err);
+      const errorMsg: ChatMessage = {
+        id: `msg-err-${Date.now()}`,
+        role: "assistant",
+        content: `⚠️ **无法启动对话**: ${err}`,
+        ts: Date.now(),
+      };
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === id ? { ...t, messages: [userMsg, errorMsg] } : t,
+        ),
+      );
+    }
   }
 
-  async function sendChatMessageFromHome(id: string, prompt: string) {
+  async function sendChatMessageFromHome(id: string, prompt: string, modelId?: string) {
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: "user",
@@ -331,6 +467,13 @@ export default function App() {
     }
     name = name.replace(/\n/g, " ");
 
+    if (availableModels().length === 0) {
+      alert("请先前往设置中心（右上角菜单 -> 模型设置中心）配置并启用大模型供应商及模型。");
+      return;
+    }
+
+    const targetModel = modelId || selectedModel();
+
     setTasks((prev) =>
       prev.map((t) =>
         t.id === id
@@ -338,20 +481,35 @@ export default function App() {
               ...t,
               name,
               messages: [userMsg],
+              modelId: targetModel,
             }
           : t
       )
     );
     await saveChatTaskBackend(id, name, [userMsg]);
 
-    const reply = await mockAgentReply(prompt);
-    const finalMessages = [userMsg, reply];
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id ? { ...t, messages: finalMessages } : t,
-      ),
-    );
-    await saveChatTaskBackend(id, name, finalMessages);
+    try {
+      const historyJson = JSON.stringify([]);
+      await invoke("start_agent_chat", {
+        taskId: id,
+        modelId: targetModel,
+        prompt,
+        historyJson,
+      });
+    } catch (err) {
+      console.error("Failed to start agent chat:", err);
+      const errorMsg: ChatMessage = {
+        id: `msg-err-${Date.now()}`,
+        role: "assistant",
+        content: `⚠️ **无法启动对话**: ${err}`,
+        ts: Date.now(),
+      };
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === id ? { ...t, messages: [userMsg, errorMsg] } : t,
+        ),
+      );
+    }
   }
 
   /** ChatCard「在 SQL 面板打开」：新建 SQL task 注入 SQL 并自动执行。 */
@@ -788,15 +946,18 @@ export default function App() {
                     workspaces={workspaces()}
                     onSelectWorkspace={selectWorkspace}
                     onAddWorkspace={addWorkspace}
-                    onCreateTask={(prompt) => {
+                    onCreateTask={(prompt, modelId) => {
                       const active = activeTask();
                       if (active && active.kind === "chat" && (active.messages?.length ?? 0) === 0) {
-                        void sendChatMessageFromHome(active.id, prompt);
+                        void sendChatMessageFromHome(active.id, prompt, modelId);
                       } else {
-                        void createChatTaskAndSend(prompt);
+                        void createChatTaskAndSend(prompt, modelId);
                       }
                     }}
                     onAddSource={handleSelectAndRegisterSource}
+                    availableModels={availableModels()}
+                    selectedModel={selectedModel()}
+                    onSelectModel={setSelectedModel}
                   />
                 }
               >
@@ -807,6 +968,19 @@ export default function App() {
                       workspace={currentWorkspace().name}
                       onSend={sendChatMessage}
                       onOpenInSqlPanel={openInSqlPanel}
+                      availableModels={availableModels()}
+                      selectedModel={activeTask()?.modelId || selectedModel()}
+                      onSelectModel={(model) => {
+                        const activeId = activeTaskId();
+                        if (activeId) {
+                          setTasks((prev) =>
+                            prev.map((t) =>
+                              t.id === activeId ? { ...t, modelId: model } : t
+                            )
+                          );
+                        }
+                        setSelectedModel(model);
+                      }}
                     />
                   </Match>
                   <Match when={(activeTask()?.kind ?? "sql") === "sql"}>

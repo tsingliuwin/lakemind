@@ -116,6 +116,8 @@ export interface QueryTask {
   messages?: ChatMessage[];
   /** 仅 sql：该查询是否已保存 */
   saved?: boolean;
+  /** 使用的模型 ID */
+  modelId?: string;
 }
 
 export interface Workspace {

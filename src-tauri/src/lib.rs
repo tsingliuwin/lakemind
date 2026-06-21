@@ -12,6 +12,7 @@ mod duckdb;
 mod error;
 mod model;
 mod state;
+mod agent;
 
 use state::AppState;
 
@@ -55,6 +56,7 @@ pub fn run() {
             commands::set_app_config,
             commands::load_settings_json,
             commands::save_settings_json,
+            commands::start_agent_chat,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

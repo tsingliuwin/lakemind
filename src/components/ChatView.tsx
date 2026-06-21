@@ -1,4 +1,4 @@
-import { For, Show, createSignal, createEffect } from "solid-js";
+import { For, Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import type { ChatMessage } from "../lib/types";
 import ChatCard from "./ChatCard";
 
@@ -18,7 +18,25 @@ export default function ChatView(props: {
   workspace: string;
   onSend: (prompt: string) => void;
   onOpenInSqlPanel: (sql: string) => void;
+  availableModels: string[];
+  selectedModel: string;
+  onSelectModel: (model: string) => void;
 }) {
+  const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
+  let modelRef: HTMLDivElement | undefined;
+
+  const handleClickOutside = (e: MouseEvent) => {
+    if (modelRef && !modelRef.contains(e.target as Node)) {
+      setModelDropdownOpen(false);
+    }
+  };
+
+  onMount(() => {
+    document.addEventListener("mousedown", handleClickOutside);
+    onCleanup(() => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    });
+  });
   const [input, setInput] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   let scrollEl: HTMLDivElement | undefined;
@@ -98,7 +116,47 @@ export default function ChatView(props: {
           rows={2}
         />
         <div class="chat-composer__toolbar">
-          <span class="chat-composer__ws" title="当前工作区">📂 {props.workspace}</span>
+          <div style="display: flex; align-items: center; gap: 16px;">
+            <span class="chat-composer__ws" title="当前工作区">📂 {props.workspace}</span>
+            
+            {/* Model Selector Dropdown */}
+            <div class="dropdown-wrapper" ref={modelRef} style="position: relative;">
+              <button 
+                class="pill-btn select-btn" 
+                style="background: transparent; border: none; padding: 2px 6px; font-size: 12px; display: flex; align-items: center; gap: 4px; color: var(--text-normal); cursor: pointer; border-radius: 4px;"
+                onClick={() => setModelDropdownOpen(!modelDropdownOpen())}
+              >
+                <span class="model-status-dot" classList={{ active: props.availableModels.length > 0 }} />
+                <span>{props.selectedModel || "选择模型"}</span>
+                <span class="btn-caret">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </span>
+              </button>
+              <Show when={modelDropdownOpen()}>
+                <div class="custom-dropdown-list" style="bottom: calc(100% + 6px); left: 0; right: auto;">
+                  <Show
+                    when={props.availableModels.length > 0}
+                    fallback={
+                      <div class="dropdown-item muted" style="font-size: 11px; pointer-events: none; padding: 6px 12px;">
+                        无可用模型
+                      </div>
+                    }
+                  >
+                    <For each={props.availableModels}>
+                      {(model) => (
+                        <button class="dropdown-item" onClick={() => { props.onSelectModel(model); setModelDropdownOpen(false); }}>
+                          {model}
+                        </button>
+                      )}
+                    </For>
+                  </Show>
+                </div>
+              </Show>
+            </div>
+          </div>
+          
           <span class="muted">Enter 发送 · Shift+Enter 换行</span>
           <button class="chat-composer__send" disabled={busy() || !input().trim()} onClick={() => void send()}>
             {busy() ? "运行中…" : "发送 ↑"}

@@ -13,7 +13,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use tauri::State;
+use tauri::{State, Emitter};
 
 use crate::db::{self, SourceRecord};
 use crate::duckdb::{execute, register, scan, schema};
@@ -577,6 +577,42 @@ pub async fn delete_task(task_id: String) -> Result<(), String> {
     }
     conn.execute("DELETE FROM tasks WHERE id = ?", [&task_id])
         .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn start_agent_chat(
+    window: tauri::Window,
+    task_id: String,
+    model_id: String,
+    prompt: String,
+    history_json: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let app_state = state.inner().clone();
+    tokio::spawn(async move {
+        if let Err(e) = crate::agent::run_agent_chat_stream(
+            window.clone(),
+            task_id.clone(),
+            model_id,
+            prompt,
+            history_json,
+            app_state,
+        )
+        .await
+        {
+            eprintln!("Agent execution error: {e}");
+            let _ = window.emit(
+                "agent-event",
+                crate::agent::AgentStreamEvent {
+                    task_id,
+                    kind: "error".to_string(),
+                    text: Some(e),
+                    card: None,
+                },
+            );
+        }
+    });
     Ok(())
 }
 

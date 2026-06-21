@@ -6,8 +6,11 @@ interface HomePanelProps {
   workspaces: Workspace[];
   onSelectWorkspace: (path: string) => void;
   onAddWorkspace: (path: string) => void;
-  onCreateTask: (prompt: string) => void;
+  onCreateTask: (prompt: string, modelId: string) => void;
   onAddSource?: () => void;
+  availableModels: string[];
+  selectedModel: string;
+  onSelectModel: (model: string) => void;
 }
 
 export default function HomePanel(props: HomePanelProps) {
@@ -16,7 +19,6 @@ export default function HomePanel(props: HomePanelProps) {
   const [searchQuery, setSearchQuery] = createSignal("");
   
   // Custom dropdown states for model, confirmation, priority
-  const [selectedModel, setSelectedModel] = createSignal("GLM-5.2");
   const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
   
   const [selectedConfirm, setSelectedConfirm] = createSignal("变更前确认");
@@ -79,7 +81,7 @@ export default function HomePanel(props: HomePanelProps) {
   const handleSubmit = () => {
     const val = inputValue().trim();
     if (!val) return;
-    props.onCreateTask(val);
+    props.onCreateTask(val, props.selectedModel);
     setInputValue("");
   };
 
@@ -209,8 +211,8 @@ export default function HomePanel(props: HomePanelProps) {
                 {/* Model Selector Dropdown */}
                 <div class="dropdown-wrapper" ref={modelRef}>
                   <button class="pill-btn select-btn" onClick={() => setModelDropdownOpen(!modelDropdownOpen())}>
-                    <span class="model-status-dot" />
-                    <span>{selectedModel()}</span>
+                    <span class="model-status-dot" classList={{ active: props.availableModels.length > 0 }} />
+                    <span>{props.selectedModel || "选择模型"}</span>
                     <span class="btn-caret">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                         <polyline points="6 9 12 15 18 9"></polyline>
@@ -219,15 +221,22 @@ export default function HomePanel(props: HomePanelProps) {
                   </button>
                   <Show when={modelDropdownOpen()}>
                     <div class="custom-dropdown-list">
-                      <button class="dropdown-item" onClick={() => { setSelectedModel("GLM-5.2"); setModelDropdownOpen(false); }}>
-                        GLM-5.2
-                      </button>
-                      <button class="dropdown-item" onClick={() => { setSelectedModel("GLM-4.0"); setModelDropdownOpen(false); }}>
-                        GLM-4.0
-                      </button>
-                      <button class="dropdown-item" onClick={() => { setSelectedModel("GLM-4-Turbo"); setModelDropdownOpen(false); }}>
-                        GLM-4-Turbo
-                      </button>
+                      <Show
+                        when={props.availableModels.length > 0}
+                        fallback={
+                          <div class="dropdown-item muted" style="font-size: 12px; pointer-events: none; padding: 6px 12px;">
+                            无可用模型，请先去设置配置
+                          </div>
+                        }
+                      >
+                        <For each={props.availableModels}>
+                          {(model) => (
+                            <button class="dropdown-item" onClick={() => { props.onSelectModel(model); setModelDropdownOpen(false); }}>
+                              {model}
+                            </button>
+                          )}
+                        </For>
+                      </Show>
                     </div>
                   </Show>
                 </div>

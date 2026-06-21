@@ -26,6 +26,8 @@ duckdb = { version = "1.5.4", features = ["bundled"] }
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 walkdir = "2.5.0"
 tokio = { version = "1.52.3", features = ["full"] }
+rig-core = "0.38.2"
+futures-util = "0.3"
 
 [profile.dev]
 debug = 0

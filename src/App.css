@@ -2945,6 +2945,9 @@ select:hover:not(:disabled) {
   border: 1px solid var(--accent-green);
   background: transparent;
 }
+.model-status-dot.active {
+  background: var(--accent-green);
+}
 
 /* Custom Dropdown Lists */
 .custom-dropdown-list {
