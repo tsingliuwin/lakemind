@@ -19,7 +19,9 @@
         "decorations": true,
         "dragDropEnabled": true,
         "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "backgroundColor": "#0a0a0b",
+        "theme": "Dark"
       }
     ],
     "security": {
