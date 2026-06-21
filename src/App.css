@@ -938,8 +938,8 @@ select:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: var(--bg-hover);
-  border: 1px solid var(--border-faint);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   padding: 4px 6px;
   cursor: pointer;
@@ -948,7 +948,10 @@ select:hover:not(:disabled) {
   min-width: 0;
   flex: 1;
 }
-.ln-user-badge:hover,
+.ln-user-badge:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-faint);
+}
 .ln-user-badge.active {
   background: var(--bg-active);
   border-color: var(--border-strong);
