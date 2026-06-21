@@ -40,6 +40,7 @@ export default function App() {
   const [inspectorOpen, setInspectorOpen] = createSignal<boolean>(true);
   const [consoleState, setConsoleState] = createSignal<ConsoleState>("folded");
   const [settingsOpen, setSettingsOpen] = createSignal<boolean>(false);
+  const [leftOpen, setLeftOpen] = createSignal<boolean>(true);
 
   const [leftWidth, setLeftWidth] = createSignal<number>(240);
   const [rightWidth, setRightWidth] = createSignal<number>(280);
@@ -670,7 +671,11 @@ export default function App() {
 
   return (
     <div 
-      classList={{ "app-shell": true, "no-inspector": !inspectorOpen() }}
+      classList={{ 
+        "app-shell": true, 
+        "no-inspector": !inspectorOpen(),
+        "sidebar-collapsed": !leftOpen()
+      }}
       style={{
         "--left-width": `${leftWidth()}px`,
         "--right-width": `${rightWidth()}px`,
@@ -682,7 +687,7 @@ export default function App() {
       <DropZone workspace={currentWorkspace().path} busy={busy()} onDropFiles={handleDropFiles} />
 
       {/* Vertical Left Resizer */}
-      <Show when={!settingsOpen()}>
+      <Show when={!settingsOpen() && leftOpen()}>
         <div 
           class="resizer-v" 
           classList={{ dragging: isDraggingLeft() }}
@@ -723,6 +728,9 @@ export default function App() {
         onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
         selectedTable={selectedTable()}
         onOpenSettings={onSettings}
+        busy={busy()}
+        leftOpen={leftOpen()}
+        onToggleLeft={() => setLeftOpen(!leftOpen())}
       />
 
       <Show when={settingsOpen()} fallback={

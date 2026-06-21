@@ -4,6 +4,8 @@ import type { SourceTable, QueryTask, Workspace, FileItem } from "../lib/types";
 import { t, currentLanguage, setCurrentLanguage } from "../lib/i18n";
 import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom, logoSrc } from "../lib/theme";
 
+const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
+
 /**
  * Left navigation styled like ZCode 3.0:
  * - Top-bar with Z logo and navigation arrows (<- and ->).
@@ -164,14 +166,14 @@ export default function LeftNav(props: {
                   class="fe-node-row"
                   classList={{ "is-dir": item.is_dir }}
                   style={{
-                    display: "flex",
-                    "align-items": "center",
-                    padding: "4px 8px",
-                    "border-radius": "4px",
-                    cursor: "pointer",
-                    transition: "background 0.1s",
-                    background: highlightFile() === item.path ? "rgba(80, 160, 255, 0.14)" : undefined,
-                    "box-shadow": highlightFile() === item.path ? "inset 2px 0 0 var(--accent-blue, #50a0ff)" : undefined,
+                     display: "flex",
+                     "align-items": "center",
+                     padding: "4px 8px",
+                     "border-radius": "4px",
+                     cursor: "pointer",
+                     transition: "background 0.1s",
+                     background: highlightFile() === item.path ? "rgba(80, 160, 255, 0.14)" : undefined,
+                     "box-shadow": highlightFile() === item.path ? "inset 2px 0 0 var(--accent-blue, #50a0ff)" : undefined,
                   }}
                   onClick={() => {
                     if (item.is_dir) {
@@ -223,25 +225,27 @@ export default function LeftNav(props: {
   return (
     <nav class="leftnav">
       {/* ZCode style top header with Z logo and history arrows */}
-      <div class="ln-top-bar">
-        <div class="ln-logo-box" title="ZCode 3.0 / LakeMind">
-          <img src={logoSrc()} alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
+      <Show when={!isMac}>
+        <div class="ln-top-bar">
+          <div class="ln-logo-box" title="ZCode 3.0 / LakeMind">
+            <img src={logoSrc()} alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
+          </div>
+          <div class="ln-nav-arrows">
+            <button class="ln-arrow-btn" title="后退" disabled={props.busy}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="19" y1="12" x2="5" y2="12"></line>
+                <polyline points="12 19 5 12 12 5"></polyline>
+              </svg>
+            </button>
+            <button class="ln-arrow-btn" title="前进" disabled={props.busy}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+              </svg>
+            </button>
+          </div>
         </div>
-        <div class="ln-nav-arrows">
-          <button class="ln-arrow-btn" title="后退" disabled={props.busy}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="19" y1="12" x2="5" y2="12"></line>
-              <polyline points="12 19 5 12 12 5"></polyline>
-            </svg>
-          </button>
-          <button class="ln-arrow-btn" title="前进" disabled={props.busy}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-              <polyline points="12 5 19 12 12 19"></polyline>
-            </svg>
-          </button>
-        </div>
-      </div>
+      </Show>
 
       {/* Quick Action links */}
       <div class="ln-quick-actions">

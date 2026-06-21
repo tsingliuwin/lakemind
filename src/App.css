@@ -188,6 +188,14 @@ select:hover:not(:disabled) {
   grid-template-columns: var(--left-width, 240px) 1fr 0px;
 }
 
+.app-shell.sidebar-collapsed {
+  --left-width: 0px !important;
+}
+
+.app-shell.sidebar-collapsed .leftnav {
+  display: none !important;
+}
+
 /* --- Custom TitleBar (decorations: false) --- */
 .titlebar {
   grid-area: titlebar;
