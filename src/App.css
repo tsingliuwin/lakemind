@@ -948,7 +948,7 @@ select:hover:not(:disabled) {
   align-items: center;
   gap: 6px;
   background: transparent;
-  border: 1px solid transparent;
+  border: 1px solid transparent !important;
   border-radius: var(--radius-sm);
   padding: 4px 6px;
   cursor: pointer;
@@ -958,12 +958,12 @@ select:hover:not(:disabled) {
   flex: 1;
 }
 .ln-user-badge:hover {
-  background: var(--bg-hover);
-  border-color: var(--border-faint);
+  background: var(--bg-hover) !important;
+  border-color: transparent !important;
 }
 .ln-user-badge.active {
-  background: var(--bg-active);
-  border-color: var(--border-strong);
+  background: var(--bg-active) !important;
+  border-color: transparent !important;
 }
 .user-avatar {
   width: 20px;
