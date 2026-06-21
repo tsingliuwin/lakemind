@@ -62,8 +62,7 @@ export default function SettingsPage(props: {
   const [editingProviderId, setEditingProviderId] = createSignal<string | null>(null);
   const [tempName, setTempName] = createSignal("");
 
-  // Speed test connection mock state
-  const [testingModelId, setTestingModelId] = createSignal<string | null>(null);
+
 
   // New provider temp states
   const [newProviderName, setNewProviderName] = createSignal("");
@@ -260,13 +259,7 @@ export default function SettingsPage(props: {
     setIsModelModalOpen(false);
   };
 
-  const testModelConnection = (modelId: string) => {
-    setTestingModelId(modelId);
-    setTimeout(() => {
-      setTestingModelId(null);
-      alert(`测试连接成功: 已成功建立与 ${modelId} 的网络连接！`);
-    }, 800);
-  };
+
 
   return (
     <div class="settings-layout-wrapper">
@@ -782,14 +775,7 @@ export default function SettingsPage(props: {
                                       {model.contextWindow >= 10000 ? `${model.contextWindow / 10000}万` : model.contextWindow}
                                     </span>
                                     <div class="model-actions-btns" style="display: flex; align-items: center; gap: 8px;">
-                                      <button 
-                                        class="sp-action-icon-btn" 
-                                        title="测试连接"
-                                        disabled={testingModelId() === model.id}
-                                        onClick={() => testModelConnection(model.id)}
-                                      >
-                                        {testingModelId() === model.id ? "⏳" : "🔌"}
-                                      </button>
+
                                       <button class="sp-action-icon-btn" title="编辑模型" onClick={() => handleOpenEditModel(model)}>✏️</button>
                                       <button class="sp-action-icon-btn" title="删除模型" onClick={() => handleDeleteModel(model.id)}>🗑️</button>
                                     </div>
