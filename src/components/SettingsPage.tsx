@@ -2,6 +2,8 @@ import { createSignal, Show, onMount, onCleanup } from "solid-js";
 import { t, currentLanguage, setCurrentLanguage } from "../lib/i18n";
 import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom, logoSrc } from "../lib/theme";
 
+const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
+
 type SettingsTab =
   | "general"
   | "codeIntel"
@@ -15,6 +17,7 @@ type SettingsTab =
 export default function SettingsPage(props: {
   onClose: () => void;
   onOpenSettings?: () => void;
+  titleBar?: any;
 }) {
   const [activeTab, setActiveTab] = createSignal<SettingsTab>("modelSettings");
   const [connectionType, setConnectionType] = createSignal<string>("coding");
@@ -48,13 +51,15 @@ export default function SettingsPage(props: {
   });
 
   return (
-    <div class="settings-layout" style={{ "grid-column": "1 / -1", "grid-row": "2 / -1", "z-index": 90 }}>
+    <div class="settings-layout-wrapper">
       {/* Settings Sidebar */}
       <aside class="settings-sidebar">
-        <div class="ss-logo-area">
-          <div class="ss-logo-box">
-            <img src={logoSrc()} alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
-          </div>
+        <div class="ss-logo-area" classList={{ "mac-nav": isMac }}>
+          <Show when={!isMac}>
+            <div class="ss-logo-box">
+              <img src={logoSrc()} alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
+            </div>
+          </Show>
         </div>
 
         <button class="ss-back-btn" onClick={() => props.onClose()}>
@@ -130,18 +135,21 @@ export default function SettingsPage(props: {
         </nav>
 
         <div class="ss-footer">
-          <div class="ss-user-badge">
+          <div class="ss-user-badge" onClick={() => alert("研途教育")}>
             <span class="ss-avatar">研</span>
             <span class="ss-username">研途教育</span>
           </div>
-          <button class="ss-gear-btn active" title="Settings">
+          <button class="ss-gear-btn active" title="Settings" onClick={() => props.onClose()}>
             <span class="gear-icon">⚙️</span>
           </button>
         </div>
       </aside>
 
-      {/* Settings Main Content Area */}
-      <main class="settings-content">
+      {/* Settings Right Area */}
+      <div class="settings-right-container">
+        {props.titleBar}
+        {/* Settings Main Content Area */}
+        <main class="settings-content">
         
         {/* Tab 1: General Settings (常规) */}
         <Show when={activeTab() === "general"}>
@@ -348,7 +356,8 @@ export default function SettingsPage(props: {
             </div>
           </div>
         </Show>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }

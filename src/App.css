@@ -1732,22 +1732,33 @@ select:hover:not(:disabled) {
    ZCode 3.0 Settings Page Layout
    =========================================================================== */
 
-.settings-layout {
+.settings-layout-wrapper {
   display: flex;
-  height: calc(100vh - 30px); /* Subtract TitleBar height */
+  height: 100vh;
   width: 100vw;
   background: var(--bg-base);
   overflow: hidden;
 }
 
+.settings-right-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-width: 0;
+}
+
 .settings-sidebar {
   width: var(--left-width, 240px);
+  min-width: var(--left-width, 240px);
+  max-width: var(--left-width, 240px);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg-surface);
   border-right: 1px solid var(--border-faint);
   min-height: 0;
+  height: 100vh;
 }
 
 .ss-logo-area {
@@ -1755,6 +1766,12 @@ select:hover:not(:disabled) {
   align-items: center;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-faint);
+  height: 38px;
+}
+.ss-logo-area.mac-nav {
+  height: 30px;
+  padding: 0 14px 0 80px;
+  justify-content: flex-start;
 }
 
 .ss-logo-box {
@@ -1773,24 +1790,25 @@ select:hover:not(:disabled) {
 }
 
 .ss-back-btn {
-  margin: 14px 10px 10px;
-  background: transparent;
-  border: 1px solid var(--border-strong);
+  margin: 8px 10px 10px;
+  background: transparent !important;
+  border: 1px solid transparent !important;
   border-radius: var(--radius-sm);
   padding: 8px 12px;
-  color: var(--text-primary);
+  color: var(--text-secondary);
   display: flex;
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  font-weight: 600;
-  transition: all 0.15s ease;
+  font-weight: 500;
+  transition: all 0.12s ease;
   justify-content: flex-start;
 }
 
 .ss-back-btn:hover {
-  background: var(--bg-hover);
-  border-color: var(--text-secondary);
+  background: var(--bg-hover) !important;
+  color: var(--text-primary) !important;
+  border-color: transparent !important;
 }
 
 .ss-back-btn .back-icon {
@@ -1866,13 +1884,25 @@ select:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: var(--bg-hover);
-  border: 1px solid var(--border-faint);
+  background: transparent;
+  border: 1px solid transparent !important;
   border-radius: var(--radius-sm);
   padding: 4px 6px;
   color: var(--text-primary);
   min-width: 0;
   flex: 1;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.ss-user-badge:hover {
+  background: var(--bg-hover) !important;
+  border-color: transparent !important;
+}
+
+.ss-user-badge.active {
+  background: var(--bg-active) !important;
+  border-color: transparent !important;
 }
 
 .ss-avatar {
@@ -1899,8 +1929,8 @@ select:hover:not(:disabled) {
 }
 
 .ss-gear-btn {
-  background: transparent;
-  border: none;
+  background: transparent !important;
+  border: none !important;
   padding: 4px;
   border-radius: 4px;
   color: var(--text-dim);
@@ -1909,11 +1939,23 @@ select:hover:not(:disabled) {
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.ss-gear-btn:hover {
+  background: var(--bg-hover) !important;
+  color: var(--text-secondary) !important;
 }
 
 .ss-gear-btn.active {
-  color: var(--accent-blue);
-  background: var(--bg-active);
+  color: var(--accent-blue) !important;
+  background: transparent !important;
+}
+
+.ss-gear-btn.active:hover {
+  background: var(--bg-hover) !important;
+  color: var(--accent-blue) !important;
 }
 
 /* Settings Right Area Content */

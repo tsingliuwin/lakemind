@@ -685,19 +685,37 @@ export default function App() {
       }}
     >
       <DropZone workspace={currentWorkspace().path} busy={busy()} onDropFiles={handleDropFiles} />
+      <Show 
+        when={!settingsOpen()}
+        fallback={
+          <SettingsPage 
+            onClose={() => setSettingsOpen(false)} 
+            titleBar={
+              <TitleBar
+                inspectorOpen={inspectorOpen()}
+                consoleOpen={consoleState() !== "folded"}
+                onToggleInspector={() => setInspectorOpen((v) => !v)}
+                onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
+                onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
+                selectedTable={selectedTable()}
+                onOpenSettings={onSettings}
+                busy={busy()}
+                leftOpen={leftOpen()}
+                onToggleLeft={() => setLeftOpen(!leftOpen())}
+              />
+            }
+          />
+        }
+      >
+        <Show when={leftOpen()}>
+          <div 
+            class="resizer-v" 
+            classList={{ dragging: isDraggingLeft() }}
+            style={{ left: `${leftWidth() - 3}px`, top: 0, height: "100vh" }} 
+            onMouseDown={startDraggingLeft}
+          />
+        </Show>
 
-      {/* Vertical Left Resizer: Runs full height since LeftNav and right-container are side-by-side */}
-      <Show when={!settingsOpen() && leftOpen()}>
-        <div 
-          class="resizer-v" 
-          classList={{ dragging: isDraggingLeft() }}
-          style={{ left: `${leftWidth() - 3}px`, top: 0, height: "100vh" }} 
-          onMouseDown={startDraggingLeft}
-        />
-      </Show>
-
-      {/* Left Column: LeftNav Sidebar */}
-      <Show when={!settingsOpen()}>
         <LeftNav
           workspace={currentWorkspace().name}
           workspacePath={currentWorkspace().path}
@@ -722,26 +740,22 @@ export default function App() {
           leftOpen={leftOpen()}
           onToggleLeft={() => setLeftOpen(!leftOpen())}
         />
-      </Show>
 
-      {/* Right Column: Full height reaching top (通顶) */}
-      <div class="right-container">
-        <TitleBar
-          inspectorOpen={inspectorOpen()}
-          consoleOpen={consoleState() !== "folded"}
-          onToggleInspector={() => setInspectorOpen((v) => !v)}
-          onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
-          onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
-          selectedTable={selectedTable()}
-          onOpenSettings={onSettings}
-          busy={busy()}
-          leftOpen={leftOpen()}
-          onToggleLeft={() => setLeftOpen(!leftOpen())}
-        />
+        <div class="right-container">
+          <TitleBar
+            inspectorOpen={inspectorOpen()}
+            consoleOpen={consoleState() !== "folded"}
+            onToggleInspector={() => setInspectorOpen((v) => !v)}
+            onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
+            onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
+            selectedTable={selectedTable()}
+            onOpenSettings={onSettings}
+            busy={busy()}
+            leftOpen={leftOpen()}
+            onToggleLeft={() => setLeftOpen(!leftOpen())}
+          />
 
-        <Show when={settingsOpen()} fallback={
           <div class="right-content-layout">
-            {/* Vertical Right Resizer (nested inside content layout, starts below TitleBar) */}
             <Show when={inspectorOpen()}>
               <div 
                 class="resizer-v" 
@@ -751,7 +765,6 @@ export default function App() {
               />
             </Show>
 
-            {/* Horizontal Console Resizer (nested inside content layout) */}
             <Show when={consoleState() !== "folded"}>
               <div 
                 class="resizer-h" 
@@ -786,9 +799,6 @@ export default function App() {
                   />
                 }
               >
-                {/* activeTaskId 非空时，按 task.kind 在 ChatView 与 SqlEditor 间切换。
-                    SqlEditor 通过自身的 createEffect 同步 initialSql，
-                    切换 SQL task 时编辑器内容会正确更新，无需 keyed 重建。 */}
                 <Switch>
                   <Match when={(activeTask()?.kind ?? "sql") === "chat"}>
                     <ChatView
@@ -837,10 +847,8 @@ export default function App() {
               onClear={() => setLogs([])}
             />
           </div>
-        }>
-          <SettingsPage onClose={() => setSettingsOpen(false)} />
-        </Show>
-      </div>
+        </div>
+      </Show>
     </div>
   );
 }
