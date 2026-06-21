@@ -511,6 +511,26 @@ impl Tool for SampleDataTool {
     }
 }
 
+fn sanitize_endpoint(endpoint: &str) -> String {
+    let mut clean = endpoint.trim().to_string();
+    while clean.ends_with('/') {
+        clean.pop();
+    }
+    if clean.ends_with("/chat/completions") {
+        clean = clean[..clean.len() - "/chat/completions".len()].to_string();
+    } else if clean.ends_with("/v1/chat/completions") {
+        clean = clean[..clean.len() - "/v1/chat/completions".len()].to_string();
+    } else if clean.ends_with("/v1/messages") {
+        clean = clean[..clean.len() - "/v1/messages".len()].to_string();
+    } else if clean.ends_with("/messages") {
+        clean = clean[..clean.len() - "/messages".len()].to_string();
+    }
+    while clean.ends_with('/') {
+        clean.pop();
+    }
+    clean
+}
+
 // ===========================================================================
 // Core Streaming Runner
 // ===========================================================================
@@ -594,23 +614,100 @@ pub async fn run_agent_chat_stream(
 禁止执行任何写操作（DELETE, DROP, UPDATE 等）。所有数据都必须从本地 SQL 查询获取。若需要可自行关联表查询。"#;
 
     let format = provider.api_format.to_lowercase();
-    if format == "openai" || format == "responses" {
+    if format == "openai" {
+        let base_url = sanitize_endpoint(&provider.endpoint);
         let client: rig_core::providers::openai::Client = rig_core::providers::openai::Client::builder()
             .api_key(&provider.api_key)
-            .base_url(&provider.endpoint)
+            .base_url(&base_url)
             .build()
             .map_err(|e| format!("构建 OpenAI 客户端失败: {e}"))?;
 
-        let agent = client
+        let mut agent_builder = client
+            .completions_api()
             .agent(&model_id)
             .preamble(preamble)
             .max_tokens(max_tokens_limit)
-            .additional_params(json!({"reasoning_effort": effort}))
             .tool(list_tool)
             .tool(desc_tool)
             .tool(exec_tool)
-            .tool(sample_tool)
-            .build();
+            .tool(sample_tool);
+
+        if model_id.starts_with("o1") || model_id.starts_with("o3") {
+            agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
+        }
+
+        let agent = agent_builder.build();
+
+        let mut stream = agent.stream_chat(prompt.clone(), rig_history)
+            .multi_turn(8)
+            .await;
+
+        use futures_util::StreamExt;
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text_struct))) => {
+                    let _ = window.emit("agent-event", AgentStreamEvent {
+                        task_id: task_id.clone(),
+                        kind: "text".to_string(),
+                        text: Some(text_struct.text),
+                        card: None,
+                        phase: Some("concluding".to_string()),
+                    });
+                }
+                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ReasoningDelta { reasoning, .. })) => {
+                    let _ = window.emit("agent-event", AgentStreamEvent {
+                        task_id: task_id.clone(),
+                        kind: "reasoning".to_string(),
+                        text: Some(reasoning),
+                        card: None,
+                        phase: None,
+                    });
+                }
+                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(reasoning_struct))) => {
+                    let _ = window.emit("agent-event", AgentStreamEvent {
+                        task_id: task_id.clone(),
+                        kind: "reasoning".to_string(),
+                        text: Some(reasoning_struct.display_text().to_string()),
+                        card: None,
+                        phase: None,
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    let err_val: StreamingError = e;
+                    let _ = window.emit("agent-event", AgentStreamEvent {
+                        task_id: task_id.clone(),
+                        kind: "error".to_string(),
+                        text: Some(err_val.to_string()),
+                        card: None,
+                        phase: None,
+                    });
+                    return Err(err_val.to_string());
+                }
+            }
+        }
+    } else if format == "responses" {
+        let base_url = sanitize_endpoint(&provider.endpoint);
+        let client: rig_core::providers::openai::Client = rig_core::providers::openai::Client::builder()
+            .api_key(&provider.api_key)
+            .base_url(&base_url)
+            .build()
+            .map_err(|e| format!("构建 OpenAI 客户端失败: {e}"))?;
+
+        let mut agent_builder = client
+            .agent(&model_id)
+            .preamble(preamble)
+            .max_tokens(max_tokens_limit)
+            .tool(list_tool)
+            .tool(desc_tool)
+            .tool(exec_tool)
+            .tool(sample_tool);
+
+        if model_id.starts_with("o1") || model_id.starts_with("o3") {
+            agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
+        }
+
+        let agent = agent_builder.build();
 
         let mut stream = agent.stream_chat(prompt.clone(), rig_history)
             .multi_turn(8)
@@ -661,9 +758,10 @@ pub async fn run_agent_chat_stream(
             }
         }
     } else if format == "anthropic" {
+        let base_url = sanitize_endpoint(&provider.endpoint);
         let client: rig_core::providers::anthropic::Client = rig_core::providers::anthropic::Client::builder()
             .api_key(provider.api_key.clone())
-            .base_url(&provider.endpoint)
+            .base_url(&base_url)
             .build()
             .map_err(|e| format!("构建 Anthropic 客户端失败: {e}"))?;
 
