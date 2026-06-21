@@ -63,6 +63,7 @@ struct SavedSettings {
 struct ModelItem {
     id: String,
     context_window: usize,
+    max_tokens: Option<usize>,
 }
 
 #[allow(dead_code)]
@@ -506,6 +507,12 @@ pub async fn run_agent_chat_stream(
     // 1. Get model provider config
     let provider = get_provider_for_model(&model_id)?;
 
+    // Get max_tokens limit for the chosen model, defaulting to 4096 if not set
+    let max_tokens_limit = provider.models.iter()
+        .find(|m| m.id == model_id)
+        .and_then(|m| m.max_tokens)
+        .unwrap_or(4096) as u64;
+
     // 2. Parse chat history
     let history: Vec<ChatMessageDto> = serde_json::from_str(&history_json)
         .map_err(|e| format!("解析聊天历史失败: {e}"))?;
@@ -537,6 +544,7 @@ pub async fn run_agent_chat_stream(
         let agent = client
             .agent(&model_id)
             .preamble(preamble)
+            .max_tokens(max_tokens_limit)
             .tool(list_tool)
             .tool(desc_tool)
             .tool(exec_tool)
@@ -597,6 +605,7 @@ pub async fn run_agent_chat_stream(
         let agent = client
             .agent(&model_id)
             .preamble(preamble)
+            .max_tokens(4096)
             .tool(list_tool)
             .tool(desc_tool)
             .tool(exec_tool)

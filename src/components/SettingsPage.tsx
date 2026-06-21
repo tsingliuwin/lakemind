@@ -20,6 +20,7 @@ type SettingsTab =
 export interface ModelItem {
   id: string;
   contextWindow: number;
+  maxTokens?: number;
 }
 
 export interface ModelProvider {
@@ -78,6 +79,7 @@ export default function SettingsPage(props: {
   const [editingModelId, setEditingModelId] = createSignal<string>("");
   const [modelFormId, setModelFormId] = createSignal("");
   const [modelFormWindow, setModelFormWindow] = createSignal(200000);
+  const [modelFormMaxTokens, setModelFormMaxTokens] = createSignal(4096);
 
   onMount(async () => {
     try {
@@ -185,6 +187,7 @@ export default function SettingsPage(props: {
     setModalMode("add");
     setModelFormId("");
     setModelFormWindow(200000);
+    setModelFormMaxTokens(4096);
     setIsModelModalOpen(true);
   };
 
@@ -194,6 +197,7 @@ export default function SettingsPage(props: {
     setEditingModelId(model.id);
     setModelFormId(model.id);
     setModelFormWindow(model.contextWindow);
+    setModelFormMaxTokens(model.maxTokens || 4096);
     setIsModelModalOpen(true);
   };
 
@@ -203,6 +207,7 @@ export default function SettingsPage(props: {
     setEditingModelId(model.id);
     setModelFormId(model.id);
     setModelFormWindow(model.contextWindow);
+    setModelFormMaxTokens(model.maxTokens || 4096);
     setIsModelModalOpen(true);
   };
 
@@ -223,11 +228,11 @@ export default function SettingsPage(props: {
           alert("模型已存在");
           return;
         }
-        setNewProviderModels([...newProviderModels(), { id: mId, contextWindow: modelFormWindow() }]);
+        setNewProviderModels([...newProviderModels(), { id: mId, contextWindow: modelFormWindow(), maxTokens: modelFormMaxTokens() }]);
       } else {
         setNewProviderModels(newProviderModels().map(m => {
           if (m.id === editingModelId()) {
-            return { id: mId, contextWindow: modelFormWindow() };
+            return { id: mId, contextWindow: modelFormWindow(), maxTokens: modelFormMaxTokens() };
           }
           return m;
         }));
@@ -245,11 +250,11 @@ export default function SettingsPage(props: {
         alert("模型已存在");
         return;
       }
-      updatedModels = [...currentProv.models, { id: mId, contextWindow: modelFormWindow() }];
+      updatedModels = [...currentProv.models, { id: mId, contextWindow: modelFormWindow(), maxTokens: modelFormMaxTokens() }];
     } else {
       updatedModels = currentProv.models.map(m => {
         if (m.id === editingModelId()) {
-          return { id: mId, contextWindow: modelFormWindow() };
+          return { id: mId, contextWindow: modelFormWindow(), maxTokens: modelFormMaxTokens() };
         }
         return m;
       });
@@ -624,8 +629,11 @@ export default function SettingsPage(props: {
                               <div class="model-row">
                                 <span class="model-name-lbl">{model.id}</span>
                                 <div style="display: flex; align-items: center; gap: 12px;">
-                                  <span class="sp-context-badge">
+                                  <span class="sp-context-badge" title="上下文窗口">
                                     {model.contextWindow >= 10000 ? `${model.contextWindow / 10000}万` : model.contextWindow}
+                                  </span>
+                                  <span class="sp-context-badge" title="最大输出 Token">
+                                    Out: {model.maxTokens || 4096}
                                   </span>
                                   <div class="model-actions-btns" style="display: flex; align-items: center; gap: 8px;">
                                     <button class="sp-action-icon-btn" title="编辑模型" onClick={() => handleOpenEditTempModel(model)}>✏️</button>
@@ -771,8 +779,11 @@ export default function SettingsPage(props: {
                                 <div class="model-row">
                                   <span class="model-name-lbl">{model.id}</span>
                                   <div style="display: flex; align-items: center; gap: 12px;">
-                                    <span class="sp-context-badge">
+                                    <span class="sp-context-badge" title="上下文窗口">
                                       {model.contextWindow >= 10000 ? `${model.contextWindow / 10000}万` : model.contextWindow}
+                                    </span>
+                                    <span class="sp-context-badge" title="最大输出 Token">
+                                      Out: {model.maxTokens || 4096}
                                     </span>
                                     <div class="model-actions-btns" style="display: flex; align-items: center; gap: 8px;">
 
@@ -835,7 +846,7 @@ export default function SettingsPage(props: {
                 />
               </div>
               
-              <div class="sp-form-row">
+              <div class="sp-form-row" style="margin-bottom: 16px;">
                 <span class="sp-form-label">上下文窗口</span>
                 <input 
                   type="number" 
@@ -843,6 +854,17 @@ export default function SettingsPage(props: {
                   placeholder="200000"
                   value={modelFormWindow()}
                   onInput={(e) => setModelFormWindow(parseInt(e.currentTarget.value) || 0)}
+                />
+              </div>
+
+              <div class="sp-form-row">
+                <span class="sp-form-label">最大输出 Token</span>
+                <input 
+                  type="number" 
+                  class="sp-input" 
+                  placeholder="4096"
+                  value={modelFormMaxTokens()}
+                  onInput={(e) => setModelFormMaxTokens(parseInt(e.currentTarget.value) || 0)}
                 />
               </div>
             </div>
