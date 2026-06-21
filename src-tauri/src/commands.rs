@@ -53,7 +53,7 @@ pub async fn list_sources(state: State<'_, AppState>) -> Result<Vec<SourceTable>
 /// the registered sources we already collected.
 const CUSTOM_TABLE_SQLS: [&str; 2] = [
     "SELECT table_name FROM duckdb_tables() WHERE database_name = 'lake' AND schema_name = 'main' AND NOT internal",
-    "SELECT table_name FROM duckdb_views() WHERE database_name = 'lake' AND schema_name = 'main' AND NOT internal",
+    "SELECT view_name as table_name FROM duckdb_views() WHERE database_name = 'lake' AND schema_name = 'main' AND NOT internal",
 ];
 
 /// All tables/views for the current workspace: registered sources (from the
@@ -612,6 +612,7 @@ pub async fn start_agent_chat(
                     kind: "error".to_string(),
                     text: Some(e),
                     card: None,
+                    phase: None,
                 },
             );
         }
@@ -734,7 +735,7 @@ fn table_exists_in_lake(conn: &duckdb::Connection, name: &str) -> bool {
         return true;
     }
     let view_sql = format!(
-        "SELECT count(*) FROM duckdb_views() WHERE database_name='lake' AND schema_name='main' AND table_name=\"{n}\""
+        "SELECT count(*) FROM duckdb_views() WHERE database_name='lake' AND schema_name='main' AND view_name=\"{n}\""
     );
     conn.query_row(&view_sql, [], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0
 }

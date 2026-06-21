@@ -1,18 +1,39 @@
 import { For, Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import type { ChatMessage } from "../lib/types";
 import ChatCard from "./ChatCard";
+import MarkdownRenderer from "./MarkdownRenderer";
 
 /**
  * 对话模式主区：消息流（上）+ 卡片内嵌 + 底部常驻输入框。
  *
- * 布局逻辑：
- * - 消息流占主体高度，可滚动；用户气泡右对齐，助手左对齐。
- * - 助手消息内可携带多张 ChatCard（步骤/SQL/结论）。
- * - 底部输入区常驻，复用 HomePanel 的输入胶囊风格。
- *
- * 数据流：发送消息 → 追加 user 消息 → await mockAgentReply → 追加 assistant 消息。
- * M2 接真 Agent 时，只替换 mockAgentReply 为真实的流式 LLM 调用。
+ * 优化特性：
+ * - Markdown 渲染（标题、代码块、表格、行内代码）
+ * - Agent 四步进度条（探索 → 理解 → 查询 → 总结）
+ * - 思考过程可展开/折叠
+ * - 工作时长计时器
  */
+
+const PHASE_LABELS: Record<string, string> = {
+  exploring: "探索数据库",
+  analyzing: "分析表结构",
+  querying: "执行查询",
+  concluding: "生成结论",
+};
+
+const PHASE_SHORT_LABELS: Record<string, string> = {
+  exploring: "探索",
+  analyzing: "分析",
+  querying: "查询",
+  concluding: "结论",
+};
+
+const PHASE_ORDER = ["exploring", "analyzing", "querying", "concluding"];
+
+function phaseIndex(phase: string | undefined): number {
+  if (!phase) return -1;
+  return PHASE_ORDER.indexOf(phase);
+}
+
 export default function ChatView(props: {
   messages: ChatMessage[];
   workspace: string;
@@ -46,6 +67,35 @@ export default function ChatView(props: {
   });
   const [input, setInput] = createSignal("");
   const [busy, setBusy] = createSignal(false);
+
+  // Reasoning fold state: track which messages have their reasoning open.
+  // Default: latest assistant message is open, older ones are closed.
+  const [openReasoningIds, setOpenReasoningIds] = createSignal<Set<string>>(new Set());
+
+  function toggleReasoning(msgId: string) {
+    setOpenReasoningIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(msgId)) next.delete(msgId);
+      else next.add(msgId);
+      return next;
+    });
+  }
+
+  // Elapsed timer for busy state
+  const [elapsedSec, setElapsedSec] = createSignal(0);
+
+  createEffect(() => {
+    if (busy()) {
+      const start = Date.now();
+      const handle = setInterval(() => {
+        setElapsedSec(Math.floor((Date.now() - start) / 1000));
+      }, 1000);
+      onCleanup(() => clearInterval(handle));
+    } else {
+      setElapsedSec(0);
+    }
+  });
+
   let scrollEl: HTMLDivElement | undefined;
 
   // 新消息到达或状态变为 busy 时滚到底部。
@@ -56,6 +106,30 @@ export default function ChatView(props: {
       scrollEl.scrollTop = scrollEl.scrollHeight;
     }
   });
+
+  // Auto-open reasoning for the latest streaming message
+  createEffect(() => {
+    const msgs = props.messages;
+    if (msgs.length > 0) {
+      const last = msgs[msgs.length - 1];
+      if (last.role === "assistant" && last.reasoning && busy()) {
+        setOpenReasoningIds((prev) => {
+          const next = new Set(prev);
+          next.add(last.id);
+          return next;
+        });
+      }
+    }
+  });
+
+  // Get the current phase from the last streaming assistant message
+  function currentPhase(): string | undefined {
+    const msgs = props.messages;
+    if (msgs.length === 0) return undefined;
+    const last = msgs[msgs.length - 1];
+    if (last.role === "assistant") return last.phase;
+    return undefined;
+  }
 
   async function send() {
     const text = input().trim();
@@ -89,13 +163,33 @@ export default function ChatView(props: {
               <div class={`chat-msg chat-msg--${msg.role}`}>
                 <div class="chat-msg__avatar">{msg.role === "user" ? "👤" : "🤖"}</div>
                 <div class="chat-msg__body">
+                  {/* Reasoning — collapsible with blue left border */}
                   <Show when={msg.reasoning}>
-                    <details class="chat-msg__reasoning" style="margin-bottom: 6px; border-left: 2px solid var(--accent-blue, #50a0ff); padding-left: 8px; opacity: 0.75;">
-                      <summary style="cursor: pointer; font-size: 12px; color: var(--text-dim); user-select: none;">💭 思考过程</summary>
-                      <div style="white-space: pre-wrap; margin-top: 4px; font-size: 12px; color: var(--text-dim);">{msg.reasoning}</div>
-                    </details>
+                    <div class="chat-reasoning">
+                      <div class="chat-reasoning__header" onClick={() => toggleReasoning(msg.id)}>
+                        <span class="chat-reasoning__icon">💭</span>
+                        <span class="chat-reasoning__label">思考过程</span>
+                        <span class="chat-reasoning__toggle">
+                          {openReasoningIds().has(msg.id) ? "▾" : "▸"}
+                        </span>
+                      </div>
+                      <Show when={openReasoningIds().has(msg.id)}>
+                        <div class="chat-reasoning__body">{msg.reasoning}</div>
+                      </Show>
+                    </div>
                   </Show>
-                  <div class="chat-msg__text">{msg.content}</div>
+
+                  {/* Message content — Markdown for assistant, plain for user */}
+                  <div class="chat-msg__text">
+                    <Show
+                      when={msg.role === "assistant"}
+                      fallback={msg.content}
+                    >
+                      <MarkdownRenderer content={msg.content} />
+                    </Show>
+                  </div>
+
+                  {/* Chat cards */}
                   <Show when={msg.cards && msg.cards.length > 0}>
                     <div class="chat-msg__cards">
                       <For each={msg.cards}>{(card) => (
@@ -107,11 +201,46 @@ export default function ChatView(props: {
               </div>
             )}
           </For>
+
+          {/* Busy / streaming indicator with phase progress bar */}
           <Show when={busy()}>
             <div class="chat-msg chat-msg--assistant">
               <div class="chat-msg__avatar">🤖</div>
               <div class="chat-msg__body">
-                <div class="chat-msg__typing">思考中…</div>
+                {/* Work duration — inspired by screenshot "已工作 46 秒 >" */}
+                <div class="chat-agent-status">
+                  <span class="agent-status__timer">
+                    ⏱ 已工作 {elapsedSec()} 秒
+                  </span>
+                  <Show when={currentPhase()}>
+                    <span class="agent-status__phase">
+                      {PHASE_LABELS[currentPhase()!] ?? currentPhase()}
+                    </span>
+                  </Show>
+                </div>
+
+                {/* Four-step progress bar */}
+                <div class="chat-phase-bar">
+                  <For each={PHASE_ORDER}>
+                    {(step, i) => {
+                      const idx = () => phaseIndex(currentPhase());
+                      const stepIdx = i();
+                      const isActive = () => idx() === stepIdx;
+                      const isDone = () => idx() > stepIdx;
+                      return (
+                        <>
+                          <Show when={stepIdx > 0}>
+                            <div class="phase-connector" classList={{ done: isDone() || isActive() }} />
+                          </Show>
+                          <div class="phase-step" classList={{ active: isActive(), done: isDone() }}>
+                            <span class="phase-dot" />
+                            <span>{PHASE_SHORT_LABELS[step] || step}</span>
+                          </div>
+                        </>
+                      );
+                    }}
+                  </For>
+                </div>
               </div>
             </div>
           </Show>

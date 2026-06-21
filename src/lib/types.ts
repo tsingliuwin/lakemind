@@ -104,6 +104,8 @@ export interface ChatMessage {
   /** 仅 assistant：本条回复产出的步骤卡片。 */
   cards?: ChatCard[];
   ts: number;
+  /** 仅 assistant：当前 Agent 工作阶段。 */
+  phase?: string; // "exploring" | "analyzing" | "querying" | "concluding"
 }
 
 export interface QueryTask {

@@ -3406,14 +3406,14 @@ select:hover:not(:disabled) {
   padding: 10px 14px;
   border-radius: var(--radius-card);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.6;
   word-break: break-word;
-  white-space: pre-wrap;
 }
 .chat-msg--user .chat-msg__text {
   background: rgba(59, 130, 246, 0.14);
   border: 1px solid rgba(59, 130, 246, 0.3);
   color: var(--text-primary);
+  white-space: pre-wrap;
 }
 .chat-msg--assistant .chat-msg__text {
   background: var(--bg-elevated);
@@ -3432,6 +3432,290 @@ select:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* --- Markdown 渲染样式（参考截图中的代码块、表格、行内代码等） --- */
+
+/* 消息内 Markdown 容器 */
+.md-rendered {
+  line-height: 1.6;
+}
+.md-rendered > *:first-child {
+  margin-top: 0;
+}
+.md-rendered > *:last-child {
+  margin-bottom: 0;
+}
+
+/* 标题 */
+.md-rendered h1,
+.md-rendered h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 16px 0 6px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-faint);
+  padding-bottom: 4px;
+}
+.md-rendered h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 12px 0 4px;
+  color: var(--text-primary);
+}
+.md-rendered h4,
+.md-rendered h5,
+.md-rendered h6 {
+  font-size: 13px;
+  font-weight: 500;
+  margin: 10px 0 4px;
+  color: var(--text-secondary);
+}
+
+/* 段落 */
+.md-rendered p {
+  margin: 6px 0;
+}
+
+/* 行内代码 — 截图中彩色背景圆角标签 */
+.md-rendered code:not(pre code) {
+  background: rgba(59, 130, 246, 0.12);
+  color: #93c5fd;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  font-weight: 500;
+}
+
+/* 代码块 — 截图中深色背景 + 语言标签 */
+.md-rendered pre {
+  background: #0a0a0d;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 8px 0;
+  position: relative;
+}
+.md-rendered pre code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+
+/* 表格 — 截图中的结构化表格 */
+.md-rendered table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  font-size: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.md-rendered thead {
+  background: var(--bg-hover);
+}
+.md-rendered th {
+  color: var(--text-dim);
+  padding: 6px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-strong);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.md-rendered td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-faint);
+  color: var(--text-primary);
+}
+.md-rendered tr:last-child td {
+  border-bottom: none;
+}
+.md-rendered tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* 列表 */
+.md-rendered ul,
+.md-rendered ol {
+  padding-left: 20px;
+  margin: 6px 0;
+}
+.md-rendered li {
+  margin: 3px 0;
+  line-height: 1.6;
+}
+.md-rendered li::marker {
+  color: var(--text-dim);
+}
+
+/* 粗体 / 斜体 */
+.md-rendered strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.md-rendered em {
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+/* 引用块 */
+.md-rendered blockquote {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--accent-blue);
+  background: rgba(59, 130, 246, 0.04);
+  color: var(--text-secondary);
+  border-radius: 0 6px 6px 0;
+}
+
+/* 水平线 */
+.md-rendered hr {
+  border: none;
+  border-top: 1px solid var(--border-strong);
+  margin: 12px 0;
+}
+
+/* 链接 */
+.md-rendered a {
+  color: var(--accent-blue);
+  text-decoration: none;
+}
+.md-rendered a:hover {
+  text-decoration: underline;
+}
+
+/* --- Agent 工作进度 — 参考截图「已工作 46 秒」 --- */
+
+.chat-agent-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.agent-status__timer {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  min-width: 90px;
+}
+.agent-status__phase {
+  color: var(--accent-blue);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+/* 四步进度条 */
+.chat-phase-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 8px 14px;
+}
+.phase-step {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-dim);
+  transition: color 0.25s;
+  white-space: nowrap;
+}
+.phase-step.active {
+  color: var(--accent-blue);
+  font-weight: 600;
+}
+.phase-step.done {
+  color: var(--accent-green);
+}
+.phase-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  transition: all 0.25s;
+  flex-shrink: 0;
+}
+.phase-step.active .phase-dot {
+  background: var(--accent-blue);
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.5);
+  animation: phasePulse 1.5s infinite;
+}
+.phase-step.done .phase-dot {
+  background: var(--accent-green);
+}
+.phase-connector {
+  flex: 1;
+  height: 2px;
+  background: var(--border-strong);
+  margin: 0 8px;
+  min-width: 16px;
+  transition: background 0.25s;
+}
+.phase-connector.done {
+  background: var(--accent-green);
+}
+
+@keyframes phasePulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(59, 130, 246, 0.3); }
+  50% { box-shadow: 0 0 12px rgba(59, 130, 246, 0.7); }
+}
+
+/* --- 思考过程 — 参考截图中的内嵌展示 --- */
+
+.chat-reasoning {
+  border-left: 2px solid var(--accent-blue);
+  background: rgba(59, 130, 246, 0.04);
+  border-radius: 0 8px 8px 0;
+  overflow: hidden;
+  margin-bottom: 2px;
+}
+.chat-reasoning__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: var(--text-dim);
+  transition: background 0.12s;
+}
+.chat-reasoning__header:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+.chat-reasoning__icon {
+  font-size: 13px;
+}
+.chat-reasoning__label {
+  font-weight: 500;
+}
+.chat-reasoning__toggle {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.chat-reasoning__body {
+  padding: 6px 12px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 /* --- 卡片 --- */

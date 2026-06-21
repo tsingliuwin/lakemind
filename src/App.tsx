@@ -139,6 +139,8 @@ export default function App() {
             lastMsg.content += payload.text ?? "";
           } else if (payload.kind === "reasoning") {
             lastMsg.reasoning = (lastMsg.reasoning ?? "") + (payload.text ?? "");
+          } else if (payload.kind === "phase" && payload.phase) {
+            lastMsg.phase = payload.phase;
           } else if (payload.kind === "error") {
             lastMsg.content += `\n\n⚠️ **错误**: ${payload.text ?? "未知错误"}`;
           } else if (payload.kind === "card" && payload.card) {

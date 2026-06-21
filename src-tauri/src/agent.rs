@@ -26,9 +26,10 @@ impl std::error::Error for ToolError {}
 #[serde(rename_all = "camelCase")]
 pub struct AgentStreamEvent {
     pub task_id: String,
-    pub kind: String, // "reasoning" | "text" | "card" | "done" | "error"
+    pub kind: String, // "reasoning" | "text" | "card" | "done" | "error" | "phase"
     pub text: Option<String>,
     pub card: Option<AgentChatCard>,
+    pub phase: Option<String>, // "exploring" | "analyzing" | "querying" | "concluding"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,6 +117,20 @@ fn emit_card(window: &tauri::Window, task_id: &str, card: AgentChatCard) {
             kind: "card".to_string(),
             text: None,
             card: Some(card),
+            phase: None,
+        },
+    );
+}
+
+fn emit_phase(window: &tauri::Window, task_id: &str, phase: &str) {
+    let _ = window.emit(
+        "agent-event",
+        AgentStreamEvent {
+            task_id: task_id.to_string(),
+            kind: "phase".to_string(),
+            text: None,
+            card: None,
+            phase: Some(phase.to_string()),
         },
     );
 }
@@ -151,6 +166,7 @@ impl Tool for ListTablesTool {
     }
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
+        emit_phase(&self.window, &self.task_id, "exploring");
         let card_id = format!("step-list-tables-{}", now_ms());
         emit_card(&self.window, &self.task_id, AgentChatCard {
             id: card_id.clone(),
@@ -164,7 +180,7 @@ impl Tool for ListTablesTool {
         let sql = "
             SELECT table_name FROM duckdb_tables() WHERE database_name = 'lake' AND schema_name = 'main' AND NOT internal
             UNION
-            SELECT table_name FROM duckdb_views() WHERE database_name = 'lake' AND schema_name = 'main' AND NOT internal
+            SELECT view_name as table_name FROM duckdb_views() WHERE database_name = 'lake' AND schema_name = 'main' AND NOT internal
         ";
         let conn = self.app_state.conn.clone();
         let tables_res = tokio::task::spawn_blocking(move || {
@@ -247,6 +263,7 @@ impl Tool for DescribeTableTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        emit_phase(&self.window, &self.task_id, "analyzing");
         let table_name = args.table_name.trim();
         if !table_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
             return Err(ToolError("表名包含非法字符，仅允许字母、数字和下划线。".to_string()));
@@ -341,6 +358,7 @@ impl Tool for ExecuteQueryTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        emit_phase(&self.window, &self.task_id, "querying");
         let sql = args.sql.trim();
         let sql_upper = sql.to_uppercase();
         let forbidden_keywords = ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "TRUNCATE", "ATTACH", "DETACH"];
@@ -432,6 +450,7 @@ impl Tool for SampleDataTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        emit_phase(&self.window, &self.task_id, "analyzing");
         let table_name = args.table_name.trim();
         if !table_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
             return Err(ToolError("表名包含非法字符，仅允许字母、数字和下划线。".to_string()));
@@ -540,7 +559,39 @@ pub async fn run_agent_chat_stream(
     let exec_tool = ExecuteQueryTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
     let sample_tool = SampleDataTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
 
-    let preamble = "你是一个本地智能数据湖分析助手。你拥有访问本地数据库表的工具。在开始回答问题前，你应该先调用 list_tables 工具了解有哪些可用的表，然后再通过 describe_table 或 sample_data 工具了解表字段详情，最后编写 SELECT 语句执行 execute_query 获取数据结论。禁止执行任何写操作（DELETE, DROP, UPDATE 等）。所有数据都必须在本地的 SQL 结果中获取。若需要，可以自行关联表查询。你的结论必须以中文展示，且务必严谨地基于数据。";
+    let preamble = r#"# 角色
+你是 LakeMind 数据分析助手——一个严谨的数据分析师。你不猜测、不假设，用数据说话。
+
+# 工作流程（严格按顺序执行）
+
+## 第一步：探索
+调用 `list_tables` 了解数据库中有哪些表。
+
+## 第二步：理解
+对与问题相关的表，调用 `describe_table` 获取结构，调用 `sample_data` 查看样例数据。
+
+## 第三步：查询
+基于理解，编写精确的 SQL 查询。如果一次查询不够，可以分多次查询。
+
+## 第四步：总结
+基于查询结果，用中文给出清晰的结论。结论必须引用具体数据。
+
+# 输出格式要求
+- 用 Markdown 格式回复
+- 用 `##` 标题分隔每个步骤
+- 数据结论用表格或列表呈现
+- 关键数值用 **粗体** 标注
+
+# 禁止行为
+- 不要在没有数据支撑时反复猜测
+- 不要写"等等"、"不对"、"让我重新想"这类自我纠正的文字
+- 不要推翻自己的结论后又得出相同结论
+- 不要在一段话中混杂猜测和结论
+- 每个结论都必须基于查询结果
+- 如果数据不足以回答问题，直接说明需要什么数据
+
+# 安全约束
+禁止执行任何写操作（DELETE, DROP, UPDATE 等）。所有数据都必须从本地 SQL 查询获取。若需要可自行关联表查询。"#;
 
     let format = provider.api_format.to_lowercase();
     if format == "openai" || format == "responses" {
@@ -574,6 +625,7 @@ pub async fn run_agent_chat_stream(
                         kind: "text".to_string(),
                         text: Some(text_struct.text),
                         card: None,
+                        phase: Some("concluding".to_string()),
                     });
                 }
                 Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ReasoningDelta { reasoning, .. })) => {
@@ -582,6 +634,7 @@ pub async fn run_agent_chat_stream(
                         kind: "reasoning".to_string(),
                         text: Some(reasoning),
                         card: None,
+                        phase: None,
                     });
                 }
                 Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(reasoning_struct))) => {
@@ -590,6 +643,7 @@ pub async fn run_agent_chat_stream(
                         kind: "reasoning".to_string(),
                         text: Some(reasoning_struct.display_text().to_string()),
                         card: None,
+                        phase: None,
                     });
                 }
                 Ok(_) => {}
@@ -600,6 +654,7 @@ pub async fn run_agent_chat_stream(
                         kind: "error".to_string(),
                         text: Some(err_val.to_string()),
                         card: None,
+                        phase: None,
                     });
                     return Err(err_val.to_string());
                 }
@@ -635,6 +690,7 @@ pub async fn run_agent_chat_stream(
                         kind: "text".to_string(),
                         text: Some(text_struct.text),
                         card: None,
+                        phase: Some("concluding".to_string()),
                     });
                 }
                 Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ReasoningDelta { reasoning, .. })) => {
@@ -643,6 +699,7 @@ pub async fn run_agent_chat_stream(
                         kind: "reasoning".to_string(),
                         text: Some(reasoning),
                         card: None,
+                        phase: None,
                     });
                 }
                 Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(reasoning_struct))) => {
@@ -651,6 +708,7 @@ pub async fn run_agent_chat_stream(
                         kind: "reasoning".to_string(),
                         text: Some(reasoning_struct.display_text().to_string()),
                         card: None,
+                        phase: None,
                     });
                 }
                 Ok(_) => {}
@@ -661,6 +719,7 @@ pub async fn run_agent_chat_stream(
                         kind: "error".to_string(),
                         text: Some(err_val.to_string()),
                         card: None,
+                        phase: None,
                     });
                     return Err(err_val.to_string());
                 }
@@ -676,6 +735,7 @@ pub async fn run_agent_chat_stream(
         kind: "done".to_string(),
         text: None,
         card: None,
+        phase: None,
     });
 
     Ok(())
