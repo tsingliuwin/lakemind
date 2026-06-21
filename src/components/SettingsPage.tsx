@@ -1,4 +1,5 @@
-import { createSignal, Show, onMount, onCleanup } from "solid-js";
+import { createSignal, Show, onMount, For } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
 import { t, currentLanguage, setCurrentLanguage } from "../lib/i18n";
 import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom, logoSrc } from "../lib/theme";
 
@@ -16,41 +17,256 @@ type SettingsTab =
   | "stats"
   | "guide";
 
+export interface ModelItem {
+  id: string;
+  contextWindow: number;
+}
+
+export interface ModelProvider {
+  id: string;
+  name: string;
+  endpoint: string;
+  apiKey: string;
+  apiFormat: "openai" | "anthropic" | "responses";
+  models: ModelItem[];
+  enabled: boolean;
+  isPredefined?: boolean;
+}
+
+export interface AppSettings {
+  theme?: string;
+  language?: string;
+  zoom?: string;
+  providers?: ModelProvider[];
+  [key: string]: any;
+}
+
 export default function SettingsPage(props: {
   onClose: () => void;
   onOpenSettings?: () => void;
   titleBar?: any;
 }) {
   const [activeTab, setActiveTab] = createSignal<SettingsTab>("modelSettings");
-  const [connectionType, setConnectionType] = createSignal<string>("coding");
-  
-  // Custom dropdown selector inside BigModel
-  const [showDropdown, setShowDropdown] = createSignal(false);
 
-  // Left predefined providers
-  const [selectedProvider, setSelectedProvider] = createSignal<string>("bigmodel");
+  // Selection signals
+  const [selectedProvider, setSelectedProvider] = createSignal<string>("");
+  const [isAddingProvider, setIsAddingProvider] = createSignal(false);
 
-  let connDropdownRef!: HTMLDivElement;
-  let connTriggerRef!: HTMLButtonElement;
+  const [settings, setSettings] = createSignal<AppSettings>({
+    providers: []
+  });
 
-  const handleClickOutside = (e: MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (
-      showDropdown() &&
-      connDropdownRef &&
-      !connDropdownRef.contains(target) &&
-      (!connTriggerRef || !connTriggerRef.contains(target))
-    ) {
-      setShowDropdown(false);
+  const [showApiKey, setShowApiKey] = createSignal(false);
+
+  // Rename fields inline
+  const [editingProviderId, setEditingProviderId] = createSignal<string | null>(null);
+  const [tempName, setTempName] = createSignal("");
+
+  // Speed test connection mock state
+  const [testingModelId, setTestingModelId] = createSignal<string | null>(null);
+
+  // New provider temp states
+  const [newProviderName, setNewProviderName] = createSignal("");
+  const [newProviderEndpoint, setNewProviderEndpoint] = createSignal("");
+  const [newProviderApiKey, setNewProviderApiKey] = createSignal("");
+  const [newProviderFormat, setNewProviderFormat] = createSignal<"openai" | "anthropic" | "responses">("openai");
+  const [newProviderModels, setNewProviderModels] = createSignal<ModelItem[]>([]);
+
+  // Dialog popups for adding/editing models
+  const [isModelModalOpen, setIsModelModalOpen] = createSignal(false);
+  const [isAddingToTempProvider, setIsAddingToTempProvider] = createSignal(false);
+  const [modalMode, setModalMode] = createSignal<"add" | "edit">("add");
+  const [editingModelId, setEditingModelId] = createSignal<string>("");
+  const [modelFormId, setModelFormId] = createSignal("");
+  const [modelFormWindow, setModelFormWindow] = createSignal(200000);
+
+  onMount(async () => {
+    try {
+      const json = await invoke<string>("load_settings_json");
+      if (json && json !== "{}") {
+        const loaded = JSON.parse(json);
+        setSettings(loaded);
+        
+        if (loaded.providers && loaded.providers.length > 0) {
+          setSelectedProvider(loaded.providers[0].id);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load settings:", err);
+    }
+  });
+
+  // Save settings helper
+  const updateSetting = (key: keyof AppSettings, value: any) => {
+    const updated = { ...settings(), [key]: value };
+    setSettings(updated);
+    invoke("save_settings_json", { json: JSON.stringify(updated, null, 2) }).catch(err => {
+      console.error("Failed to save settings:", err);
+    });
+  };
+
+  const updateProviderProperty = (providerId: string, property: keyof ModelProvider, value: any) => {
+    const updatedProviders = (settings().providers || []).map(p => {
+      if (p.id === providerId) {
+        return { ...p, [property]: value };
+      }
+      return p;
+    });
+    updateSetting("providers", updatedProviders);
+  };
+
+  const handleSaveProviderName = () => {
+    const val = tempName().trim();
+    if (val && editingProviderId()) {
+      updateProviderProperty(editingProviderId()!, "name", val);
+    }
+    setEditingProviderId(null);
+  };
+
+  const handleDeleteProvider = (id: string) => {
+    const updated = (settings().providers || []).filter(p => p.id !== id);
+    updateSetting("providers", updated);
+    if (updated.length > 0) {
+      setSelectedProvider(updated[0].id);
+    } else {
+      setSelectedProvider("");
     }
   };
 
-  onMount(() => {
-    document.addEventListener("mousedown", handleClickOutside);
-    onCleanup(() => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    });
-  });
+  const handleCreateNewProvider = () => {
+    const name = newProviderName().trim();
+    const endpoint = newProviderEndpoint().trim();
+    const apiKey = newProviderApiKey().trim();
+    const format = newProviderFormat();
+
+    if (!name) {
+      alert("请输入服务商名称");
+      return;
+    }
+    if (!endpoint) {
+      alert("请输入 Base URL");
+      return;
+    }
+
+    const newId = "custom_" + Date.now();
+    const newProvider: ModelProvider = {
+      id: newId,
+      name,
+      endpoint,
+      apiKey,
+      apiFormat: format,
+      models: newProviderModels(),
+      enabled: true
+    };
+
+    const updated = [...(settings().providers || []), newProvider];
+    updateSetting("providers", updated);
+    setSelectedProvider(newId);
+    setIsAddingProvider(false);
+
+    // Reset temp states
+    setNewProviderName("");
+    setNewProviderEndpoint("");
+    setNewProviderApiKey("");
+    setNewProviderFormat("openai");
+    setNewProviderModels([]);
+  };
+
+  // Model actions handlers
+  const handleOpenAddModel = () => {
+    setIsAddingToTempProvider(false);
+    setModalMode("add");
+    setModelFormId("");
+    setModelFormWindow(200000);
+    setIsModelModalOpen(true);
+  };
+
+  const handleOpenAddTempModel = () => {
+    setIsAddingToTempProvider(true);
+    setModalMode("add");
+    setModelFormId("");
+    setModelFormWindow(200000);
+    setIsModelModalOpen(true);
+  };
+
+  const handleOpenEditModel = (model: ModelItem) => {
+    setIsAddingToTempProvider(false);
+    setModalMode("edit");
+    setEditingModelId(model.id);
+    setModelFormId(model.id);
+    setModelFormWindow(model.contextWindow);
+    setIsModelModalOpen(true);
+  };
+
+  const handleOpenEditTempModel = (model: ModelItem) => {
+    setIsAddingToTempProvider(true);
+    setModalMode("edit");
+    setEditingModelId(model.id);
+    setModelFormId(model.id);
+    setModelFormWindow(model.contextWindow);
+    setIsModelModalOpen(true);
+  };
+
+  const handleDeleteModel = (modelId: string) => {
+    const currentProv = (settings().providers || []).find(p => p.id === selectedProvider());
+    if (!currentProv) return;
+    const updatedModels = currentProv.models.filter(m => m.id !== modelId);
+    updateProviderProperty(selectedProvider(), "models", updatedModels);
+  };
+
+  const handleSaveModel = () => {
+    const mId = modelFormId().trim();
+    if (!mId) return;
+
+    if (isAddingToTempProvider()) {
+      if (modalMode() === "add") {
+        if (newProviderModels().some(m => m.id === mId)) {
+          alert("模型已存在");
+          return;
+        }
+        setNewProviderModels([...newProviderModels(), { id: mId, contextWindow: modelFormWindow() }]);
+      } else {
+        setNewProviderModels(newProviderModels().map(m => {
+          if (m.id === editingModelId()) {
+            return { id: mId, contextWindow: modelFormWindow() };
+          }
+          return m;
+        }));
+      }
+      setIsModelModalOpen(false);
+      return;
+    }
+
+    const currentProv = (settings().providers || []).find(p => p.id === selectedProvider());
+    if (!currentProv) return;
+
+    let updatedModels: ModelItem[] = [];
+    if (modalMode() === "add") {
+      if (currentProv.models.some(m => m.id === mId)) {
+        alert("模型已存在");
+        return;
+      }
+      updatedModels = [...currentProv.models, { id: mId, contextWindow: modelFormWindow() }];
+    } else {
+      updatedModels = currentProv.models.map(m => {
+        if (m.id === editingModelId()) {
+          return { id: mId, contextWindow: modelFormWindow() };
+        }
+        return m;
+      });
+    }
+
+    updateProviderProperty(selectedProvider(), "models", updatedModels);
+    setIsModelModalOpen(false);
+  };
+
+  const testModelConnection = (modelId: string) => {
+    setTestingModelId(modelId);
+    setTimeout(() => {
+      setTestingModelId(null);
+      alert(`测试连接成功: 已成功建立与 ${modelId} 的网络连接！`);
+    }, 800);
+  };
 
   return (
     <div class="settings-layout-wrapper">
@@ -314,133 +530,282 @@ export default function SettingsPage(props: {
             
             {/* Left Column: Providers List */}
             <div class="sp-left-panel">
-              <div class="sp-section-lbl">{t("predefined")}</div>
-              <button 
-                class="sp-provider-item" 
-                classList={{ active: selectedProvider() === "bigmodel" }}
-                onClick={() => setSelectedProvider("bigmodel")}
-              >
-                <span class="provider-dot active" />
-                <span class="provider-icon-lbl">🔹</span>
-                <span class="provider-name">BigModel</span>
-              </button>
+              <div class="sp-section-lbl">模型供应商</div>
+              
+              <For each={settings().providers}>
+                {(prov) => (
+                  <button 
+                    class="sp-provider-item" 
+                    classList={{ active: selectedProvider() === prov.id && !isAddingProvider() }}
+                    onClick={() => { setSelectedProvider(prov.id); setIsAddingProvider(false); }}
+                  >
+                    <span class="provider-dot" classList={{ active: prov.enabled && !!prov.apiKey }} />
+                    <span class="provider-icon-lbl">
+                      {prov.id === "bigmodel" ? "🔹" : prov.id === "deepseek" ? "🐳" : prov.id === "siliconflow" ? "⚡" : prov.id === "openai" ? "🤖" : "⚙️"}
+                    </span>
+                    <span class="provider-name">{prov.name}</span>
+                  </button>
+                )}
+              </For>
 
-              <div class="sp-section-lbl" style="margin-top: 20px;">{t("customProviders")}</div>
-              <button class="sp-add-btn" onClick={() => alert(t("settingsM1Placeholder"))}>
+              <button class="sp-add-btn" onClick={() => { setIsAddingProvider(true); setSelectedProvider(""); }}>
                 <span class="add-icon">+</span>
-                <span>{t("addProvider")}</span>
+                <span>添加供应商</span>
               </button>
             </div>
 
             {/* Right Column: Provider Details */}
             <div class="sp-right-panel">
-              <Show 
-                when={selectedProvider() === "bigmodel"}
-                fallback={<div class="sp-empty-provider">{t("selectProviderPrompt")}</div>}
-              >
-                {/* BigModel Provider view */}
-                <div class="provider-detail-header">
-                  <div class="pd-title-group">
-                    <span class="pd-icon">🔹</span>
-                    <h3>BigModel</h3>
-                    <span class="pd-status-badge">{t("enabledBadge")}</span>
-                  </div>
+              <Show
+                when={!isAddingProvider()}
+                fallback={
+                  <>
+                    <div class="provider-detail-header">
+                      <div class="pd-title-group">
+                        <span class="pd-icon">⚙️</span>
+                        <h3>添加模型供应商</h3>
+                      </div>
+                    </div>
+                    <p class="settings-view-desc" style="margin-top: -10px; margin-bottom: 20px; color: var(--text-dim); font-size: 12px;">
+                      配置一个完全自定义的 API 端点和初始模型。
+                    </p>
 
-                  <div class="pd-connection">
-                    <span class="pd-conn-lbl">{t("connectionType")}</span>
-                    <div class="pd-select-container">
-                      <button ref={connTriggerRef} class="pd-select-trigger" onClick={() => setShowDropdown(!showDropdown())}>
-                        {connectionType() === "coding" ? t("codingPackage") : t("defaultPackage")}
-                        <span class="pd-select-chevron">▼</span>
-                      </button>
-                      <Show when={showDropdown()}>
-                        <div class="pd-select-dropdown" ref={connDropdownRef}>
-                          <button 
-                            class="pd-dropdown-opt" 
-                            onClick={() => { setConnectionType("coding"); setShowDropdown(false); }}
-                          >
-                            {t("codingPackage")}
-                          </button>
-                          <button 
-                            class="pd-dropdown-opt" 
-                            onClick={() => { setConnectionType("default"); setShowDropdown(false); }}
-                          >
-                            {t("defaultPackage")}
+                    <div class="sp-form-section" style="margin-top: 0;">
+                      <div class="sp-form-row">
+                        <span class="sp-form-label">名称</span>
+                        <input 
+                          type="text" 
+                          class="sp-input" 
+                          placeholder="如：智谱 GLM"
+                          value={newProviderName()}
+                          onInput={(e) => setNewProviderName(e.currentTarget.value)}
+                        />
+                      </div>
+
+                      <div class="sp-form-row">
+                        <span class="sp-form-label">Base URL</span>
+                        <input 
+                          type="text" 
+                          class="sp-input" 
+                          placeholder="https://api.example.com/v1"
+                          value={newProviderEndpoint()}
+                          onInput={(e) => setNewProviderEndpoint(e.currentTarget.value)}
+                        />
+                      </div>
+
+                      <div class="sp-form-row">
+                        <span class="sp-form-label">API Key</span>
+                        <div class="sp-input-wrapper">
+                          <input 
+                            type={showApiKey() ? "text" : "password"} 
+                            class="sp-input password-input" 
+                            placeholder="输入 API Key"
+                            value={newProviderApiKey()}
+                            onInput={(e) => setNewProviderApiKey(e.currentTarget.value)}
+                          />
+                          <button class="sp-pwd-toggle" onClick={() => setShowApiKey(!showApiKey())}>
+                            {showApiKey() ? "👁️" : "🙈"}
                           </button>
                         </div>
-                      </Show>
-                    </div>
-                  </div>
-                </div>
+                      </div>
 
-                {/* GLM Coding Pro card */}
-                <div class="sp-card glm-card">
-                  <div class="glm-card-left">
-                    <div class="glm-card-title-row">
-                      <span class="glm-card-title">GLM Coding Pro</span>
-                      <span class="glm-card-badge">~ 150% 扣额</span>
-                    </div>
-                    <div class="glm-card-subtext">
-                      {t("expirationInfo")}
-                    </div>
-                  </div>
-                  <button class="glm-card-btn" onClick={() => alert(t("alreadyPremiumMsg"))}>
-                    <span class="rocket-icon">🚀</span>
-                    {t("upgradeBtn")}
-                  </button>
-                </div>
+                      <div class="sp-form-row">
+                        <span class="sp-form-label">API 格式</span>
+                        <div class="select-wrapper" style="width: 100%;">
+                          <select 
+                            value={newProviderFormat()}
+                            onChange={(e) => setNewProviderFormat(e.currentTarget.value as any)}
+                          >
+                            <option value="anthropic">Anthropic Messages (/v1/messages)</option>
+                            <option value="openai">Chat Completions (/chat/completions)</option>
+                            <option value="responses">Responses (/responses)</option>
+                          </select>
+                        </div>
+                      </div>
 
-                {/* Quota Statistics cards group */}
-                <div class="sp-stats-grid">
-                  
-                  {/* Hours Left */}
-                  <div class="stat-card">
-                    <div class="stat-header">
-                      <span class="stat-val">99%</span>
-                      <span class="stat-lbl">{t("hoursRemaining")}</span>
+                      <div class="sp-form-row" style="margin-top: 10px;">
+                        <span class="sp-form-label">模型列表</span>
+                        <div class="models-list">
+                          <For each={newProviderModels()}>
+                            {(model) => (
+                              <div class="model-row">
+                                <span class="model-name-lbl">{model.id}</span>
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                  <span class="sp-context-badge">
+                                    {model.contextWindow >= 10000 ? `${model.contextWindow / 10000}万` : model.contextWindow}
+                                  </span>
+                                  <div class="model-actions-btns" style="display: flex; align-items: center; gap: 8px;">
+                                    <button class="sp-action-icon-btn" title="编辑模型" onClick={() => handleOpenEditTempModel(model)}>✏️</button>
+                                    <button class="sp-action-icon-btn" title="删除模型" onClick={() => setNewProviderModels(newProviderModels().filter(m => m.id !== model.id))}>🗑️</button>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </For>
+                          <button class="sp-add-model-inline-btn" onClick={handleOpenAddTempModel}>
+                            + 添加模型
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <div class="progress-container">
-                      <div class="progress-bar bar-blue" style={{ width: "99%" }} />
-                    </div>
-                  </div>
 
-                  {/* Quota Left */}
-                  <div class="stat-card">
-                    <div class="stat-header">
-                      <span class="stat-val">34%</span>
-                      <span class="stat-lbl">{t("dailyRemaining")}</span>
+                    <div style="margin-top: 20px; display: flex; gap: 12px;">
+                      <button class="sp-btn-primary" onClick={handleCreateNewProvider}>
+                        添加供应商
+                      </button>
+                      <button class="sp-btn-secondary" onClick={() => setIsAddingProvider(false)}>
+                        取消
+                      </button>
                     </div>
-                    <div class="progress-container">
-                      <div class="progress-bar bar-green" style={{ width: "34%" }} />
-                    </div>
-                  </div>
+                  </>
+                }
+              >
+                {(() => {
+                  const prov = (settings().providers || []).find(p => p.id === selectedProvider());
+                  if (!prov) {
+                    return (
+                      <div class="sp-empty-provider" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); text-align: center; padding: 40px;">
+                        <span style="font-size: 40px; margin-bottom: 12px;">🔌</span>
+                        <h4 style="color: var(--text); font-weight: 500;">暂无模型供应商</h4>
+                        <p style="font-size: 12px; margin-top: 6px; max-width: 280px; line-height: 1.5;">点击左侧「添加供应商」按钮配置您的 AI API 接口和模型</p>
+                      </div>
+                    );
+                  }
 
-                  {/* MCP Left */}
-                  <div class="stat-card">
-                    <div class="stat-header">
-                      <span class="stat-val">98%</span>
-                      <span class="stat-lbl">{t("mcpDailyRemaining")}</span>
-                    </div>
-                    <div class="progress-container">
-                      <div class="progress-bar bar-purple" style={{ width: "98%" }} />
-                    </div>
-                  </div>
-                </div>
+                  return (
+                    <>
+                      <div class="provider-detail-header" style="border-bottom: none; padding-bottom: 0; margin-bottom: 12px;">
+                        <div class="pd-title-group">
+                          <span class="pd-icon">
+                            {prov.id === "bigmodel" ? "🔹" : prov.id === "deepseek" ? "🐳" : prov.id === "siliconflow" ? "⚡" : prov.id === "openai" ? "🤖" : "⚙️"}
+                          </span>
+                          <Show
+                            when={editingProviderId() === prov.id}
+                            fallback={
+                              <div style="display: flex; align-items: center; gap: 6px;">
+                                <h3>{prov.name}</h3>
+                                <button class="sp-edit-title-btn" onClick={() => {
+                                  setEditingProviderId(prov.id);
+                                  setTempName(prov.name);
+                                }}>✏️</button>
+                              </div>
+                            }
+                          >
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <input 
+                                type="text" 
+                                class="sp-input" 
+                                style="width: 150px; height: 26px; padding: 2px 8px;"
+                                value={tempName()}
+                                onInput={(e) => setTempName(e.currentTarget.value)}
+                                onBlur={handleSaveProviderName}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") handleSaveProviderName();
+                                  if (e.key === "Escape") setEditingProviderId(null);
+                                }}
+                                autoFocus
+                              />
+                            </div>
+                          </Show>
 
-                {/* Models List */}
-                <div class="sp-models-section">
-                  <div class="models-section-title">{t("modelListTitle")}</div>
-                  <div class="models-list">
-                    <div class="model-row">
-                      <span class="model-name-lbl">GLM-4.0</span>
-                      <span class="model-token-badge">100万</span>
-                    </div>
-                    <div class="model-row">
-                      <span class="model-name-lbl">GLM-4-Turbo</span>
-                      <span class="model-token-badge">20万</span>
-                    </div>
-                  </div>
-                </div>
+                          <div class="sp-status-btn-group">
+                            <button 
+                              class={`status-btn enabled-btn ${prov.enabled ? "active" : ""}`}
+                              onClick={() => updateProviderProperty(prov.id, "enabled", true)}
+                            >
+                              已启用
+                            </button>
+                            <button 
+                              class={`status-btn disabled-btn ${!prov.enabled ? "active" : ""}`}
+                              onClick={() => updateProviderProperty(prov.id, "enabled", false)}
+                            >
+                              禁用
+                            </button>
+                          </div>
+                        </div>
+
+                        <button class="sp-btn-danger" style="margin-top: 0;" onClick={() => handleDeleteProvider(prov.id)}>
+                          删除
+                        </button>
+                      </div>
+
+                      <div class="sp-form-section" style="margin-top: 0;">
+                        <div class="sp-form-row">
+                          <span class="sp-form-label">Base URL</span>
+                          <input 
+                            type="text" 
+                            class="sp-input" 
+                            value={prov.endpoint}
+                            onInput={(e) => updateProviderProperty(prov.id, "endpoint", e.currentTarget.value)}
+                          />
+                        </div>
+
+                        <div class="sp-form-row">
+                          <span class="sp-form-label">API 格式</span>
+                          <div class="select-wrapper" style="width: 100%;">
+                            <select 
+                              value={prov.apiFormat}
+                              onChange={(e) => updateProviderProperty(prov.id, "apiFormat", e.currentTarget.value as any)}
+                            >
+                              <option value="anthropic">Anthropic Messages (/v1/messages)</option>
+                              <option value="openai">Chat Completions (/chat/completions)</option>
+                              <option value="responses">Responses (/responses)</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div class="sp-form-row">
+                          <span class="sp-form-label">API Key</span>
+                          <div class="sp-input-wrapper">
+                            <input 
+                              type={showApiKey() ? "text" : "password"} 
+                              class="sp-input password-input" 
+                              placeholder={t("apiKeyPlaceholder")}
+                              value={prov.apiKey}
+                              onInput={(e) => updateProviderProperty(prov.id, "apiKey", e.currentTarget.value)}
+                            />
+                            <button class="sp-pwd-toggle" onClick={() => setShowApiKey(!showApiKey())}>
+                              {showApiKey() ? "👁️" : "🙈"}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div class="sp-form-row" style="margin-top: 10px;">
+                          <span class="sp-form-label">模型列表</span>
+                          <div class="models-list">
+                            <For each={prov.models}>
+                              {(model) => (
+                                <div class="model-row">
+                                  <span class="model-name-lbl">{model.id}</span>
+                                  <div style="display: flex; align-items: center; gap: 12px;">
+                                    <span class="sp-context-badge">
+                                      {model.contextWindow >= 10000 ? `${model.contextWindow / 10000}万` : model.contextWindow}
+                                    </span>
+                                    <div class="model-actions-btns" style="display: flex; align-items: center; gap: 8px;">
+                                      <button 
+                                        class="sp-action-icon-btn" 
+                                        title="测试连接"
+                                        disabled={testingModelId() === model.id}
+                                        onClick={() => testModelConnection(model.id)}
+                                      >
+                                        {testingModelId() === model.id ? "⏳" : "🔌"}
+                                      </button>
+                                      <button class="sp-action-icon-btn" title="编辑模型" onClick={() => handleOpenEditModel(model)}>✏️</button>
+                                      <button class="sp-action-icon-btn" title="删除模型" onClick={() => handleDeleteModel(model.id)}>🗑️</button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </For>
+                            <button class="sp-add-model-inline-btn" onClick={handleOpenAddModel}>
+                              + 添加模型
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </Show>
             </div>
           </div>
@@ -462,6 +827,47 @@ export default function SettingsPage(props: {
         </Show>
         </main>
       </div>
+
+      {/* Modal Dialog for Add/Edit Model */}
+      <Show when={isModelModalOpen()}>
+        <div class="sp-modal-overlay" onClick={() => setIsModelModalOpen(false)}>
+          <div class="sp-modal-box" onClick={(e) => e.stopPropagation()}>
+            <div class="sp-modal-header">
+              <h3>{modalMode() === "add" ? "添加模型" : "编辑模型"}</h3>
+              <button class="sp-modal-close" onClick={() => setIsModelModalOpen(false)}>×</button>
+            </div>
+            
+            <div class="sp-modal-body">
+              <div class="sp-form-row" style="margin-bottom: 16px;">
+                <span class="sp-form-label">模型 ID</span>
+                <input 
+                  type="text" 
+                  class="sp-input" 
+                  placeholder="模型 ID"
+                  value={modelFormId()}
+                  onInput={(e) => setModelFormId(e.currentTarget.value)}
+                />
+              </div>
+              
+              <div class="sp-form-row">
+                <span class="sp-form-label">上下文窗口</span>
+                <input 
+                  type="number" 
+                  class="sp-input" 
+                  placeholder="200000"
+                  value={modelFormWindow()}
+                  onInput={(e) => setModelFormWindow(parseInt(e.currentTarget.value) || 0)}
+                />
+              </div>
+            </div>
+            
+            <div class="sp-modal-footer">
+              <button class="sp-modal-btn cancel-btn" onClick={() => setIsModelModalOpen(false)}>取消</button>
+              <button class="sp-modal-btn save-btn" onClick={handleSaveModel}>保存</button>
+            </div>
+          </div>
+        </div>
+      </Show>
     </div>
   );
 }

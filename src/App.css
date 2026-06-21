@@ -3601,3 +3601,435 @@ select:hover:not(:disabled) {
   background: var(--bg-active) !important;
   color: var(--text-primary);
 }
+
+/* ===========================================================================
+   ZCode Model Settings Form Controls & Sliders
+   =========================================================================== */
+.sp-form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 18px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.sp-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sp-form-row.row-inline {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sp-form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.1px;
+}
+
+.sp-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.sp-input {
+  width: 100%;
+  height: 32px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 6px 12px;
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+  transition: all 0.12s ease;
+}
+
+.sp-input:focus {
+  border-color: var(--accent-blue);
+  background: var(--bg-active);
+}
+
+.sp-input.password-input {
+  padding-right: 36px;
+}
+
+.sp-pwd-toggle {
+  position: absolute;
+  right: 8px;
+  background: transparent !important;
+  border: none !important;
+  padding: 4px !important;
+  cursor: pointer;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-size: 14px;
+  transition: color 0.12s ease;
+}
+
+.sp-pwd-toggle:hover {
+  color: var(--text-secondary);
+}
+
+.sp-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.sp-slider {
+  flex: 1;
+  height: 4px;
+  background: var(--border-strong);
+  border-radius: 2px;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.sp-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.sp-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+  background: var(--accent-blue-hover);
+}
+
+.sp-slider-val {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
+  width: 32px;
+  text-align: right;
+}
+
+/* Custom action buttons */
+.sp-btn-danger {
+  background: var(--accent-red-bg) !important;
+  border: 1px solid rgba(239, 68, 68, 0.2) !important;
+  color: var(--accent-red) !important;
+  padding: 4px 10px !important;
+  font-size: 11px !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  transition: all 0.12s ease !important;
+}
+
+.sp-btn-danger:hover {
+  border-color: var(--accent-red) !important;
+  background: var(--accent-red) !important;
+  color: #fff !important;
+}
+
+/* ===========================================================================
+   Unified Model Settings Layout Styles
+   =========================================================================== */
+.sp-provider-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.sp-status-btn-group {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  padding: 2px;
+  margin-left: 12px;
+}
+
+.sp-status-btn-group .status-btn {
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  padding: 3px 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-weight: 500;
+  transition: all 0.12s ease;
+}
+
+.sp-status-btn-group .status-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.sp-status-btn-group .status-btn.active.enabled-btn {
+  background: var(--accent-green) !important;
+  color: #fff !important;
+  font-weight: 600;
+}
+
+.sp-status-btn-group .status-btn.active.disabled-btn {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: var(--text-primary) !important;
+  font-weight: 600;
+}
+
+.sp-edit-title-btn {
+  background: transparent !important;
+  border: none !important;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 2px !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+}
+
+.sp-edit-title-btn:hover {
+  opacity: 1;
+  color: var(--text-primary);
+}
+
+/* Models List */
+.models-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.model-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 8px 16px;
+  transition: all 0.12s ease;
+}
+
+.model-row:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-active);
+}
+
+.sp-context-badge {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-faint);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+.sp-action-icon-btn {
+  background: transparent !important;
+  border: none !important;
+  padding: 4px !important;
+  cursor: pointer;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  transition: all 0.12s ease;
+}
+
+.sp-action-icon-btn:hover:not(:disabled) {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.sp-action-icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+
+.sp-add-model-inline-btn {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+  font-weight: 500;
+}
+
+.sp-add-model-inline-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-dim);
+}
+
+/* Primary / Secondary General Action Buttons */
+.sp-btn-primary {
+  background: var(--text-primary) !important;
+  border: 1px solid var(--text-primary) !important;
+  color: var(--bg-base) !important;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: opacity 0.15s ease;
+}
+
+.sp-btn-primary:hover {
+  opacity: 0.9;
+}
+
+.sp-btn-secondary {
+  background: transparent !important;
+  border: 1px solid var(--border-strong) !important;
+  color: var(--text-secondary) !important;
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.sp-btn-secondary:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Modal Dialog Styles */
+.sp-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  backdrop-filter: blur(4px);
+  animation: fadeInModalOverlay 0.18s ease-out;
+}
+
+.sp-modal-box {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 20px;
+  width: 380px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: slideUpModalBox 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sp-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sp-modal-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sp-modal-close {
+  background: transparent !important;
+  border: none !important;
+  font-size: 20px;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.sp-modal-close:hover {
+  color: var(--text-primary);
+}
+
+.sp-modal-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.sp-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.sp-modal-btn {
+  padding: 5px 14px;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  font-weight: 500;
+}
+
+.sp-modal-btn.cancel-btn {
+  background: transparent !important;
+  border: 1px solid var(--border-strong) !important;
+  color: var(--text-secondary) !important;
+}
+
+.sp-modal-btn.cancel-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sp-modal-btn.save-btn {
+  background: var(--text-primary) !important;
+  border: 1px solid var(--text-primary) !important;
+  color: var(--bg-base) !important;
+  font-weight: 600;
+}
+
+.sp-modal-btn.save-btn:hover {
+  opacity: 0.9;
+}
+
+@keyframes fadeInModalOverlay {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUpModalBox {
+  from { transform: translateY(12px) scale(0.98); }
+  to { transform: translateY(0) scale(1); }
+}
+

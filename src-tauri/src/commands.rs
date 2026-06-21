@@ -323,6 +323,25 @@ pub async fn set_app_config(key: String, value: String) -> Result<(), String> {
     db::set_config(&conn, &key, &value)
 }
 
+/// Read configurations from ~/.lakemind/settings.json
+#[tauri::command]
+pub async fn load_settings_json() -> Result<String, String> {
+    let mut path = db::get_lakemind_dir()?;
+    path.push("settings.json");
+    if !path.exists() {
+        return Ok("{}".to_string());
+    }
+    std::fs::read_to_string(path).map_err(|e| format!("读取配置文件失败: {e}"))
+}
+
+/// Write configurations to ~/.lakemind/settings.json
+#[tauri::command]
+pub async fn save_settings_json(json: String) -> Result<(), String> {
+    let mut path = db::get_lakemind_dir()?;
+    path.push("settings.json");
+    std::fs::write(path, json).map_err(|e| format!("保存配置文件失败: {e}"))
+}
+
 // ===========================================================================
 // Filesystem commands
 // ===========================================================================

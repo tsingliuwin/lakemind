@@ -109,6 +109,18 @@ const translations: Record<Language, Record<string, string>> = {
     moduleDeveloping: "当前模块正在开发中",
     expirationInfo: "到期 8月28日 · 智能 · 极速",
     m1WorkingMsg: "M1 纯算力内核稳定工作中。高级设置详情将在后续版本升级解锁。",
+    apiConfigTitle: "API 配置",
+    apiKeyLabel: "API 密钥 (API Key)",
+    apiKeyPlaceholder: "请输入该服务商的 API 密钥",
+    chatModelLabel: "默认对话模型",
+    codingModelLabel: "默认编程模型",
+    tempLabel: "温度参数 (Temperature)",
+    maxTokensLabel: "单次最大 Token 数 (Max Tokens)",
+    saveBtn: "保存配置",
+    deleteBtn: "删除服务商",
+    customNameLabel: "服务商名称",
+    customEndpointLabel: "API 端点 (Base URL)",
+    customModelsLabel: "模型列表 (逗号分隔)",
   },
   en: {
     // LeftNav
@@ -214,6 +226,18 @@ const translations: Record<Language, Record<string, string>> = {
     moduleDeveloping: "This module is currently under development",
     expirationInfo: "Expires Aug 28 · Intelligent · High-Speed",
     m1WorkingMsg: "M1 pure-compute kernel is running stably. Advanced settings details will be unlocked in a future upgrade.",
+    apiConfigTitle: "API Configuration",
+    apiKeyLabel: "API Key",
+    apiKeyPlaceholder: "Enter API key for this provider",
+    chatModelLabel: "Default Chat Model",
+    codingModelLabel: "Default Coding Model",
+    tempLabel: "Temperature",
+    maxTokensLabel: "Max Generation Tokens",
+    saveBtn: "Save Config",
+    deleteBtn: "Delete Provider",
+    customNameLabel: "Provider Name",
+    customEndpointLabel: "API Endpoint (Base URL)",
+    customModelsLabel: "Models List (comma-separated)",
   }
 };
 

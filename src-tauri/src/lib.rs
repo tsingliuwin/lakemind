@@ -53,6 +53,8 @@ pub fn run() {
             commands::list_duckdb_tables,
             commands::get_app_config,
             commands::set_app_config,
+            commands::load_settings_json,
+            commands::save_settings_json,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
