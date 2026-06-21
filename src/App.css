@@ -210,6 +210,10 @@ select:hover:not(:disabled) {
   position: relative;
 }
 
+.titlebar-left.mac-padding {
+  padding-left: 80px;
+}
+
 .tb-logo {
   font-size: 14px;
 }

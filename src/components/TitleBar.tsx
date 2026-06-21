@@ -4,6 +4,8 @@ import type { SourceTable } from "../lib/types";
 import { t } from "../lib/i18n";
 import { logoSrc } from "../lib/theme";
 
+const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
+
 export default function TitleBar(props: {
   inspectorOpen: boolean;
   consoleOpen: boolean;
@@ -52,7 +54,7 @@ export default function TitleBar(props: {
     <div class="titlebar" data-tauri-drag-region>
       {/* Titlebar Left: Logo, Name, and ZCode-style Dropdown Menu */}
       {/* Titlebar Left: Logo and Name */}
-      <div class="titlebar-left" data-tauri-drag-region>
+      <div class="titlebar-left" classList={{ "mac-padding": isMac }} data-tauri-drag-region>
         <span class="tb-logo" data-tauri-drag-region><img src={logoSrc()} alt="LakeMind" style="width: 14px; height: 14px; object-fit: contain; vertical-align: middle;" /></span>
         <span class="tb-brand" data-tauri-drag-region>LakeMind</span>
       </div>
@@ -157,33 +159,35 @@ export default function TitleBar(props: {
           </div>
         </Show>
 
-        <button 
-          class="tb-win-btn" 
-          title={t("minimize")}
-          onClick={() => void appWindow.minimize()}
-        >
-          <svg viewBox="0 0 10.2 1" style="width: 10px; height: 1px;">
-            <rect x="0" y="0" width="10.2" height="1" fill="currentColor" />
-          </svg>
-        </button>
-        <button 
-          class="tb-win-btn" 
-          title={t("maximize")}
-          onClick={() => void appWindow.toggleMaximize()}
-        >
-          <svg viewBox="0 0 10 10" style="width: 10px; height: 10px;">
-            <path d="M0,0v10h10V0H0z M9,9H1V1h8V9z" fill="currentColor" />
-          </svg>
-        </button>
-        <button 
-          class="tb-win-btn close-btn" 
-          title={t("close")}
-          onClick={() => void appWindow.close()}
-        >
-          <svg viewBox="0 0 10 10" style="width: 10px; height: 10px;">
-            <polygon points="10,0.7 9.3,0 5,4.3 0.7,0 0,0.7 4.3,5 0,9.3 0.7,10 5,5.7 9.3,10 10,9.3 5.7,5" fill="currentColor" />
-          </svg>
-        </button>
+        <Show when={!isMac}>
+          <button 
+            class="tb-win-btn" 
+            title={t("minimize")}
+            onClick={() => void appWindow.minimize()}
+          >
+            <svg viewBox="0 0 10.2 1" style="width: 10px; height: 1px;">
+              <rect x="0" y="0" width="10.2" height="1" fill="currentColor" />
+            </svg>
+          </button>
+          <button 
+            class="tb-win-btn" 
+            title={t("maximize")}
+            onClick={() => void appWindow.toggleMaximize()}
+          >
+            <svg viewBox="0 0 10 10" style="width: 10px; height: 10px;">
+              <path d="M0,0v10h10V0H0z M9,9H1V1h8V9z" fill="currentColor" />
+            </svg>
+          </button>
+          <button 
+            class="tb-win-btn close-btn" 
+            title={t("close")}
+            onClick={() => void appWindow.close()}
+          >
+            <svg viewBox="0 0 10 10" style="width: 10px; height: 10px;">
+              <polygon points="10,0.7 9.3,0 5,4.3 0.7,0 0,0.7 4.3,5 0,9.3 0.7,10 5,5.7 9.3,10 10,9.3 5.7,5" fill="currentColor" />
+            </svg>
+          </button>
+        </Show>
       </div>
 
       {/* About Modal Dialog */}
