@@ -14,6 +14,9 @@
   --border-faint: #1a1a1c;   /* Thin dividers */
   --border-strong: #252528;  /* Defined borders, headers, buttons */
 
+  --bg-pill-outer: #1c1c1f;  /* ZCode pill outer panel */
+  --bg-pill-inner: #0e0e10;  /* ZCode pill inner text area card */
+
   --text-primary: #e6e7eb;   /* Main text, headings */
   --text-secondary: #9aa0a6; /* Subtitles, shortcut labels, inactive states */
   --text-dim: #5c6066;       /* Placeholders, disabled markers */
@@ -66,6 +69,9 @@
   --text-primary: #f0f0f5;
   --text-secondary: #a0a0a5;
   --text-dim: #606065;
+
+  --bg-pill-outer: #222222;
+  --bg-pill-inner: #181818;
 }
 
 /* --- ZCode 3.0 Premium Light Theme Hues --- */
@@ -81,6 +87,9 @@
   --text-primary: #111827;   /* Main text, headings */
   --text-secondary: #4b5563; /* Subtitles, shortcut labels, inactive states */
   --text-dim: #9ca3af;       /* Placeholders, disabled markers */
+  
+  --bg-pill-outer: #f1f2f5;
+  --bg-pill-inner: #ffffff;
   
   --accent-blue: #2563eb;
   --accent-blue-hover: #1d4ed8;
@@ -2474,19 +2483,31 @@ select:hover:not(:disabled) {
 /* Input pill container */
 .input-pill {
   width: 100%;
-  background: #18181b; /* ZCode darker elevated background */
-  border: 1px solid var(--border-strong);
+  background: var(--bg-pill-outer);
+  border: none;
   border-radius: 16px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
-  padding: 12px 16px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+  padding: 8px 0 0 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+.pill-inner-card {
+  background: var(--bg-pill-inner);
+  border-radius: 12px 12px 16px 16px;
+  padding: 12px 14px;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
 .pill-header {
   display: flex;
   align-items: center;
+  padding: 0 12px;
 }
 
 /* Workspace trigger button */
@@ -2495,14 +2516,14 @@ select:hover:not(:disabled) {
 }
 
 .ws-trigger-btn {
-  background: var(--bg-hover);
-  border: 1px solid var(--border-strong);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 6px;
   padding: 4px 8px;
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--text-primary);
+  color: var(--text-secondary);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -2511,8 +2532,8 @@ select:hover:not(:disabled) {
 }
 
 .ws-trigger-btn:hover {
-  background: var(--bg-active);
-  border-color: var(--accent-blue);
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .ws-icon {
@@ -2664,7 +2685,9 @@ select:hover:not(:disabled) {
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
-  placeholder-color: var(--text-dim);
+}
+.pill-body textarea::placeholder {
+  color: var(--text-dim);
 }
 
 /* Pill Footer Toolbar */
@@ -2674,8 +2697,8 @@ select:hover:not(:disabled) {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px 12px;
-  border-top: 1px solid var(--border-faint);
-  padding-top: 10px;
+  border-top: none;
+  padding-top: 0;
 }
 
 .footer-left {
@@ -2707,8 +2730,9 @@ select:hover:not(:disabled) {
 .attachment-btn {
   width: 24px;
   height: 24px;
-  border-radius: 50%;
-  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text-secondary);
   padding: 0;
 }
@@ -2729,8 +2753,8 @@ select:hover:not(:disabled) {
 }
 
 .select-btn {
-  background: var(--bg-hover);
-  border: 1px solid var(--border-strong);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 6px;
   padding: 4px 10px;
   font-size: 11px;
@@ -2744,14 +2768,15 @@ select:hover:not(:disabled) {
 }
 
 .select-btn.active {
-  background: var(--bg-active);
-  border-color: var(--accent-blue);
+  background: var(--bg-hover);
   color: var(--text-primary);
+  border-color: transparent;
 }
 
 .select-btn:hover {
-  background: var(--bg-active);
+  background: var(--bg-hover);
   color: var(--text-primary);
+  border-color: transparent;
 }
 
 .btn-prefix {

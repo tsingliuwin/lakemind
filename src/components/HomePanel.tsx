@@ -20,12 +20,14 @@ export default function HomePanel(props: HomePanelProps) {
   const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
   
   const [selectedConfirm, setSelectedConfirm] = createSignal("变更前确认");
+  const [confirmDropdownOpen, setConfirmDropdownOpen] = createSignal(false);
 
   const [selectedPriority, setSelectedPriority] = createSignal("最高");
   const [priorityDropdownOpen, setPriorityDropdownOpen] = createSignal(false);
 
   let wsRef!: HTMLDivElement;
   let modelRef!: HTMLDivElement;
+  let confirmRef!: HTMLDivElement;
   let priorityRef!: HTMLDivElement;
 
   const handleClickOutside = (e: MouseEvent) => {
@@ -34,6 +36,9 @@ export default function HomePanel(props: HomePanelProps) {
     }
     if (modelRef && !modelRef.contains(e.target as Node)) {
       setModelDropdownOpen(false);
+    }
+    if (confirmRef && !confirmRef.contains(e.target as Node)) {
+      setConfirmDropdownOpen(false);
     }
     if (priorityRef && !priorityRef.contains(e.target as Node)) {
       setPriorityDropdownOpen(false);
@@ -149,116 +154,124 @@ export default function HomePanel(props: HomePanelProps) {
             </div>
           </div>
 
-          {/* Text Area */}
-          <div class="pill-body">
-            <textarea
-              placeholder="向 ZCode 提问，输入 @ 添加文件, / 使用命令, $ 使用技能, # 关联对话"
-              value={inputValue()}
-              onInput={(e) => setInputValue(e.currentTarget.value)}
-              onKeyDown={handleKeyDown}
-              rows={2}
-            />
-          </div>
-
-          {/* Bottom Toolbar Row */}
-          <div class="pill-footer">
-            <div class="footer-left">
-              {/* Attachment Button */}
-              <button 
-                class="pill-btn attachment-btn" 
-                title="添加文件 / @"
-                onClick={() => props.onAddSource?.()}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M12 5v14M5 12h14"/>
-                </svg>
-              </button>
-
-              {/* Confirmation Mode Selector (Parallel Buttons) */}
-              <button 
-                class="pill-btn select-btn" 
-                classList={{ active: selectedConfirm() === "变更前确认" }}
-                onClick={() => setSelectedConfirm("变更前确认")}
-              >
-                <span class="btn-prefix">✋</span>
-                <span>变更前确认</span>
-              </button>
-              <button 
-                class="pill-btn select-btn" 
-                classList={{ active: selectedConfirm() === "自动执行" }}
-                onClick={() => setSelectedConfirm("自动执行")}
-              >
-                <span class="btn-prefix">⚡</span>
-                <span>自动执行</span>
-              </button>
+          {/* Inner Card wrapping Text Area and Toolbar */}
+          <div class="pill-inner-card">
+            {/* Text Area */}
+            <div class="pill-body">
+              <textarea
+                placeholder="向 ZCode 提问，输入 @ 添加文件, / 使用命令, $ 使用技能, # 关联对话"
+                value={inputValue()}
+                onInput={(e) => setInputValue(e.currentTarget.value)}
+                onKeyDown={handleKeyDown}
+                rows={2}
+              />
             </div>
 
-            <div class="footer-right">
-              {/* Model Selector Dropdown */}
-              <div class="dropdown-wrapper" ref={modelRef}>
-                <button class="pill-btn select-btn" onClick={() => setModelDropdownOpen(!modelDropdownOpen())}>
-                  <span class="model-status-dot" />
-                  <span>{selectedModel()}</span>
-                  <span class="btn-caret">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                      <polyline points="6 9 12 15 18 9"></polyline>
-                    </svg>
-                  </span>
+            {/* Bottom Toolbar Row */}
+            <div class="pill-footer">
+              <div class="footer-left">
+                {/* Attachment Button */}
+                <button 
+                  class="pill-btn attachment-btn" 
+                  title="添加文件 / @"
+                  onClick={() => props.onAddSource?.()}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 5v14M5 12h14"/>
+                  </svg>
                 </button>
-                <Show when={modelDropdownOpen()}>
-                  <div class="custom-dropdown-list">
-                    <button class="dropdown-item" onClick={() => { setSelectedModel("GLM-5.2"); setModelDropdownOpen(false); }}>
-                      GLM-5.2
-                    </button>
-                    <button class="dropdown-item" onClick={() => { setSelectedModel("GLM-4.0"); setModelDropdownOpen(false); }}>
-                      GLM-4.0
-                    </button>
-                    <button class="dropdown-item" onClick={() => { setSelectedModel("GLM-4-Turbo"); setModelDropdownOpen(false); }}>
-                      GLM-4-Turbo
-                    </button>
-                  </div>
-                </Show>
+
+                {/* Confirmation Mode Selector Dropdown */}
+                <div class="dropdown-wrapper" ref={confirmRef}>
+                  <button class="pill-btn select-btn" onClick={() => setConfirmDropdownOpen(!confirmDropdownOpen())}>
+                    <span class="btn-prefix">{selectedConfirm() === "自动执行" ? "⚡" : "✋"}</span>
+                    <span>{selectedConfirm()}</span>
+                    <span class="btn-caret">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </span>
+                  </button>
+                  <Show when={confirmDropdownOpen()}>
+                    <div class="custom-dropdown-list">
+                      <button class="dropdown-item" onClick={() => { setSelectedConfirm("变更前确认"); setConfirmDropdownOpen(false); }}>
+                        <span class="btn-prefix">✋</span> 变更前确认
+                      </button>
+                      <button class="dropdown-item" onClick={() => { setSelectedConfirm("自动执行"); setConfirmDropdownOpen(false); }}>
+                        <span class="btn-prefix">⚡</span> 自动执行
+                      </button>
+                    </div>
+                  </Show>
+                </div>
               </div>
 
-              {/* Priority Selector Dropdown */}
-              <div class="dropdown-wrapper" ref={priorityRef}>
-                <button class="pill-btn select-btn" onClick={() => setPriorityDropdownOpen(!priorityDropdownOpen())}>
-                  <span class="btn-prefix">⚙️</span>
-                  <span>{selectedPriority()}</span>
-                  <span class="btn-caret">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                      <polyline points="6 9 12 15 18 9"></polyline>
-                    </svg>
-                  </span>
-                </button>
-                <Show when={priorityDropdownOpen()}>
-                  <div class="custom-dropdown-list">
-                    <button class="dropdown-item" onClick={() => { setSelectedPriority("最高"); setPriorityDropdownOpen(false); }}>
-                      最高
-                    </button>
-                    <button class="dropdown-item" onClick={() => { setSelectedPriority("均衡"); setPriorityDropdownOpen(false); }}>
-                      均衡
-                    </button>
-                    <button class="dropdown-item" onClick={() => { setSelectedPriority("最快"); setPriorityDropdownOpen(false); }}>
-                      最快
-                    </button>
-                  </div>
-                </Show>
-              </div>
+              <div class="footer-right">
+                {/* Model Selector Dropdown */}
+                <div class="dropdown-wrapper" ref={modelRef}>
+                  <button class="pill-btn select-btn" onClick={() => setModelDropdownOpen(!modelDropdownOpen())}>
+                    <span class="model-status-dot" />
+                    <span>{selectedModel()}</span>
+                    <span class="btn-caret">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </span>
+                  </button>
+                  <Show when={modelDropdownOpen()}>
+                    <div class="custom-dropdown-list">
+                      <button class="dropdown-item" onClick={() => { setSelectedModel("GLM-5.2"); setModelDropdownOpen(false); }}>
+                        GLM-5.2
+                      </button>
+                      <button class="dropdown-item" onClick={() => { setSelectedModel("GLM-4.0"); setModelDropdownOpen(false); }}>
+                        GLM-4.0
+                      </button>
+                      <button class="dropdown-item" onClick={() => { setSelectedModel("GLM-4-Turbo"); setModelDropdownOpen(false); }}>
+                        GLM-4-Turbo
+                      </button>
+                    </div>
+                  </Show>
+                </div>
 
-              {/* Send Button */}
-              <button 
-                class="send-btn" 
-                classList={{ active: inputValue().trim().length > 0 }}
-                disabled={inputValue().trim().length === 0}
-                onClick={handleSubmit}
-                title="发送任务"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="12" y1="19" x2="12" y2="5"></line>
-                  <polyline points="5 12 12 5 19 12"></polyline>
-                </svg>
-              </button>
+                {/* Priority Selector Dropdown */}
+                <div class="dropdown-wrapper" ref={priorityRef}>
+                  <button class="pill-btn select-btn" onClick={() => setPriorityDropdownOpen(!priorityDropdownOpen())}>
+                    <span class="btn-prefix">⚙️</span>
+                    <span>{selectedPriority()}</span>
+                    <span class="btn-caret">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </span>
+                  </button>
+                  <Show when={priorityDropdownOpen()}>
+                    <div class="custom-dropdown-list">
+                      <button class="dropdown-item" onClick={() => { setSelectedPriority("最高"); setPriorityDropdownOpen(false); }}>
+                        最高
+                      </button>
+                      <button class="dropdown-item" onClick={() => { setSelectedPriority("均衡"); setPriorityDropdownOpen(false); }}>
+                        均衡
+                      </button>
+                      <button class="dropdown-item" onClick={() => { setSelectedPriority("最快"); setPriorityDropdownOpen(false); }}>
+                        最快
+                      </button>
+                    </div>
+                  </Show>
+                </div>
+
+                {/* Send Button */}
+                <button 
+                  class="send-btn" 
+                  classList={{ active: inputValue().trim().length > 0 }}
+                  disabled={inputValue().trim().length === 0}
+                  onClick={handleSubmit}
+                  title="发送任务"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="19" x2="12" y2="5"></line>
+                    <polyline points="5 12 12 5 19 12"></polyline>
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         </div>
