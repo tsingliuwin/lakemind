@@ -946,6 +946,7 @@ select:hover:not(:disabled) {
 .ln-user-badge {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 6px;
   background: transparent;
   border: 1px solid transparent !important;
@@ -1913,6 +1914,7 @@ select:hover:not(:disabled) {
 .ss-user-badge {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 6px;
   background: transparent;
   border: 1px solid transparent !important;
