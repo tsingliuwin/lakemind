@@ -502,10 +502,19 @@ pub async fn run_agent_chat_stream(
     model_id: String,
     prompt: String,
     history_json: String,
+    priority: String,
     app_state: AppState,
 ) -> Result<(), String> {
     // 1. Get model provider config
     let provider = get_provider_for_model(&model_id)?;
+
+    // Map priority (最高/均衡/最快) → OpenAI reasoning_effort (high/medium/low).
+    // For models that don't support this param, it's silently ignored by the API.
+    let effort = match priority.as_str() {
+        "最高" => "high",
+        "最快" => "low",
+        _ => "medium", // 均衡 or default
+    };
 
     // Get max_tokens limit for the chosen model, defaulting to 4096 if not set
     let max_tokens_limit = provider.models.iter()
@@ -545,6 +554,7 @@ pub async fn run_agent_chat_stream(
             .agent(&model_id)
             .preamble(preamble)
             .max_tokens(max_tokens_limit)
+            .additional_params(json!({"reasoning_effort": effort}))
             .tool(list_tool)
             .tool(desc_tool)
             .tool(exec_tool)

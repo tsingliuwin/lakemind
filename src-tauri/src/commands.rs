@@ -587,9 +587,11 @@ pub async fn start_agent_chat(
     model_id: String,
     prompt: String,
     history_json: String,
+    priority: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let app_state = state.inner().clone();
+    let priority = priority.unwrap_or_else(|| "均衡".to_string());
     tokio::spawn(async move {
         if let Err(e) = crate::agent::run_agent_chat_stream(
             window.clone(),
@@ -597,6 +599,7 @@ pub async fn start_agent_chat(
             model_id,
             prompt,
             history_json,
+            priority,
             app_state,
         )
         .await

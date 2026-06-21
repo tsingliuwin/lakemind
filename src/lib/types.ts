@@ -99,6 +99,8 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** 仅 assistant：推理/思考过程（reasoning 模型流式输出，前端折叠显示）。 */
+  reasoning?: string;
   /** 仅 assistant：本条回复产出的步骤卡片。 */
   cards?: ChatCard[];
   ts: number;

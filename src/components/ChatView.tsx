@@ -21,13 +21,20 @@ export default function ChatView(props: {
   availableModels: string[];
   selectedModel: string;
   onSelectModel: (model: string) => void;
+  selectedPriority: string;
+  onSelectPriority: (priority: string) => void;
 }) {
   const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
+  const [priorityDropdownOpen, setPriorityDropdownOpen] = createSignal(false);
   let modelRef: HTMLDivElement | undefined;
+  let priorityRef: HTMLDivElement | undefined;
 
   const handleClickOutside = (e: MouseEvent) => {
     if (modelRef && !modelRef.contains(e.target as Node)) {
       setModelDropdownOpen(false);
+    }
+    if (priorityRef && !priorityRef.contains(e.target as Node)) {
+      setPriorityDropdownOpen(false);
     }
   };
 
@@ -82,6 +89,12 @@ export default function ChatView(props: {
               <div class={`chat-msg chat-msg--${msg.role}`}>
                 <div class="chat-msg__avatar">{msg.role === "user" ? "👤" : "🤖"}</div>
                 <div class="chat-msg__body">
+                  <Show when={msg.reasoning}>
+                    <details class="chat-msg__reasoning" style="margin-bottom: 6px; border-left: 2px solid var(--accent-blue, #50a0ff); padding-left: 8px; opacity: 0.75;">
+                      <summary style="cursor: pointer; font-size: 12px; color: var(--text-dim); user-select: none;">💭 思考过程</summary>
+                      <div style="white-space: pre-wrap; margin-top: 4px; font-size: 12px; color: var(--text-dim);">{msg.reasoning}</div>
+                    </details>
+                  </Show>
                   <div class="chat-msg__text">{msg.content}</div>
                   <Show when={msg.cards && msg.cards.length > 0}>
                     <div class="chat-msg__cards">
@@ -108,7 +121,7 @@ export default function ChatView(props: {
       <div class="chat-composer">
         <textarea
           class="chat-composer__input"
-          placeholder={`向 LakeMind 提问（@ 数据源  / 命令  # 关联历史）…`}
+          placeholder={`向 LakeMind 提问（Enter 发送 · Shift+Enter 换行）…`}
           value={input()}
           onInput={(e) => setInput(e.currentTarget.value)}
           onkeydown={onKeydown}
@@ -121,8 +134,8 @@ export default function ChatView(props: {
             
             {/* Model Selector Dropdown */}
             <div class="dropdown-wrapper" ref={modelRef} style="position: relative;">
-              <button 
-                class="pill-btn select-btn" 
+              <button
+                class="pill-btn select-btn"
                 style="background: transparent; border: none; padding: 2px 6px; font-size: 12px; display: flex; align-items: center; gap: 4px; color: var(--text-normal); cursor: pointer; border-radius: 4px;"
                 onClick={() => setModelDropdownOpen(!modelDropdownOpen())}
               >
@@ -155,9 +168,32 @@ export default function ChatView(props: {
                 </div>
               </Show>
             </div>
+
+            {/* Priority Selector Dropdown */}
+            <div class="dropdown-wrapper" ref={priorityRef} style="position: relative;">
+              <button
+                class="pill-btn select-btn"
+                style="background: transparent; border: none; padding: 2px 6px; font-size: 12px; display: flex; align-items: center; gap: 4px; color: var(--text-normal); cursor: pointer; border-radius: 4px;"
+                onClick={() => setPriorityDropdownOpen(!priorityDropdownOpen())}
+              >
+                <span>⚙️</span>
+                <span>{props.selectedPriority}</span>
+                <span class="btn-caret">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </span>
+              </button>
+              <Show when={priorityDropdownOpen()}>
+                <div class="custom-dropdown-list" style="bottom: calc(100% + 6px); left: 0; right: auto;">
+                  <button class="dropdown-item" onClick={() => { props.onSelectPriority("最高"); setPriorityDropdownOpen(false); }}>最高</button>
+                  <button class="dropdown-item" onClick={() => { props.onSelectPriority("均衡"); setPriorityDropdownOpen(false); }}>均衡</button>
+                  <button class="dropdown-item" onClick={() => { props.onSelectPriority("最快"); setPriorityDropdownOpen(false); }}>最快</button>
+                </div>
+              </Show>
+            </div>
           </div>
           
-          <span class="muted">Enter 发送 · Shift+Enter 换行</span>
           <button class="chat-composer__send" disabled={busy() || !input().trim()} onClick={() => void send()}>
             {busy() ? "运行中…" : "发送 ↑"}
           </button>

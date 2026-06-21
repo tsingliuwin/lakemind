@@ -11,6 +11,8 @@ interface HomePanelProps {
   availableModels: string[];
   selectedModel: string;
   onSelectModel: (model: string) => void;
+  selectedPriority: string;
+  onSelectPriority: (priority: string) => void;
 }
 
 export default function HomePanel(props: HomePanelProps) {
@@ -24,7 +26,6 @@ export default function HomePanel(props: HomePanelProps) {
   const [selectedConfirm, setSelectedConfirm] = createSignal("变更前确认");
   const [confirmDropdownOpen, setConfirmDropdownOpen] = createSignal(false);
 
-  const [selectedPriority, setSelectedPriority] = createSignal("最高");
   const [priorityDropdownOpen, setPriorityDropdownOpen] = createSignal(false);
 
   let wsRef!: HTMLDivElement;
@@ -245,7 +246,7 @@ export default function HomePanel(props: HomePanelProps) {
                 <div class="dropdown-wrapper" ref={priorityRef}>
                   <button class="pill-btn select-btn" onClick={() => setPriorityDropdownOpen(!priorityDropdownOpen())}>
                     <span class="btn-prefix">⚙️</span>
-                    <span>{selectedPriority()}</span>
+                    <span>{props.selectedPriority}</span>
                     <span class="btn-caret">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                         <polyline points="6 9 12 15 18 9"></polyline>
@@ -254,13 +255,13 @@ export default function HomePanel(props: HomePanelProps) {
                   </button>
                   <Show when={priorityDropdownOpen()}>
                     <div class="custom-dropdown-list">
-                      <button class="dropdown-item" onClick={() => { setSelectedPriority("最高"); setPriorityDropdownOpen(false); }}>
+                      <button class="dropdown-item" onClick={() => { props.onSelectPriority("最高"); setPriorityDropdownOpen(false); }}>
                         最高
                       </button>
-                      <button class="dropdown-item" onClick={() => { setSelectedPriority("均衡"); setPriorityDropdownOpen(false); }}>
+                      <button class="dropdown-item" onClick={() => { props.onSelectPriority("均衡"); setPriorityDropdownOpen(false); }}>
                         均衡
                       </button>
-                      <button class="dropdown-item" onClick={() => { setSelectedPriority("最快"); setPriorityDropdownOpen(false); }}>
+                      <button class="dropdown-item" onClick={() => { props.onSelectPriority("最快"); setPriorityDropdownOpen(false); }}>
                         最快
                       </button>
                     </div>

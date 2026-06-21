@@ -704,7 +704,7 @@ export default function SettingsPage(props: {
                                   if (e.key === "Enter") handleSaveProviderName();
                                   if (e.key === "Escape") setEditingProviderId(null);
                                 }}
-                                autoFocus
+                                autofocus
                               />
                             </div>
                           </Show>

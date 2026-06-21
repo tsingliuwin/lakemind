@@ -69,6 +69,7 @@ export default function App() {
   // --- model settings sync ---
   const [availableModels, setAvailableModels] = createSignal<string[]>([]);
   const [selectedModel, setSelectedModel] = createSignal<string>("");
+  const [selectedPriority, setSelectedPriority] = createSignal<string>("最高");
 
   async function loadModelsFromSettings() {
     try {
@@ -136,10 +137,13 @@ export default function App() {
           
           if (payload.kind === "text") {
             lastMsg.content += payload.text ?? "";
+          } else if (payload.kind === "reasoning") {
+            lastMsg.reasoning = (lastMsg.reasoning ?? "") + (payload.text ?? "");
           } else if (payload.kind === "error") {
             lastMsg.content += `\n\n⚠️ **错误**: ${payload.text ?? "未知错误"}`;
           } else if (payload.kind === "card" && payload.card) {
             const card = payload.card;
+            if (!lastMsg.cards) lastMsg.cards = [];
             const existingIdx = lastMsg.cards.findIndex(c => c.id === card.id);
             if (existingIdx >= 0) {
               lastMsg.cards[existingIdx] = card;
@@ -374,6 +378,7 @@ export default function App() {
         modelId: activeModel,
         prompt,
         historyJson,
+        priority: selectedPriority(),
       });
     } catch (err) {
       console.error("Failed to start agent chat:", err);
@@ -436,6 +441,7 @@ export default function App() {
         modelId: targetModel,
         prompt,
         historyJson,
+        priority: selectedPriority(),
       });
     } catch (err) {
       console.error("Failed to start agent chat:", err);
@@ -495,6 +501,7 @@ export default function App() {
         modelId: targetModel,
         prompt,
         historyJson,
+        priority: selectedPriority(),
       });
     } catch (err) {
       console.error("Failed to start agent chat:", err);
@@ -958,6 +965,8 @@ export default function App() {
                     availableModels={availableModels()}
                     selectedModel={selectedModel()}
                     onSelectModel={setSelectedModel}
+                    selectedPriority={selectedPriority()}
+                    onSelectPriority={setSelectedPriority}
                   />
                 }
               >
@@ -981,6 +990,8 @@ export default function App() {
                         }
                         setSelectedModel(model);
                       }}
+                      selectedPriority={selectedPriority()}
+                      onSelectPriority={setSelectedPriority}
                     />
                   </Match>
                   <Match when={(activeTask()?.kind ?? "sql") === "sql"}>
