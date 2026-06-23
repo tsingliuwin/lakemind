@@ -3452,10 +3452,6 @@ select:hover:not(:disabled) {
   line-height: 1.6;
   word-break: break-word;
 }
-.chat-msg--user {
-  align-self: flex-end;
-  max-width: 80%;
-}
 .chat-msg--user .chat-msg__body {
   align-items: flex-end;
 }
@@ -3465,10 +3461,7 @@ select:hover:not(:disabled) {
   color: var(--text-primary);
   white-space: pre-wrap;
   border-radius: 12px 12px 2px 12px;
-}
-.chat-msg--assistant {
-  align-self: flex-start;
-  max-width: 90%;
+  max-width: 85%;
 }
 .chat-msg--assistant .chat-msg__text {
   background: var(--bg-elevated);
