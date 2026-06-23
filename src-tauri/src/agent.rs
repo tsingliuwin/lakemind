@@ -751,7 +751,7 @@ pub async fn run_agent_chat_stream(
 
         let agent = agent_builder.build();
         let stream = agent.stream_chat(prompt.clone(), rig_history)
-            .multi_turn(20)
+            .multi_turn(100)
             .await;
         run_stream_loop(window.clone(), task_id.clone(), stream).await;
     } else if format == "responses" {
@@ -777,7 +777,7 @@ pub async fn run_agent_chat_stream(
 
         let agent = agent_builder.build();
         let stream = agent.stream_chat(prompt.clone(), rig_history)
-            .multi_turn(20)
+            .multi_turn(100)
             .await;
         run_stream_loop(window.clone(), task_id.clone(), stream).await;
     } else if format == "anthropic" {
@@ -799,7 +799,7 @@ pub async fn run_agent_chat_stream(
             .build();
 
         let stream = agent.stream_chat(prompt.clone(), rig_history)
-            .multi_turn(20)
+            .multi_turn(100)
             .await;
         run_stream_loop(window.clone(), task_id.clone(), stream).await;
     } else {
