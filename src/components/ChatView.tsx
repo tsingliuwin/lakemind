@@ -5,8 +5,10 @@ import MarkdownRenderer from "./MarkdownRenderer";
 
 type ReasoningSeg = Extract<Segment, { type: "reasoning" }>;
 type TextSeg = Extract<Segment, { type: "text" }>;
+type ErrorSeg = Extract<Segment, { type: "error" }>;
 const asReasoning = (s: Segment): ReasoningSeg | null => (s.type === "reasoning" ? s : null);
 const asText = (s: Segment): TextSeg | null => (s.type === "text" ? s : null);
+const asError = (s: Segment): ErrorSeg | null => (s.type === "error" ? s : null);
 
 /**
  * 对话模式主区：消息流（上）+ 段内嵌 + 底部常驻输入框。
@@ -246,8 +248,21 @@ export default function ChatView(props: {
                     {(seg) => {
                       const rs = () => asReasoning(seg);
                       const ts = () => asText(seg);
+                      const es = () => asError(seg);
                       return (
                         <Switch>
+                          <Match when={seg.type === "error" && es()}>
+                            <div class="chat-terminal-error">
+                              <span class="chat-terminal-error__icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                                  <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                                  <line x1="12" y1="9" x2="12" y2="13" />
+                                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                                </svg>
+                              </span>
+                              <span class="chat-terminal-error__text">{es()!.text}</span>
+                            </div>
+                          </Match>
                           <Match when={seg.type === "reasoning"}>
                             <div class="chat-reasoning">
                               <div class="chat-reasoning__header" onClick={() => toggleReasoning(seg.id)}>

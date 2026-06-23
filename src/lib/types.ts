@@ -101,7 +101,8 @@ export type Segment =
       table?: SqlResult;
       elapsedMs?: number;
     }
-  | { type: "text"; id: string; text: string };
+  | { type: "text"; id: string; text: string }
+  | { type: "error"; id: string; text: string };
 
 /** 一条对话消息。assistant 消息由有序 Segment 构成。 */
 export interface ChatMessage {

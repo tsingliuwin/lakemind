@@ -157,11 +157,14 @@ export default function App() {
               elapsedMs: s.elapsedMs,
             });
           } else if (kind === "error") {
-            segments = appendDelta(
-              segments,
-              "text",
-              `\n\n⚠️ **错误**: ${payload.text ?? "未知错误"}`,
-            );
+            segments = [
+              ...segments,
+              {
+                type: "error",
+                id: `seg-err-${Date.now()}`,
+                text: payload.text ?? "未知错误",
+              },
+            ];
           }
 
           messages[messages.length - 1] = { ...lastMsg, segments };

@@ -3804,6 +3804,34 @@ select:hover:not(:disabled) {
   margin-left: 6px;
 }
 
+/* --- 终端/助手执行错误 --- */
+.chat-terminal-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--accent-red-bg);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-left: 3px solid var(--accent-red);
+  border-radius: var(--radius-card);
+  margin: 6px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.chat-terminal-error__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-red);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.chat-terminal-error__text {
+  word-break: break-word;
+  font-weight: 500;
+}
+
 /* --- 卡片 --- */
 .chat-card {
   background: var(--bg-surface);

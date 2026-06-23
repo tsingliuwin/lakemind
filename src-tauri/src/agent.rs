@@ -62,6 +62,11 @@ pub enum Segment {
         id: String,
         text: String,
     },
+    /// Terminal/agent execution error.
+    Error {
+        id: String,
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
