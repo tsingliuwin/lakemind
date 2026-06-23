@@ -611,8 +611,7 @@ pub async fn start_agent_chat(
                     task_id,
                     kind: "error".to_string(),
                     text: Some(e),
-                    card: None,
-                    phase: None,
+                    segment: None,
                 },
             );
         }

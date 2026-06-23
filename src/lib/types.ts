@@ -79,33 +79,47 @@ export function typeFamily(type: string): TypeFamily {
 
 export type TaskKind = "sql" | "chat";
 
-/** Agent 执行过程中的产物卡片，嵌在助手消息里展示。 */
-export interface ChatCard {
-  id: string;
-  /** 卡片类型：步骤摘要 / SQL 代码 / 结果表 / 最终结论。 */
-  kind: "step" | "sql" | "table" | "conclusion";
-  /** 卡片标题，如「探测了 3 张表」「执行查询」。 */
-  title: string;
-  /** 详细说明（步骤描述或 SQL 文本）。 */
-  detail?: string;
-  /** SQL 卡片：可「在 SQL 面板打开」注入到新 SQL task。 */
-  sql?: string;
-  /** table 卡片：结果行数提示。 */
-  rows?: number;
-}
+/**
+ * Agent 执行过程中的一段产物。一条 assistant 消息是 Segment 的有序列表，
+ * 按真实发生顺序排列：reasoning → tool → reasoning → tool → … → text(结论)。
+ * 这取代了旧的 {content, reasoning, cards, phase} 平行桶，保留思考与工具
+ * 调用的时序关系。
+ */
+export type Segment =
+  | { type: "reasoning"; id: string; text: string }
+  | {
+      type: "tool";
+      id: string;
+      tool: string; // "list_tables" | "describe_table" | "execute_query" | "sample_data"
+      args?: unknown;
+      status: "running" | "ok" | "error";
+      /** 人类可读摘要（折叠时显示）。 */
+      summary?: string;
+      /** execute_query 等：SQL 文本，可「在 SQL 面板打开」。 */
+      sql?: string;
+      /** 行返回类工具：完整结构化结果，内联渲染为表格。 */
+      table?: SqlResult;
+      elapsedMs?: number;
+    }
+  | { type: "text"; id: string; text: string };
 
-/** 一条对话消息。assistant 消息可携带多张步骤卡片。 */
+/** 一条对话消息。assistant 消息由有序 Segment 构成。 */
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
-  content: string;
-  /** 仅 assistant：推理/思考过程（reasoning 模型流式输出，前端折叠显示）。 */
-  reasoning?: string;
-  /** 仅 assistant：本条回复产出的步骤卡片。 */
-  cards?: ChatCard[];
+  /** 有序产物段（user 消息为单个 text 段）。 */
+  segments: Segment[];
   ts: number;
-  /** 仅 assistant：当前 Agent 工作阶段。 */
-  phase?: string; // "exploring" | "analyzing" | "querying" | "concluding"
+}
+
+/** @deprecated 旧卡片模型，仅用于迁移历史 chat 任务。 */
+export interface ChatCard {
+  id: string;
+  kind: "step" | "sql" | "table" | "conclusion";
+  title: string;
+  detail?: string;
+  sql?: string;
+  rows?: number;
 }
 
 export interface QueryTask {

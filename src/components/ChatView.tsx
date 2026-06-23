@@ -1,44 +1,34 @@
-import { For, Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
-import type { ChatMessage } from "../lib/types";
-import ChatCard from "./ChatCard";
+import { For, Show, Switch, Match, createSignal, createEffect, onMount, onCleanup } from "solid-js";
+import type { ChatMessage, Segment } from "../lib/types";
+import ToolSegment from "./ToolSegment";
 import MarkdownRenderer from "./MarkdownRenderer";
 
+type ReasoningSeg = Extract<Segment, { type: "reasoning" }>;
+type TextSeg = Extract<Segment, { type: "text" }>;
+const asReasoning = (s: Segment): ReasoningSeg | null => (s.type === "reasoning" ? s : null);
+const asText = (s: Segment): TextSeg | null => (s.type === "text" ? s : null);
+
 /**
- * 对话模式主区：消息流（上）+ 卡片内嵌 + 底部常驻输入框。
+ * 对话模式主区：消息流（上）+ 段内嵌 + 底部常驻输入框。
  *
- * 优化特性：
- * - Markdown 渲染（标题、代码块、表格、行内代码）
- * - Agent 四步进度条（探索 → 理解 → 查询 → 总结）
- * - 思考过程可展开/折叠
- * - 工作时长计时器
+ * 消息按 segment 顺序渲染：reasoning（折叠）→ tool（混合折叠）→ text（Markdown）。
+ * 进度指示为单行「⏱ 已工作 N 秒 · 正在执行 SQL…」，由当前 running tool 派生。
  */
 
-const PHASE_LABELS: Record<string, string> = {
-  exploring: "探索数据库",
-  analyzing: "分析表结构",
-  querying: "执行查询",
-  concluding: "生成结论",
+const TOOL_LABELS: Record<string, string> = {
+  list_tables: "探索数据库",
+  describe_table: "分析表结构",
+  execute_query: "执行 SQL",
+  sample_data: "采样数据",
 };
-
-const PHASE_SHORT_LABELS: Record<string, string> = {
-  exploring: "探索",
-  analyzing: "分析",
-  querying: "查询",
-  concluding: "结论",
-};
-
-const PHASE_ORDER = ["exploring", "analyzing", "querying", "concluding"];
-
-function phaseIndex(phase: string | undefined): number {
-  if (!phase) return -1;
-  return PHASE_ORDER.indexOf(phase);
-}
 
 export default function ChatView(props: {
   messages: ChatMessage[];
   workspace: string;
+  taskName: string;
   onSend: (prompt: string) => void;
   onOpenInSqlPanel: (sql: string) => void;
+  onDelete?: () => void;
   availableModels: string[];
   selectedModel: string;
   onSelectModel: (model: string) => void;
@@ -68,15 +58,26 @@ export default function ChatView(props: {
   const [input, setInput] = createSignal("");
   const [busy, setBusy] = createSignal(false);
 
-  // Reasoning fold state: track which messages have their reasoning open.
-  // Default: latest assistant message is open, older ones are closed.
+  // Reasoning fold state: latest assistant message open while streaming.
   const [openReasoningIds, setOpenReasoningIds] = createSignal<Set<string>>(new Set());
+  // Tool segment fold state: a tool segment is auto-expanded while running,
+  // auto-collapsed when its result arrives; user can toggle manually.
+  const [expandedToolIds, setExpandedToolIds] = createSignal<Set<string>>(new Set());
 
   function toggleReasoning(msgId: string) {
     setOpenReasoningIds((prev) => {
       const next = new Set(prev);
       if (next.has(msgId)) next.delete(msgId);
       else next.add(msgId);
+      return next;
+    });
+  }
+
+  function toggleTool(segId: string) {
+    setExpandedToolIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(segId)) next.delete(segId);
+      else next.add(segId);
       return next;
     });
   }
@@ -107,28 +108,74 @@ export default function ChatView(props: {
     }
   });
 
-  // Auto-open reasoning for the latest streaming message
-  createEffect(() => {
+  // The latest assistant message id (streaming target).
+  function lastAssistantId(): string | undefined {
     const msgs = props.messages;
-    if (msgs.length > 0) {
-      const last = msgs[msgs.length - 1];
-      if (last.role === "assistant" && last.reasoning && busy()) {
+    if (msgs.length === 0) return undefined;
+    const last = msgs[msgs.length - 1];
+    return last.role === "assistant" ? last.id : undefined;
+  }
+
+  // Auto-expand the latest reasoning segment of the streaming assistant
+  // message (there can be several, interleaved between tool calls). Each new
+  // reasoning run auto-opens as it starts receiving deltas.
+  createEffect(() => {
+    const id = lastAssistantId();
+    if (!id || !busy()) return;
+    const msg = props.messages.find((m) => m.id === id);
+    if (!msg) return;
+    for (let i = msg.segments.length - 1; i >= 0; i--) {
+      const s = msg.segments[i];
+      if (s.type === "reasoning") {
         setOpenReasoningIds((prev) => {
           const next = new Set(prev);
-          next.add(last.id);
+          next.add(s.id);
           return next;
         });
+        break;
       }
     }
   });
 
-  // Get the current phase from the last streaming assistant message
-  function currentPhase(): string | undefined {
-    const msgs = props.messages;
-    if (msgs.length === 0) return undefined;
-    const last = msgs[msgs.length - 1];
-    if (last.role === "assistant") return last.phase;
-    return undefined;
+  // Drive tool-segment auto-expand/collapse: any tool segment whose status is
+  // "running" is expanded; once it transitions to ok|error it is removed from
+  // the expanded set (collapses to one line). Latest tool thus stays expanded
+  // while running, history collapses.
+  createEffect(() => {
+    const id = lastAssistantId();
+    if (!id) return;
+    const msg = props.messages.find((m) => m.id === id);
+    if (!msg) return;
+    const running = msg.segments
+      .filter((s): s is Extract<Segment, { type: "tool" }> => s.type === "tool")
+      .filter((s) => s.status === "running")
+      .map((s) => s.id);
+    setExpandedToolIds((prev) => {
+      const next = new Set(prev);
+      for (const r of running) next.add(r);
+      // Drop completed tools that the user hasn't manually toggled open.
+      for (const s of msg.segments) {
+        if (s.type === "tool" && s.status !== "running" && !running.includes(s.id)) {
+          next.delete(s.id);
+        }
+      }
+      return next;
+    });
+  });
+
+  // Current single-line action label derived from the running tool (or "思考中…").
+  function currentAction(): string | undefined {
+    const id = lastAssistantId();
+    if (!id) return undefined;
+    const msg = props.messages.find((m) => m.id === id);
+    if (!msg) return undefined;
+    const tools = msg.segments.filter((s): s is Extract<Segment, { type: "tool" }> => s.type === "tool");
+    const running = tools.filter((s) => s.status === "running");
+    if (running.length > 0) {
+      const last = running[running.length - 1];
+      return `正在${TOOL_LABELS[last.tool] ?? "执行工具"}…`;
+    }
+    return "思考中…";
   }
 
   async function send() {
@@ -153,6 +200,22 @@ export default function ChatView(props: {
 
   return (
     <div class="chat-view">
+      <div class="chat-header">
+        <span class="chat-header__title">{props.taskName || "对话"}</span>
+        <button
+          class="icon-btn"
+          title="关闭并删除对话"
+          onClick={() => {
+            if (props.messages.length > 0) {
+              if (!window.confirm("删除这个对话？历史记录将一并清除且不可恢复。")) return;
+            }
+            props.onDelete?.();
+          }}
+          style="color: var(--accent-red);"
+        >
+          ✕
+        </button>
+      </div>
       <div class="chat-stream" ref={scrollEl}>
         <Show
           when={props.messages.length > 0}
@@ -163,83 +226,65 @@ export default function ChatView(props: {
               <div class={`chat-msg chat-msg--${msg.role}`}>
                 <div class="chat-msg__avatar">{msg.role === "user" ? "👤" : "🤖"}</div>
                 <div class="chat-msg__body">
-                  {/* Reasoning — collapsible with blue left border */}
-                  <Show when={msg.reasoning}>
-                    <div class="chat-reasoning">
-                      <div class="chat-reasoning__header" onClick={() => toggleReasoning(msg.id)}>
-                        <span class="chat-reasoning__icon">💭</span>
-                        <span class="chat-reasoning__label">思考过程</span>
-                        <span class="chat-reasoning__toggle">
-                          {openReasoningIds().has(msg.id) ? "▾" : "▸"}
-                        </span>
-                      </div>
-                      <Show when={openReasoningIds().has(msg.id)}>
-                        <div class="chat-reasoning__body">{msg.reasoning}</div>
-                      </Show>
-                    </div>
-                  </Show>
-
-                  {/* Message content — Markdown for assistant, plain for user */}
-                  <div class="chat-msg__text">
-                    <Show
-                      when={msg.role === "assistant"}
-                      fallback={msg.content}
-                    >
-                      <MarkdownRenderer content={msg.content} />
-                    </Show>
-                  </div>
-
-                  {/* Chat cards */}
-                  <Show when={msg.cards && msg.cards.length > 0}>
-                    <div class="chat-msg__cards">
-                      <For each={msg.cards}>{(card) => (
-                        <ChatCard card={card} onOpenInSqlPanel={props.onOpenInSqlPanel} />
-                      )}</For>
-                    </div>
-                  </Show>
+                  {/* Single ordered loop: preserves the real reasoning → tool →
+                      … → text transcript instead of grouping by type. */}
+                  <For each={msg.segments}>
+                    {(seg) => {
+                      const rs = () => asReasoning(seg);
+                      const ts = () => asText(seg);
+                      return (
+                        <Switch>
+                          <Match when={seg.type === "reasoning"}>
+                            <div class="chat-reasoning">
+                              <div class="chat-reasoning__header" onClick={() => toggleReasoning(seg.id)}>
+                                <span class="chat-reasoning__icon">💭</span>
+                                <span class="chat-reasoning__label">思考过程</span>
+                                <span class="chat-reasoning__toggle">
+                                  {openReasoningIds().has(seg.id) ? "▾" : "▸"}
+                                </span>
+                              </div>
+                              <Show when={openReasoningIds().has(seg.id) && rs()}>
+                                <div class="chat-reasoning__body">{rs()!.text}</div>
+                              </Show>
+                            </div>
+                          </Match>
+                          <Match when={seg.type === "tool"}>
+                            <ToolSegment
+                              seg={seg}
+                              expanded={expandedToolIds().has(seg.id)}
+                              onToggle={toggleTool}
+                              onOpenInSqlPanel={props.onOpenInSqlPanel}
+                            />
+                          </Match>
+                          <Match when={seg.type === "text" && ts()}>
+                            <div class="chat-msg__text">
+                              <Show
+                                when={msg.role === "assistant"}
+                                fallback={ts()!.text}
+                              >
+                                <MarkdownRenderer content={ts()!.text} />
+                              </Show>
+                            </div>
+                          </Match>
+                        </Switch>
+                      );
+                    }}
+                  </For>
                 </div>
               </div>
             )}
           </For>
 
-          {/* Busy / streaming indicator with phase progress bar */}
+          {/* Busy / streaming indicator — single-line status */}
           <Show when={busy()}>
             <div class="chat-msg chat-msg--assistant">
               <div class="chat-msg__avatar">🤖</div>
               <div class="chat-msg__body">
-                {/* Work duration — inspired by screenshot "已工作 46 秒 >" */}
                 <div class="chat-agent-status">
-                  <span class="agent-status__timer">
-                    ⏱ 已工作 {elapsedSec()} 秒
-                  </span>
-                  <Show when={currentPhase()}>
-                    <span class="agent-status__phase">
-                      {PHASE_LABELS[currentPhase()!] ?? currentPhase()}
-                    </span>
+                  <span class="agent-status__timer">⏱ 已工作 {elapsedSec()} 秒</span>
+                  <Show when={currentAction()}>
+                    <span class="agent-status__phase">{currentAction()}</span>
                   </Show>
-                </div>
-
-                {/* Four-step progress bar */}
-                <div class="chat-phase-bar">
-                  <For each={PHASE_ORDER}>
-                    {(step, i) => {
-                      const idx = () => phaseIndex(currentPhase());
-                      const stepIdx = i();
-                      const isActive = () => idx() === stepIdx;
-                      const isDone = () => idx() > stepIdx;
-                      return (
-                        <>
-                          <Show when={stepIdx > 0}>
-                            <div class="phase-connector" classList={{ done: isDone() || isActive() }} />
-                          </Show>
-                          <div class="phase-step" classList={{ active: isActive(), done: isDone() }}>
-                            <span class="phase-dot" />
-                            <span>{PHASE_SHORT_LABELS[step] || step}</span>
-                          </div>
-                        </>
-                      );
-                    }}
-                  </For>
                 </div>
               </div>
             </div>
@@ -260,7 +305,7 @@ export default function ChatView(props: {
         <div class="chat-composer__toolbar">
           <div style="display: flex; align-items: center; gap: 16px;">
             <span class="chat-composer__ws" title="当前工作区">📂 {props.workspace}</span>
-            
+
             {/* Model Selector Dropdown */}
             <div class="dropdown-wrapper" ref={modelRef} style="position: relative;">
               <button
@@ -322,7 +367,7 @@ export default function ChatView(props: {
               </Show>
             </div>
           </div>
-          
+
           <button class="chat-composer__send" disabled={busy() || !input().trim()} onClick={() => void send()}>
             {busy() ? "运行中…" : "发送 ↑"}
           </button>

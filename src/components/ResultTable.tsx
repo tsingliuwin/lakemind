@@ -34,14 +34,19 @@ const CELL_W = 160;
  *   reactivity only tracks synchronous reads in a tracking context. The signal
  *   changes but the function is never called, so nothing happens.
  */
-export default function ResultTable(props: { result: SqlResult | null }) {
+export default function ResultTable(props: {
+  result: SqlResult | null;
+  /** Compact variant for inline embedding inside chat tool segments:
+   *  smaller row height, capped height with internal scrolling. */
+  compact?: boolean;
+}) {
   return (
-    <div class="result-wrap">
+    <div class="result-wrap" classList={{ "result-wrap--compact": !!props.compact }}>
       <Show
         when={props.result}
         fallback={<div class="result-empty">执行查询以查看结果。</div>}
       >
-        {(result) => <VirtualGrid result={result()} />}
+        {(result) => <VirtualGrid result={result()} compact={props.compact} />}
       </Show>
     </div>
   );
@@ -49,7 +54,7 @@ export default function ResultTable(props: { result: SqlResult | null }) {
 
 // ─── Sub-component: only created when result is non-null ────────────────────
 
-function VirtualGrid(props: { result: SqlResult }) {
+function VirtualGrid(props: { result: SqlResult; compact?: boolean }) {
   let scrollRef: HTMLDivElement | undefined;
 
   const columns = createMemo<ColumnDef<Row, unknown>[]>(() => {
@@ -87,8 +92,8 @@ function VirtualGrid(props: { result: SqlResult }) {
       return table.getRowModel().rows.length;
     },
     getScrollElement: () => scrollRef ?? null,
-    estimateSize: () => 28,
-    overscan: 12,
+    estimateSize: () => (props.compact ? 24 : 28),
+    overscan: props.compact ? 8 : 12,
   });
 
   // Reset scroll position when result identity changes.
@@ -98,7 +103,7 @@ function VirtualGrid(props: { result: SqlResult }) {
   });
 
   return (
-    <div class="result-scroll" ref={scrollRef}>
+    <div class="result-scroll" classList={{ "result-scroll--compact": !!props.compact }} ref={scrollRef}>
       {/* Sticky header */}
       <div class="result-head" role="row" style={{ width: `${tableWidth()}px` }}>
         <div class="result-cell row-idx">#</div>

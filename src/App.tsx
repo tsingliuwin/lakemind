@@ -13,6 +13,7 @@ import HomePanel from "./components/HomePanel";
 import { executeSql, importFileToWorkspace } from "./lib/duckdb";
 import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage } from "./lib/types";
 import ChatView from "./components/ChatView";
+import { appendDelta, pushToolCall, mergeToolResult, normalizeMessage } from "./lib/chat";
 import "./App.css";
 
 /**
@@ -112,54 +113,65 @@ export default function App() {
     const unlistenAgent = await listen<any>("agent-event", (event) => {
       const payload = event.payload;
       const targetId = payload.taskId;
-      
+
       setTasks((prev) =>
         prev.map((t) => {
           if (t.id !== targetId) return t;
-          
+
           let messages = [...(t.messages ?? [])];
-          if (messages.length === 0) return t;
-          
+
+          // Ensure an assistant message is the last one (lazily created).
           let lastMsg = messages[messages.length - 1];
-          if (lastMsg.role !== "assistant") {
+          if (!lastMsg || lastMsg.role !== "assistant") {
             lastMsg = {
               id: `msg-assistant-${Date.now()}`,
               role: "assistant",
-              content: "",
-              cards: [],
+              segments: [],
               ts: Date.now(),
             };
-            messages.push(lastMsg);
-          } else {
-            lastMsg = { ...lastMsg, cards: lastMsg.cards ? [...lastMsg.cards] : [] };
-            messages[messages.length - 1] = lastMsg;
+            messages = [...messages, lastMsg];
           }
-          
-          if (payload.kind === "text") {
-            lastMsg.content += payload.text ?? "";
-          } else if (payload.kind === "reasoning") {
-            lastMsg.reasoning = (lastMsg.reasoning ?? "") + (payload.text ?? "");
-          } else if (payload.kind === "phase" && payload.phase) {
-            lastMsg.phase = payload.phase;
-          } else if (payload.kind === "error") {
-            lastMsg.content += `\n\n⚠️ **错误**: ${payload.text ?? "未知错误"}`;
-          } else if (payload.kind === "card" && payload.card) {
-            const card = payload.card;
-            if (!lastMsg.cards) lastMsg.cards = [];
-            const existingIdx = lastMsg.cards.findIndex(c => c.id === card.id);
-            if (existingIdx >= 0) {
-              lastMsg.cards[existingIdx] = card;
-            } else {
-              lastMsg.cards.push(card);
-            }
+
+          let segments = lastMsg.segments ? [...lastMsg.segments] : [];
+          const kind = payload.kind as string;
+
+          if (kind === "text") {
+            segments = appendDelta(segments, "text", payload.text ?? "");
+          } else if (kind === "reasoning") {
+            segments = appendDelta(segments, "reasoning", payload.text ?? "");
+          } else if (kind === "tool_call" && payload.segment) {
+            const s = payload.segment;
+            segments = pushToolCall(segments, {
+              id: s.id,
+              tool: s.tool,
+              args: s.args,
+            });
+          } else if (kind === "tool_result" && payload.segment) {
+            const s = payload.segment;
+            segments = mergeToolResult(segments, {
+              id: s.id,
+              status: s.status,
+              summary: s.summary,
+              sql: s.sql,
+              table: s.table,
+              elapsedMs: s.elapsedMs,
+            });
+          } else if (kind === "error") {
+            segments = appendDelta(
+              segments,
+              "text",
+              `\n\n⚠️ **错误**: ${payload.text ?? "未知错误"}`,
+            );
           }
-          
-          if (payload.kind === "done" || payload.kind === "error") {
+
+          messages[messages.length - 1] = { ...lastMsg, segments };
+
+          if (kind === "done" || kind === "error") {
             void saveChatTaskBackend(targetId, t.name, messages);
           }
-          
+
           return { ...t, messages };
-        })
+        }),
       );
     });
 
@@ -204,16 +216,22 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      // 1. Load tasks
+      // 1. Load tasks. Normalize legacy chat messages (flat content/reasoning/
+      //    cards) into the segment model so old persisted chats stay readable.
       const loadedTasks = await invoke<QueryTask[]>("load_workspace_tasks", { workspacePath: ws.path });
-      setTasks(loadedTasks);
-      
-      if (loadedTasks.length > 0) {
+      const migrated = loadedTasks.map((t) =>
+        t.kind === "chat" && Array.isArray(t.messages)
+          ? { ...t, messages: t.messages.map((m) => normalizeMessage(m)) }
+          : t,
+      );
+      setTasks(migrated);
+
+      if (migrated.length > 0) {
         const activeId = activeTaskId();
-        if (activeId && loadedTasks.some(t => t.id === activeId)) {
+        if (activeId && migrated.some(t => t.id === activeId)) {
           selectTask(activeId);
         } else {
-          selectTask(loadedTasks[0].id);
+          selectTask(migrated[0].id);
         }
       } else {
         setActiveTaskId(null);
@@ -358,10 +376,10 @@ export default function App() {
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: "user",
-      content: prompt,
+      segments: [{ type: "text", id: `seg-txt-${Date.now()}`, text: prompt }],
       ts: Date.now(),
     };
-    
+
     const updatedMessages = [...(task.messages ?? []), userMsg];
     setTasks((prev) =>
       prev.map((t) =>
@@ -387,7 +405,11 @@ export default function App() {
       const errorMsg: ChatMessage = {
         id: `msg-err-${Date.now()}`,
         role: "assistant",
-        content: `⚠️ **无法启动对话**: ${err}`,
+        segments: [{
+          type: "text",
+          id: `seg-txt-${Date.now()}`,
+          text: `⚠️ **无法启动对话**: ${err}`,
+        }],
         ts: Date.now(),
       };
       setTasks((prev) =>
@@ -415,7 +437,7 @@ export default function App() {
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: "user",
-      content: prompt,
+      segments: [{ type: "text", id: `seg-txt-${Date.now()}`, text: prompt }],
       ts: Date.now(),
     };
 
@@ -450,7 +472,11 @@ export default function App() {
       const errorMsg: ChatMessage = {
         id: `msg-err-${Date.now()}`,
         role: "assistant",
-        content: `⚠️ **无法启动对话**: ${err}`,
+        segments: [{
+          type: "text",
+          id: `seg-txt-${Date.now()}`,
+          text: `⚠️ **无法启动对话**: ${err}`,
+        }],
         ts: Date.now(),
       };
       setTasks((prev) =>
@@ -465,7 +491,7 @@ export default function App() {
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: "user",
-      content: prompt,
+      segments: [{ type: "text", id: `seg-txt-${Date.now()}`, text: prompt }],
       ts: Date.now(),
     };
 
@@ -510,7 +536,11 @@ export default function App() {
       const errorMsg: ChatMessage = {
         id: `msg-err-${Date.now()}`,
         role: "assistant",
-        content: `⚠️ **无法启动对话**: ${err}`,
+        segments: [{
+          type: "text",
+          id: `seg-txt-${Date.now()}`,
+          text: `⚠️ **无法启动对话**: ${err}`,
+        }],
         ts: Date.now(),
       };
       setTasks((prev) =>
@@ -521,7 +551,7 @@ export default function App() {
     }
   }
 
-  /** ChatCard「在 SQL 面板打开」：新建 SQL task 注入 SQL 并自动执行。 */
+  /** ToolSegment「在 SQL 面板打开」：新建 SQL task 注入 SQL 并自动执行。 */
   function openInSqlPanel(sql: string) {
     createTask(sql, "sql");
     void run();
@@ -977,8 +1007,10 @@ export default function App() {
                     <ChatView
                       messages={activeTask()?.messages ?? []}
                       workspace={currentWorkspace().name}
+                      taskName={activeTask()?.name ?? ""}
                       onSend={sendChatMessage}
                       onOpenInSqlPanel={openInSqlPanel}
+                      onDelete={() => deleteTask(activeTaskId()!)}
                       availableModels={availableModels()}
                       selectedModel={activeTask()?.modelId || selectedModel()}
                       onSelectModel={(model) => {

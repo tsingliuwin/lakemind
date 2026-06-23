@@ -1279,6 +1279,15 @@ select:hover:not(:disabled) {
   position: relative;
   background-color: var(--bg-surface);
 }
+/* Compact variant for inline embedding inside chat tool segments: capped
+   height with internal scrolling, tighter margins. */
+.result-wrap--compact {
+  margin: 6px 0 0;
+  max-height: 320px;
+}
+.result-scroll--compact {
+  max-height: 288px;
+}
 .result-head {
   display: flex;
   position: sticky;
@@ -3365,6 +3374,40 @@ select:hover:not(:disabled) {
   background: var(--bg-base);
 }
 
+.chat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-faint);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+}
+.chat-header__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.chat-header .icon-btn {
+  background: transparent;
+  border: none;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-dim);
+  transition: all 0.1s;
+}
+.chat-header .icon-btn:hover {
+  background: var(--bg-active);
+  color: var(--accent-red);
+}
+
 .chat-stream {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -3887,6 +3930,162 @@ select:hover:not(:disabled) {
   opacity: 1;
   background: var(--bg-active) !important;
   color: var(--text-primary);
+}
+
+/* ===========================================================================
+   Tool segments — ordered transcript of agent tool calls.
+   Collapsed (default for completed steps): a one-line summary chip.
+   Expanded (running step, or user-toggled): shows SQL + inline table + actions.
+   =========================================================================== */
+.tool-seg {
+  border: 1px solid var(--border-faint);
+  border-left: 3px solid var(--border-strong);
+  border-radius: 6px;
+  margin: 6px 0;
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+.tool-seg--running {
+  border-left-color: var(--accent-blue);
+}
+.tool-seg--ok {
+  border-left-color: var(--accent-green);
+}
+.tool-seg--error {
+  border-left-color: var(--accent-red);
+}
+.tool-seg__summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  line-height: 1.4;
+}
+.tool-seg__summary:hover {
+  background: var(--bg-hover);
+}
+.tool-seg__status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  font-weight: 600;
+}
+.tool-seg--ok .tool-seg__status {
+  color: var(--accent-green);
+}
+.tool-seg--error .tool-seg__status {
+  color: var(--accent-red);
+}
+.tool-seg--running .tool-seg__status {
+  color: var(--accent-blue);
+}
+.tool-seg__name {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.tool-seg__meta {
+  color: var(--text-dim);
+}
+.tool-seg__summary-text {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.tool-seg__chevron {
+  color: var(--text-dim);
+  margin-left: auto;
+}
+.tool-seg__spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--accent-blue);
+  border-top-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  animation: tool-seg-spin 0.7s linear infinite;
+}
+@keyframes tool-seg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.tool-seg__body {
+  padding: 0 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tool-seg__arg {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.tool-seg__arg code {
+  background: var(--bg-active);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.tool-seg__code {
+  position: relative;
+  margin: 0;
+  padding: 10px 64px 10px 12px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-faint);
+  border-radius: 5px;
+  font-family: "SF Mono", "Menlo", "Consolas", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+.tool-seg__copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-faint);
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0.75;
+}
+.tool-seg__copy:hover {
+  opacity: 1;
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+.tool-seg__table .result-wrap {
+  margin: 0;
+}
+.tool-seg__actions {
+  display: flex;
+  gap: 8px;
+}
+.tool-seg__open {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--accent-blue);
+  cursor: pointer;
+}
+.tool-seg__open:hover {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
 }
 
 /* ===========================================================================
