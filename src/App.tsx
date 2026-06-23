@@ -226,11 +226,13 @@ export default function App() {
       // 1. Load tasks. Normalize legacy chat messages (flat content/reasoning/
       //    cards) into the segment model so old persisted chats stay readable.
       const loadedTasks = await invoke<QueryTask[]>("load_workspace_tasks", { workspacePath: ws.path });
-      const migrated = loadedTasks.map((t) =>
-        t.kind === "chat" && Array.isArray(t.messages)
-          ? { ...t, messages: t.messages.map((m) => normalizeMessage(m)) }
-          : t,
-      );
+      const migrated = loadedTasks
+        .map((t) =>
+          t.kind === "chat" && Array.isArray(t.messages)
+            ? { ...t, messages: t.messages.map((m) => normalizeMessage(m)) }
+            : t,
+        )
+        .sort((a, b) => b.createdAt - a.createdAt);
       setTasks(migrated);
 
       if (migrated.length > 0) {
@@ -571,14 +573,16 @@ export default function App() {
     const remaining = tasks().filter((t) => t.id !== id);
     setTasks(remaining);
     if (activeTaskId() === id) {
-      const visible = remaining.filter((task) => {
-        if (task.kind === "chat") {
-          return (task.messages?.length ?? 0) > 0;
-        } else {
-          const isDefaultOrEmpty = !task.sql.trim() || task.sql.trim() === "SELECT 1 AS n;";
-          return !!task.saved && !isDefaultOrEmpty;
-        }
-      });
+      const visible = remaining
+        .filter((task) => {
+          if (task.kind === "chat") {
+            return (task.messages?.length ?? 0) > 0;
+          } else {
+            const isDefaultOrEmpty = !task.sql.trim() || task.sql.trim() === "SELECT 1 AS n;";
+            return !!task.saved && !isDefaultOrEmpty;
+          }
+        })
+        .sort((a, b) => b.createdAt - a.createdAt);
       if (visible.length > 0) {
         selectTask(visible[0].id);
       } else {
@@ -631,14 +635,16 @@ export default function App() {
   }
 
   const visibleTasks = () => {
-    return tasks().filter((task) => {
-      if (task.kind === "chat") {
-        return (task.messages?.length ?? 0) > 0;
-      } else {
-        const isDefaultOrEmpty = !task.sql.trim() || task.sql.trim() === "SELECT 1 AS n;";
-        return !!task.saved && !isDefaultOrEmpty;
-      }
-    });
+    return tasks()
+      .filter((task) => {
+        if (task.kind === "chat") {
+          return (task.messages?.length ?? 0) > 0;
+        } else {
+          const isDefaultOrEmpty = !task.sql.trim() || task.sql.trim() === "SELECT 1 AS n;";
+          return !!task.saved && !isDefaultOrEmpty;
+        }
+      })
+      .sort((a, b) => b.createdAt - a.createdAt);
   };
 
   function handleSqlChange(newSql: string) {
