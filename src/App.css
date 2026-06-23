@@ -1322,6 +1322,27 @@ select:hover:not(:disabled) {
   font-weight: 600;
   padding: 8px 12px;
 }
+.resizer {
+  position: absolute;
+  right: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+  z-index: 10;
+}
+body.is-resizing-column,
+body.is-resizing-column * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  cursor: col-resize !important;
+}
+.result-scroll.is-resizing {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
 .row-idx {
   flex: 0 0 54px;
   color: var(--text-dim);

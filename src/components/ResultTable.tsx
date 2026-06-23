@@ -1,4 +1,4 @@
-import { createMemo, createEffect, Show, For } from "solid-js";
+import { createMemo, createEffect, createSignal, Show, For, onCleanup } from "solid-js";
 import { createSolidTable, flexRender, getCoreRowModel } from "@tanstack/solid-table";
 import { createVirtualizer } from "@tanstack/solid-virtual";
 import type { ColumnDef } from "@tanstack/table-core";
@@ -56,6 +56,7 @@ export default function ResultTable(props: {
 
 function VirtualGrid(props: { result: SqlResult; compact?: boolean }) {
   let scrollRef: HTMLDivElement | undefined;
+  const [columnSizing, setColumnSizing] = createSignal<Record<string, number>>({});
 
   const columns = createMemo<ColumnDef<Row, unknown>[]>(() => {
     return props.result.columns.map(
@@ -65,6 +66,9 @@ function VirtualGrid(props: { result: SqlResult; compact?: boolean }) {
           accessorFn: (row: Row) => row[i],
           header: () => name,
           cell: (info) => renderCell(info.getValue()),
+          size: CELL_W,
+          minSize: 60,
+          maxSize: 600,
         }) as ColumnDef<Row, unknown>,
     );
   });
@@ -78,10 +82,17 @@ function VirtualGrid(props: { result: SqlResult; compact?: boolean }) {
     get columns() {
       return columns();
     },
+    state: {
+      get columnSizing() {
+        return columnSizing();
+      },
+    },
+    onColumnSizingChange: setColumnSizing,
+    columnResizeMode: "onChange",
     getCoreRowModel: getCoreRowModel(),
   });
 
-  const tableWidth = createMemo(() => ROW_IDX_W + CELL_W * props.result.columns.length);
+  const tableWidth = createMemo(() => ROW_IDX_W + table.getCenterTotalSize());
 
   // At this point scrollRef is still `undefined` (assigned below in JSX).
   // But by the time `onMount` fires inside solid-virtual, the JSX has been
@@ -102,19 +113,59 @@ function VirtualGrid(props: { result: SqlResult; compact?: boolean }) {
     scrollRef?.scrollTo({ top: 0, left: 0 });
   });
 
+  const isResizing = createMemo(() => !!table.getState().columnSizingInfo.isResizingColumn);
+
+  createEffect(() => {
+    if (isResizing()) {
+      document.body.classList.add("is-resizing-column");
+    } else {
+      document.body.classList.remove("is-resizing-column");
+    }
+  });
+
+  onCleanup(() => {
+    document.body.classList.remove("is-resizing-column");
+  });
+
   return (
-    <div class="result-scroll" classList={{ "result-scroll--compact": !!props.compact }} ref={scrollRef}>
+    <div
+      class="result-scroll"
+      classList={{
+        "result-scroll--compact": !!props.compact,
+        "is-resizing": isResizing()
+      }}
+      ref={scrollRef}
+    >
       {/* Sticky header */}
-      <div class="result-head" role="row" style={{ width: `${tableWidth()}px` }}>
-        <div class="result-cell row-idx">#</div>
-        <For each={props.result.columns}>
-          {(name, i) => (
-            <div class="result-cell head-cell" title={props.result.columnTypes[i()]}>
-              {name}
-            </div>
-          )}
-        </For>
-      </div>
+      <For each={table.getHeaderGroups()}>
+        {(headerGroup) => (
+          <div class="result-head" role="row" style={{ width: `${tableWidth()}px` }}>
+            <div class="result-cell row-idx">#</div>
+            <For each={headerGroup.headers}>
+              {(header) => (
+                <div
+                  class="result-cell head-cell"
+                  style={{
+                    flex: `0 0 ${header.column.getSize()}px`,
+                    width: `${header.column.getSize()}px`,
+                    position: "relative",
+                  }}
+                >
+                  {flexRender(header.column.columnDef.header, header.getContext())}
+                  <Show when={header.column.getCanResize()}>
+                    <div
+                      onMouseDown={header.getResizeHandler()}
+                      onTouchStart={header.getResizeHandler()}
+                      class="resizer"
+                      classList={{ isResizing: header.column.getIsResizing() }}
+                    />
+                  </Show>
+                </div>
+              )}
+            </For>
+          </div>
+        )}
+      </For>
       {/* Virtualized body */}
       <div
         style={{
@@ -143,7 +194,13 @@ function VirtualGrid(props: { result: SqlResult; compact?: boolean }) {
                 <div class="result-cell row-idx">{vRow.index + 1}</div>
                 <For each={row.getVisibleCells()}>
                   {(cell) => (
-                    <div class="result-cell">
+                    <div
+                      class="result-cell"
+                      style={{
+                        flex: `0 0 ${cell.column.getSize()}px`,
+                        width: `${cell.column.getSize()}px`,
+                      }}
+                    >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </div>
                   )}
