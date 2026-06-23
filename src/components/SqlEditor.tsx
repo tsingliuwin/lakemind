@@ -107,7 +107,7 @@ export default function SqlEditor(props: {
               <path d="M7 3v5h8"></path>
             </svg>
           </button>
-          <button class="icon-btn" title="关闭并放弃查询" onClick={() => props.onClose?.()} style="color: var(--accent-red);">
+          <button class="header-close-btn" title="关闭并放弃查询" onClick={() => props.onClose?.()}>
             ✕
           </button>
           <button class="run-btn" title={`${t("run")} (Ctrl/Cmd+Enter)`} disabled={props.busy} onClick={() => props.onRun()}>

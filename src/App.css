@@ -3021,11 +3021,20 @@ select:hover:not(:disabled) {
 .send-btn svg {
   width: 13px;
   height: 13px;
+  display: block;
+  flex-shrink: 0;
 }
 
 /* LeftNav Task Item Styles */
 .task-leaf {
   position: relative;
+}
+.task-leaf .task-time {
+  transition: opacity 0.15s ease;
+}
+
+.task-leaf:hover .task-time {
+  opacity: 0;
 }
 
 .task-leaf:hover .task-delete-btn {
@@ -3038,10 +3047,44 @@ select:hover:not(:disabled) {
   top: 50%;
   transform: translateY(-50%);
   opacity: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  transition: all 0.15s ease;
 }
 
 .task-delete-btn:hover {
-  background: var(--bg-active) !important;
+  background: rgba(239, 68, 68, 0.15) !important;
+  color: var(--accent-red) !important;
+}
+
+.header-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  transition: all 0.15s ease;
+}
+
+.header-close-btn:hover {
+  background: rgba(239, 68, 68, 0.15) !important;
   color: var(--accent-red) !important;
 }
 
@@ -4001,15 +4044,21 @@ select:hover:not(:disabled) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--text-normal);
+  background: var(--accent-blue);
   border: none;
-  color: var(--bg-base);
+  color: #fff;
   border-radius: 8px;
   cursor: pointer;
   transition: opacity 0.12s, background-color 0.12s;
 }
+.chat-composer__send-square svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  flex-shrink: 0;
+}
 .chat-composer__send-square:hover:not(:disabled) {
-  opacity: 0.9;
+  background: var(--accent-blue-hover);
 }
 .chat-composer__send-square:disabled {
   background: rgba(255, 255, 255, 0.08);
@@ -4043,6 +4092,12 @@ select:hover:not(:disabled) {
 .chat-view__scroll-down:hover {
   background: var(--bg-active);
   color: var(--text-normal);
+}
+.chat-view__scroll-down svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  flex-shrink: 0;
 }
 
 /* --- task kind 图标（LeftNav） --- */
@@ -4204,18 +4259,34 @@ select:hover:not(:disabled) {
   word-break: break-word;
   overflow-x: auto;
 }
-.tool-seg__copy {
+.tool-seg__code-actions {
   position: absolute;
   top: 6px;
   right: 6px;
-  font-size: 11px;
-  padding: 2px 8px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.tool-seg__code-actions svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+  flex-shrink: 0;
+}
+.tool-seg__copy {
+  width: 22px;
+  height: 22px;
   border-radius: 4px;
   background: var(--bg-elevated);
-  border: 1px solid var(--border-faint);
+  border: none;
   color: var(--text-secondary);
   cursor: pointer;
   opacity: 0.75;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 .tool-seg__copy:hover {
   opacity: 1;
@@ -4230,18 +4301,24 @@ select:hover:not(:disabled) {
   gap: 8px;
 }
 .tool-seg__open {
-  font-size: 11px;
-  padding: 3px 9px;
+  width: 22px;
+  height: 22px;
   border-radius: 4px;
-  background: transparent;
-  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  border: none;
   color: var(--accent-blue);
   cursor: pointer;
+  opacity: 0.75;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
 }
 .tool-seg__open:hover {
-  background: var(--accent-blue);
-  color: #fff;
-  border-color: var(--accent-blue);
+  opacity: 1;
+  background: var(--bg-active);
+  color: var(--accent-blue-hover);
 }
 
 /* ===========================================================================

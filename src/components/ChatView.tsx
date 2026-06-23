@@ -59,6 +59,14 @@ export default function ChatView(props: {
   });
   const [input, setInput] = createSignal("");
   const [busy, setBusy] = createSignal(false);
+  const [showConfirm, setShowConfirm] = createSignal(false);
+
+  createEffect(() => {
+    // Reset confirmation state when messages or active conversation changes
+    props.messages;
+    props.taskName;
+    setShowConfirm(false);
+  });
 
   // Reasoning fold state: latest assistant message open while streaming.
   const [openReasoningIds, setOpenReasoningIds] = createSignal<Set<string>>(new Set());
@@ -219,19 +227,43 @@ export default function ChatView(props: {
             <span class="ws-text">{props.workspace}</span>
           </span>
         </div>
-        <button
-          class="icon-btn"
-          title="关闭并删除对话"
-          onClick={() => {
-            if (props.messages.length > 0) {
-              if (!window.confirm("删除这个对话？历史记录将一并清除且不可恢复。")) return;
-            }
-            props.onDelete?.();
-          }}
-          style="color: var(--accent-red);"
+        <Show
+          when={showConfirm()}
+          fallback={
+            <button
+              class="header-close-btn"
+              title="关闭并删除对话"
+              onClick={() => {
+                if (props.messages.length > 0) {
+                  setShowConfirm(true);
+                } else {
+                  props.onDelete?.();
+                }
+              }}
+            >
+              ✕
+            </button>
+          }
         >
-          ✕
-        </button>
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; background: var(--bg-hover); padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border-faint);">
+            <span style="color: var(--accent-red); font-weight: 500;">确定删除？</span>
+            <button
+              onClick={() => {
+                setShowConfirm(false);
+                props.onDelete?.();
+              }}
+              style="background: var(--accent-red); color: white; border: none; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 500;"
+            >
+              确定
+            </button>
+            <button
+              onClick={() => setShowConfirm(false)}
+              style="background: transparent; color: var(--text-secondary); border: 1px solid var(--border-strong); padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 500;"
+            >
+              取消
+            </button>
+          </div>
+        </Show>
       </div>
       <div class="chat-stream" ref={scrollEl} onScroll={handleScroll}>
         <Show

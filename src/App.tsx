@@ -568,9 +568,22 @@ export default function App() {
   }
 
   async function deleteTask(id: string) {
-    setTasks((prev) => prev.filter((t) => t.id !== id));
+    const remaining = tasks().filter((t) => t.id !== id);
+    setTasks(remaining);
     if (activeTaskId() === id) {
-      setActiveTaskId(null);
+      const visible = remaining.filter((task) => {
+        if (task.kind === "chat") {
+          return (task.messages?.length ?? 0) > 0;
+        } else {
+          const isDefaultOrEmpty = !task.sql.trim() || task.sql.trim() === "SELECT 1 AS n;";
+          return !!task.saved && !isDefaultOrEmpty;
+        }
+      });
+      if (visible.length > 0) {
+        selectTask(visible[0].id);
+      } else {
+        setActiveTaskId(null);
+      }
     }
     try {
       await invoke("delete_task", { taskId: id });

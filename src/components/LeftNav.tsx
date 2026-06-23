@@ -463,17 +463,6 @@ export default function LeftNav(props: {
                             <span class="task-time" style="font-size: 10px; color: var(--text-dim); margin-left: auto; padding-left: 8px; flex-shrink: 0;">
                               {formatRelativeTime(task.createdAt)}
                             </span>
-                            <button 
-                              class="task-delete-btn" 
-                              onClick={(e) => { 
-                                e.stopPropagation(); 
-                                props.onDeleteTask?.(task.id); 
-                              }}
-                              title="关闭任务"
-                              style="background: transparent; border: none; color: var(--text-dim); cursor: pointer; font-size: 10px; padding: 2px 4px; border-radius: 4px; transition: all 0.1s;"
-                            >
-                              ✕
-                            </button>
                           </div>
                         )}
                       </For>
