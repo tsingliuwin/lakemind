@@ -953,7 +953,13 @@ export default function App() {
             onToggleLeft={() => setLeftOpen(!leftOpen())}
           />
 
-          <div class="right-content-layout">
+          <div
+            class="right-content-layout"
+            style={{
+              "grid-template-columns": `1fr ${rightWidthActual()}`,
+              "grid-template-rows": `1fr ${bottomHeightActual()}`,
+            }}
+          >
             <Show when={inspectorOpen()}>
               <div 
                 class="resizer-v" 
