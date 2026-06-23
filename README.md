@@ -150,6 +150,16 @@ src-tauri/src/
     *.csv / *.parquet / ...   # small imported files (large ones stay in place)
 ```
 
+## Database Naming Conventions
+
+For data layering and namespace isolation, LakeMind adopts the following naming conventions for DuckDB tables and views:
+
+- **`s_`** (Source): Raw views directly mapped from imported source files (e.g., `s_sales`). These are read-only and may contain headers/comments.
+- **`tmp_`** (Temp Table): Intermediate processed physical tables created during data transformation/cleansing (e.g., `tmp_sales_joined`).
+- **`tmp_v_`** (Temp View): Intermediate processed virtual views created during data transformation/cleansing (e.g., `tmp_v_sales_filtered`).
+- **`t_`** (Target Table): Final clean physical materialized tables, ready for query and analysis (e.g., `t_sales`).
+- **`v_`** (Target View): Final clean virtual views, ready for query and analysis (e.g., `v_sales`).
+
 ## Tests
 
 ```bash
