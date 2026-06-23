@@ -236,11 +236,15 @@ pub fn init_global_db() -> Result<(), String> {
             kind TEXT NOT NULL,
             created_at INTEGER NOT NULL,
             saved INTEGER NOT NULL,
+            model_id TEXT,
             FOREIGN KEY(workspace_path) REFERENCES workspaces(path) ON DELETE CASCADE
         )",
         [],
     )
     .map_err(|e| format!("Failed to create tasks table: {e}"))?;
+
+    // Migrate tasks table to add model_id column if it doesn't exist
+    let _ = conn.execute("ALTER TABLE tasks ADD COLUMN model_id TEXT;", []);
 
     // sources: the file ↔ table ↔ storage mapping (NEW)
     conn.execute(

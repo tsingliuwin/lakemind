@@ -481,13 +481,15 @@ pub struct QueryTask {
     pub kind: String,
     pub messages: Option<serde_json::Value>,
     pub saved: bool,
+    #[serde(rename = "modelId")]
+    pub model_id: Option<String>,
 }
 
 #[tauri::command]
 pub async fn load_workspace_tasks(workspace_path: String) -> Result<Vec<QueryTask>, String> {
     let conn = db::get_db_conn()?;
     let mut stmt = conn
-        .prepare("SELECT id, name, kind, created_at, saved FROM tasks WHERE workspace_path = ? ORDER BY created_at ASC")
+        .prepare("SELECT id, name, kind, created_at, saved, model_id FROM tasks WHERE workspace_path = ? ORDER BY created_at ASC")
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([&workspace_path], |row| {
@@ -497,6 +499,7 @@ pub async fn load_workspace_tasks(workspace_path: String) -> Result<Vec<QueryTas
                 row.get::<_, String>(2)?,
                 row.get::<_, i64>(3)?,
                 row.get::<_, i32>(4)? != 0,
+                row.get::<_, Option<String>>(5)?,
             ))
         })
         .map_err(|e| e.to_string())?;
@@ -504,7 +507,7 @@ pub async fn load_workspace_tasks(workspace_path: String) -> Result<Vec<QueryTas
     let lakemind_dir = db::get_lakemind_dir()?;
     let mut tasks = Vec::new();
     for r in rows {
-        if let Ok((id, name, kind, created_at, saved)) = r {
+        if let Ok((id, name, kind, created_at, saved, model_id)) = r {
             let mut sql = String::new();
             let mut messages = None;
             if kind == "sql" {
@@ -519,7 +522,7 @@ pub async fn load_workspace_tasks(workspace_path: String) -> Result<Vec<QueryTas
                     messages = serde_json::from_str(&json_str).ok();
                 }
             }
-            tasks.push(QueryTask { id, name, sql, created_at, kind, messages, saved });
+            tasks.push(QueryTask { id, name, sql, created_at, kind, messages, saved, model_id });
         }
     }
     Ok(tasks)
@@ -548,13 +551,14 @@ pub async fn save_chat_task(
     task_id: String,
     name: String,
     messages: serde_json::Value,
+    model_id: Option<String>,
 ) -> Result<(), String> {
     let conn = db::get_db_conn()?;
     let now = now_ms();
     conn.execute(
-        "INSERT OR REPLACE INTO tasks (id, workspace_path, name, kind, created_at, saved)
-         VALUES (?, ?, ?, 'chat', COALESCE((SELECT created_at FROM tasks WHERE id = ?), ?), 1)",
-        rusqlite::params![task_id, workspace_path, name, task_id, now],
+        "INSERT OR REPLACE INTO tasks (id, workspace_path, name, kind, created_at, saved, model_id)
+         VALUES (?, ?, ?, 'chat', COALESCE((SELECT created_at FROM tasks WHERE id = ?), ?), 1, ?)",
+        rusqlite::params![task_id, workspace_path, name, task_id, now, model_id],
     )
     .map_err(|e| e.to_string())?;
 

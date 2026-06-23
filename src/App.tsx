@@ -38,7 +38,7 @@ export default function App() {
   const [busy, setBusy] = createSignal<boolean>(false);
 
   // --- drawers & layout sizes ---
-  const [inspectorOpen, setInspectorOpen] = createSignal<boolean>(true);
+  const [inspectorOpen, setInspectorOpen] = createSignal<boolean>(false);
   const [consoleState, setConsoleState] = createSignal<ConsoleState>("folded");
   const [settingsOpen, setSettingsOpen] = createSignal<boolean>(false);
   const [leftOpen, setLeftOpen] = createSignal<boolean>(true);
@@ -88,8 +88,12 @@ export default function App() {
           }
         }
         setAvailableModels(models);
+        
+        const savedDefault = localStorage.getItem("default_model");
         if (models.length > 0) {
-          if (!selectedModel() || !models.includes(selectedModel())) {
+          if (savedDefault && models.includes(savedDefault)) {
+            setSelectedModel(savedDefault);
+          } else if (!selectedModel() || !models.includes(selectedModel())) {
             setSelectedModel(models[0]);
           }
         } else {
@@ -353,11 +357,14 @@ export default function App() {
 
   async function saveChatTaskBackend(taskId: string, name: string, messages: ChatMessage[]) {
     try {
+      const task = tasks().find((t) => t.id === taskId);
+      const modelId = task?.modelId || null;
       await invoke("save_chat_task", {
         workspacePath: currentWorkspace().path,
         taskId,
         name,
         messages,
+        modelId,
       });
     } catch (err) {
       console.error("Failed to save chat task to backend:", err);
@@ -1005,7 +1012,10 @@ export default function App() {
                     onAddSource={handleSelectAndRegisterSource}
                     availableModels={availableModels()}
                     selectedModel={selectedModel()}
-                    onSelectModel={setSelectedModel}
+                    onSelectModel={(model) => {
+                      setSelectedModel(model);
+                      localStorage.setItem("default_model", model);
+                    }}
                     selectedPriority={selectedPriority()}
                     onSelectPriority={setSelectedPriority}
                   />
@@ -1030,8 +1040,15 @@ export default function App() {
                               t.id === activeId ? { ...t, modelId: model } : t
                             )
                           );
+                          setTimeout(() => {
+                            const updated = tasks().find((t) => t.id === activeId);
+                            if (updated) {
+                              void saveChatTaskBackend(activeId, updated.name, updated.messages || []);
+                            }
+                          }, 0);
                         }
                         setSelectedModel(model);
+                        localStorage.setItem("default_model", model);
                       }}
                       selectedPriority={selectedPriority()}
                       onSelectPriority={setSelectedPriority}
