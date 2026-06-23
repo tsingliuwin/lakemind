@@ -99,6 +99,13 @@ export default function ChatView(props: {
 
   let scrollEl: HTMLDivElement | undefined;
 
+  const [showScrollDown, setShowScrollDown] = createSignal(false);
+  const handleScroll = (e: Event) => {
+    const el = e.currentTarget as HTMLDivElement;
+    const diff = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollDown(diff > 150);
+  };
+
   // 新消息到达或状态变为 busy 时滚到底部。
   createEffect(() => {
     props.messages;
@@ -201,7 +208,15 @@ export default function ChatView(props: {
   return (
     <div class="chat-view">
       <div class="chat-header">
-        <span class="chat-header__title">{props.taskName || "对话"}</span>
+        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;">
+          <span class="chat-header__title">{props.taskName || "对话"}</span>
+          <span class="chat-header__ws" title={`当前工作区: ${props.workspace}`}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; flex-shrink: 0; color: var(--text-dim);">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span class="ws-text">{props.workspace}</span>
+          </span>
+        </div>
         <button
           class="icon-btn"
           title="关闭并删除对话"
@@ -216,7 +231,7 @@ export default function ChatView(props: {
           ✕
         </button>
       </div>
-      <div class="chat-stream" ref={scrollEl}>
+      <div class="chat-stream" ref={scrollEl} onScroll={handleScroll}>
         <Show
           when={props.messages.length > 0}
           fallback={<div class="chat-empty">向 LakeMind 提问，开始探索你的数据。</div>}
@@ -297,85 +312,125 @@ export default function ChatView(props: {
         </Show>
       </div>
 
-      <div class="chat-composer">
-        <textarea
-          class="chat-composer__input"
-          placeholder={`向 LakeMind 提问（Enter 发送 · Shift+Enter 换行）…`}
-          value={input()}
-          onInput={(e) => setInput(e.currentTarget.value)}
-          onkeydown={onKeydown}
-          disabled={busy()}
-          rows={2}
-        />
-        <div class="chat-composer__toolbar">
-          <div style="display: flex; align-items: center; gap: 16px;">
-            <span class="chat-composer__ws" title="当前工作区">📂 {props.workspace}</span>
+      <Show when={showScrollDown()}>
+        <button
+          class="chat-view__scroll-down"
+          onClick={() => {
+            if (scrollEl) {
+              scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: "smooth" });
+            }
+          }}
+          title="回到底部"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <polyline points="19 12 12 19 5 12"></polyline>
+          </svg>
+        </button>
+      </Show>
 
-            {/* Model Selector Dropdown */}
-            <div class="dropdown-wrapper" ref={modelRef} style="position: relative;">
+      <div class="chat-composer">
+        <div class="chat-composer__box">
+          <textarea
+            class="chat-composer__input"
+            placeholder="向 LakeMind 提问（Enter 发送 · Shift+Enter 换行）…"
+            value={input()}
+            onInput={(e) => setInput(e.currentTarget.value)}
+            onkeydown={onKeydown}
+            disabled={busy()}
+            rows={2}
+          />
+          <div class="chat-composer__toolbar">
+            <div style="display: flex; align-items: center; gap: 8px;">
               <button
-                class="pill-btn select-btn"
-                style="background: transparent; border: none; padding: 2px 6px; font-size: 12px; display: flex; align-items: center; gap: 4px; color: var(--text-normal); cursor: pointer; border-radius: 4px;"
-                onClick={() => setModelDropdownOpen(!modelDropdownOpen())}
+                class="chat-composer__plus-btn"
+                style="background: transparent; border: none; padding: 4px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); cursor: pointer;"
               >
-                <span class="model-status-dot" classList={{ active: props.availableModels.length > 0 }} />
-                <span>{props.selectedModel || "选择模型"}</span>
-                <span class="btn-caret">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
-                    <polyline points="6 9 12 15 18 9"></polyline>
-                  </svg>
-                </span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 16px; height: 16px;">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
               </button>
-              <Show when={modelDropdownOpen()}>
-                <div class="custom-dropdown-list" style="bottom: calc(100% + 6px); left: 0; right: auto;">
-                  <Show
-                    when={props.availableModels.length > 0}
-                    fallback={
-                      <div class="dropdown-item muted" style="font-size: 11px; pointer-events: none; padding: 6px 12px;">
-                        无可用模型
-                      </div>
-                    }
-                  >
-                    <For each={props.availableModels}>
-                      {(model) => (
-                        <button class="dropdown-item" onClick={() => { props.onSelectModel(model); setModelDropdownOpen(false); }}>
-                          {model}
-                        </button>
-                      )}
-                    </For>
-                  </Show>
-                </div>
-              </Show>
             </div>
 
-            {/* Priority Selector Dropdown */}
-            <div class="dropdown-wrapper" ref={priorityRef} style="position: relative;">
-              <button
-                class="pill-btn select-btn"
-                style="background: transparent; border: none; padding: 2px 6px; font-size: 12px; display: flex; align-items: center; gap: 4px; color: var(--text-normal); cursor: pointer; border-radius: 4px;"
-                onClick={() => setPriorityDropdownOpen(!priorityDropdownOpen())}
-              >
-                <span>⚙️</span>
-                <span>{props.selectedPriority}</span>
-                <span class="btn-caret">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
-                    <polyline points="6 9 12 15 18 9"></polyline>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              {/* Model Selector Dropdown */}
+              <div class="dropdown-wrapper" ref={modelRef} style="position: relative;">
+                <button
+                  class="chat-composer__pill-btn select-btn"
+                  onClick={() => setModelDropdownOpen(!modelDropdownOpen())}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="5,3" style="width: 12px; height: 12px;">
+                    <circle cx="12" cy="12" r="10"></circle>
                   </svg>
-                </span>
+                  <span>{props.selectedModel || "选择模型"}</span>
+                  <span class="btn-caret">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </span>
+                </button>
+                <Show when={modelDropdownOpen()}>
+                  <div class="custom-dropdown-list" style="bottom: calc(100% + 6px); right: 0; left: auto;">
+                    <Show
+                      when={props.availableModels.length > 0}
+                      fallback={
+                        <div class="dropdown-item muted" style="font-size: 11px; pointer-events: none; padding: 6px 12px;">
+                          无可用模型
+                        </div>
+                      }
+                    >
+                      <For each={props.availableModels}>
+                        {(model) => (
+                          <button class="dropdown-item" onClick={() => { props.onSelectModel(model); setModelDropdownOpen(false); }}>
+                            {model}
+                          </button>
+                        )}
+                      </For>
+                    </Show>
+                  </div>
+                </Show>
+              </div>
+
+              {/* Priority Selector Dropdown */}
+              <div class="dropdown-wrapper" ref={priorityRef} style="position: relative;">
+                <button
+                  class="chat-composer__pill-btn select-btn"
+                  onClick={() => setPriorityDropdownOpen(!priorityDropdownOpen())}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                    <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1 0-3.12 3 3 0 0 1 0-4.88 2.5 2.5 0 0 1 0-3.12A2.5 2.5 0 0 1 9.5 2Z" />
+                    <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 0-3.12 3 3 0 0 0 0-4.88 2.5 2.5 0 0 0 0-3.12A2.5 2.5 0 0 0 14.5 2Z" />
+                  </svg>
+                  <span>{props.selectedPriority}</span>
+                  <span class="btn-caret">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </span>
+                </button>
+                <Show when={priorityDropdownOpen()}>
+                  <div class="custom-dropdown-list" style="bottom: calc(100% + 6px); right: 0; left: auto;">
+                    <button class="dropdown-item" onClick={() => { props.onSelectPriority("最高"); setPriorityDropdownOpen(false); }}>最高</button>
+                    <button class="dropdown-item" onClick={() => { props.onSelectPriority("均衡"); setPriorityDropdownOpen(false); }}>均衡</button>
+                    <button class="dropdown-item" onClick={() => { props.onSelectPriority("最快"); setPriorityDropdownOpen(false); }}>最快</button>
+                  </div>
+                </Show>
+              </div>
+
+              <button
+                class="chat-composer__send-square"
+                disabled={busy() || !input().trim()}
+                onClick={() => void send()}
+                title={busy() ? "运行中" : "发送"}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                  <line x1="12" y1="19" x2="12" y2="5"></line>
+                  <polyline points="5 12 12 5 19 12"></polyline>
+                </svg>
               </button>
-              <Show when={priorityDropdownOpen()}>
-                <div class="custom-dropdown-list" style="bottom: calc(100% + 6px); left: 0; right: auto;">
-                  <button class="dropdown-item" onClick={() => { props.onSelectPriority("最高"); setPriorityDropdownOpen(false); }}>最高</button>
-                  <button class="dropdown-item" onClick={() => { props.onSelectPriority("均衡"); setPriorityDropdownOpen(false); }}>均衡</button>
-                  <button class="dropdown-item" onClick={() => { props.onSelectPriority("最快"); setPriorityDropdownOpen(false); }}>最快</button>
-                </div>
-              </Show>
             </div>
           </div>
-
-          <button class="chat-composer__send" disabled={busy() || !input().trim()} onClick={() => void send()}>
-            {busy() ? "运行中…" : "发送 ↑"}
-          </button>
         </div>
       </div>
     </div>

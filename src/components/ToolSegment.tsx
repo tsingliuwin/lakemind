@@ -40,12 +40,36 @@ export default function ToolSegment(props: {
       ? String((t.args as any).table_name)
       : undefined;
 
+  const tablesList = () => {
+    if (t.tool !== "list_tables" || !t.summary) return [];
+    const marker = "张表: ";
+    const idx = t.summary.indexOf(marker);
+    if (idx < 0) return [];
+    return t.summary.substring(idx + marker.length).split(",").map(s => s.trim()).filter(Boolean);
+  };
+
+  const hasBody = () => !!(
+    (sqlFromArgs && t.tool === "execute_query") ||
+    (tableFromArgs && t.tool !== "execute_query") ||
+    t.sql ||
+    t.table ||
+    (t.tool === "list_tables" && tablesList().length > 0)
+  );
+
   return (
     <div
       class={`tool-seg tool-seg--${t.status}`}
-      classList={{ "tool-seg--open": props.expanded }}
+      classList={{ "tool-seg--open": props.expanded && hasBody() }}
     >
-      <div class="tool-seg__summary" onClick={() => props.onToggle(t.id)}>
+      <div
+        class="tool-seg__summary"
+        classList={{ "tool-seg__summary--clickable": hasBody() && t.status !== "running" }}
+        onClick={() => {
+          if (hasBody() && t.status !== "running") {
+            props.onToggle(t.id);
+          }
+        }}
+      >
         <span class="tool-seg__status">
           {t.status === "running" ? (
             <span class="tool-seg__spinner" />
@@ -86,7 +110,7 @@ export default function ToolSegment(props: {
         <Show when={t.summary}>
           <span class="tool-seg__summary-text">· {t.summary}</span>
         </Show>
-        <Show when={t.status !== "running"}>
+        <Show when={t.status !== "running" && hasBody()}>
           <span class="tool-seg__chevron" classList={{ "tool-seg__chevron--open": props.expanded }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 10px; height: 10px; transition: transform 0.15s ease;">
               <polyline points="9 18 15 12 9 6"></polyline>
@@ -95,8 +119,22 @@ export default function ToolSegment(props: {
         </Show>
       </div>
 
-      <Show when={props.expanded}>
+      <Show when={props.expanded && hasBody()}>
         <div class="tool-seg__body">
+          {/* Tables list from list_tables */}
+          <Show when={t.tool === "list_tables" && tablesList().length > 0}>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0;">
+              <span style="font-size: 11.5px; color: var(--text-dim); margin-right: 2px; align-self: center;">数据表:</span>
+              <For each={tablesList()}>
+                {(tableName) => (
+                  <code style="background: var(--bg-active); padding: 1.5px 5px; border-radius: 3px; font-size: 11px; color: var(--text-normal); border: 1px solid var(--border-faint); font-family: inherit;">
+                    {tableName}
+                  </code>
+                )}
+              </For>
+            </div>
+          </Show>
+
           {/* Args / SQL preview */}
           <Show when={sqlFromArgs && t.tool === "execute_query"}>
             <SqlBlock sql={sqlFromArgs!} onCopy />

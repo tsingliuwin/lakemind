@@ -3390,8 +3390,28 @@ select:hover:not(:disabled) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
+}
+.chat-header__ws {
+  border: 1px solid var(--border-faint);
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+  user-select: none;
+  max-width: 150px;
+  cursor: default;
+  line-height: 1.2;
+}
+.chat-header__ws .ws-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chat-header .icon-btn {
   background: transparent;
@@ -3867,29 +3887,37 @@ select:hover:not(:disabled) {
 /* --- 底部输入区 --- */
 .chat-composer {
   flex: 0 0 auto;
-  border-top: 1px solid var(--border-strong);
-  background: var(--bg-surface);
-  padding: 10px 16px 12px;
+  background: transparent;
+  padding: 12px 24px 20px;
+  display: flex;
+  flex-direction: column;
+}
+.chat-composer__box {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  padding: 12px 14px 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.chat-composer__box:focus-within {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
 }
 .chat-composer__input {
   width: 100%;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-card);
+  background: transparent;
+  border: none;
+  border-radius: 0;
   color: var(--text-primary);
-  padding: 10px 14px;
-  font-size: 13px;
+  padding: 0;
+  font-size: 13.5px;
   font-family: var(--font-sans);
   resize: none;
   outline: none;
   line-height: 1.5;
-  transition: border-color 0.12s;
-}
-.chat-composer__input:focus {
-  border-color: var(--accent-blue);
 }
 .chat-composer__input::placeholder {
   color: var(--text-dim);
@@ -3897,27 +3925,96 @@ select:hover:not(:disabled) {
 .chat-composer__toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
   font-size: 11px;
   color: var(--text-dim);
+  margin-top: 4px;
 }
 .chat-composer__ws {
-  color: var(--text-secondary);
-}
-.chat-composer__send {
-  margin-left: auto;
-  background: var(--accent-blue);
-  border-color: var(--accent-blue);
-  color: #fff;
-  font-weight: 600;
-  padding: 5px 16px;
+  border: 1px solid var(--border-faint);
+  padding: 4px 8px;
   border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+  user-select: none;
+  max-width: 180px;
+  cursor: default;
 }
-.chat-composer__send:hover:not(:disabled) {
-  background: var(--accent-blue-hover);
+.chat-composer__ws .ws-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.chat-composer__send:disabled {
-  opacity: 0.4;
+.chat-composer__pill-btn {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-faint);
+  padding: 4px 8px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-pill);
+  transition: background 0.12s, border-color 0.12s;
+}
+.chat-composer__pill-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--border-strong);
+  color: var(--text-normal);
+}
+.chat-composer__send-square {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--text-normal);
+  border: none;
+  color: var(--bg-base);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: opacity 0.12s, background-color 0.12s;
+}
+.chat-composer__send-square:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.chat-composer__send-square:disabled {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+  cursor: not-allowed;
+}
+
+/* --- 回到底部悬浮按钮 --- */
+.chat-view {
+  position: relative;
+}
+.chat-view__scroll-down {
+  position: absolute;
+  bottom: 115px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 28px;
+  height: 28px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  transition: opacity 0.2s, background-color 0.2s, color 0.2s;
+  z-index: 10;
+}
+.chat-view__scroll-down:hover {
+  background: var(--bg-active);
+  color: var(--text-normal);
 }
 
 /* --- task kind 图标（LeftNav） --- */
@@ -3961,7 +4058,7 @@ select:hover:not(:disabled) {
    Expanded (running step, or user-toggled): shows SQL + inline table + actions.
    =========================================================================== */
 .tool-seg {
-  margin: 4px 0;
+  margin: 8px 0;
   background: transparent;
   border-radius: 0;
   overflow: hidden;
@@ -3973,12 +4070,15 @@ select:hover:not(:disabled) {
   padding: 4px 0;
   font-size: 12px;
   color: var(--text-dim);
-  cursor: pointer;
+  cursor: default;
   user-select: none;
   line-height: 1.4;
   transition: opacity 0.12s;
 }
-.tool-seg__summary:hover {
+.tool-seg__summary--clickable {
+  cursor: pointer;
+}
+.tool-seg__summary--clickable:hover {
   opacity: 0.8;
 }
 .tool-seg__status {
@@ -3987,6 +4087,7 @@ select:hover:not(:disabled) {
   justify-content: center;
   width: 14px;
   height: 14px;
+  flex-shrink: 0;
 }
 .tool-seg--error .tool-seg__status {
   color: var(--accent-red);
@@ -3997,16 +4098,20 @@ select:hover:not(:disabled) {
 .tool-seg__name {
   color: var(--text-dim);
   font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .tool-seg__meta {
   color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .tool-seg__summary-text {
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
 }
 .tool-seg__chevron {
@@ -4018,7 +4123,7 @@ select:hover:not(:disabled) {
   justify-content: center;
   color: var(--text-dim);
 }
-.tool-seg__summary:hover .tool-seg__chevron {
+.tool-seg__summary--clickable:hover .tool-seg__chevron {
   opacity: 1;
 }
 .tool-seg__chevron--open svg {
