@@ -3452,16 +3452,29 @@ select:hover:not(:disabled) {
   line-height: 1.6;
   word-break: break-word;
 }
+.chat-msg--user {
+  align-self: flex-end;
+  max-width: 80%;
+}
+.chat-msg--user .chat-msg__body {
+  align-items: flex-end;
+}
 .chat-msg--user .chat-msg__text {
   background: rgba(59, 130, 246, 0.14);
   border: 1px solid rgba(59, 130, 246, 0.3);
   color: var(--text-primary);
   white-space: pre-wrap;
+  border-radius: 12px 12px 2px 12px;
+}
+.chat-msg--assistant {
+  align-self: flex-start;
+  max-width: 90%;
 }
 .chat-msg--assistant .chat-msg__text {
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
   color: var(--text-primary);
+  border-radius: 12px 12px 12px 2px;
 }
 .chat-msg__typing {
   padding: 10px 14px;
@@ -3469,7 +3482,7 @@ select:hover:not(:disabled) {
   font-style: italic;
   background: var(--bg-elevated);
   border: 1px solid var(--border-faint);
-  border-radius: var(--radius-card);
+  border-radius: 12px 12px 12px 2px;
 }
 .chat-msg__cards {
   display: flex;
@@ -3645,7 +3658,7 @@ select:hover:not(:disabled) {
   padding: 8px 14px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-card);
+  border-radius: 12px 12px 12px 2px;
   font-size: 12px;
   color: var(--text-secondary);
 }

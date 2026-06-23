@@ -224,7 +224,6 @@ export default function ChatView(props: {
           <For each={props.messages}>
             {(msg) => (
               <div class={`chat-msg chat-msg--${msg.role}`}>
-                <div class="chat-msg__avatar">{msg.role === "user" ? "👤" : "🤖"}</div>
                 <div class="chat-msg__body">
                   {/* Single ordered loop: preserves the real reasoning → tool →
                       … → text transcript instead of grouping by type. */}
@@ -278,7 +277,6 @@ export default function ChatView(props: {
           {/* Busy / streaming indicator — single-line status */}
           <Show when={busy()}>
             <div class="chat-msg chat-msg--assistant">
-              <div class="chat-msg__avatar">🤖</div>
               <div class="chat-msg__body">
                 <div class="chat-agent-status">
                   <span class="agent-status__timer">⏱ 已工作 {elapsedSec()} 秒</span>
