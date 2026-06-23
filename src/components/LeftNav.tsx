@@ -568,7 +568,7 @@ export default function LeftNav(props: {
                                   }}
                                 >
                                   <span class="kind-badge" data-kind={t.kind}>{t.kind}</span>
-                                  <span class="leaf-label">{t.label}</span>
+                                  <span class="leaf-label">{t.name}</span>
                                   <Show when={t.storage === "view"}>
                                     <span class="leaf-storage" title="零拷贝视图(直接读源文件,不复制)">👁</span>
                                   </Show>

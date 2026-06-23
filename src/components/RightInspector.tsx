@@ -27,7 +27,7 @@ export default function RightInspector(props: {
             <div class="ri-header">
               <div class="ri-title">
                 <span class="kind-badge" data-kind={tVal().kind}>{tVal().kind}</span>
-                <span class="ri-name" title={tVal().label}>{tVal().label}</span>
+                <span class="ri-name" title={tVal().name}>{tVal().name}</span>
               </div>
               <div class="ri-meta">
                 <Show when={tVal().rowCountEstimate != null}>

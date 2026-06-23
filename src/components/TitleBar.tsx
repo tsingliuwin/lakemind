@@ -115,7 +115,7 @@ export default function TitleBar(props: {
         <Show when={props.selectedTable}>
           {(tVal) => (
             <span class="tb-workspace-info" data-tauri-drag-region>
-              {t("currentSource")}: {tVal().label} ({tVal().kind})
+              {t("currentSource")}: {tVal().name} ({tVal().kind})
             </span>
           )}
         </Show>
