@@ -1,4 +1,4 @@
-import { Show, createSignal } from "solid-js";
+import { Show, For, createSignal } from "solid-js";
 import type { Segment } from "../lib/types";
 import ResultTable from "./ResultTable";
 
@@ -126,7 +126,7 @@ export default function ToolSegment(props: {
             <div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0;">
               <span style="font-size: 11.5px; color: var(--text-dim); margin-right: 2px; align-self: center;">数据表:</span>
               <For each={tablesList()}>
-                {(tableName) => (
+                {(tableName: string) => (
                   <code style="background: var(--bg-active); padding: 1.5px 5px; border-radius: 3px; font-size: 11px; color: var(--text-normal); border: 1px solid var(--border-faint); font-family: inherit;">
                     {tableName}
                   </code>

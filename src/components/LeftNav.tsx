@@ -456,8 +456,20 @@ export default function LeftNav(props: {
                             onClick={() => props.onSelectTask?.(task.id)}
                             style="padding-left: 28px; display: flex; align-items: center; gap: 6px; position: relative;"
                           >
-                            <span class="task-kind-icon" title={(task.kind ?? "sql") === "chat" ? "对话" : "SQL 查询"}>
-                              {(task.kind ?? "sql") === "chat" ? "💬" : "📊"}
+                            <span class="task-kind-icon" title={(task.kind ?? "sql") === "chat" ? "对话" : "SQL 查询"} style="display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px;">
+                              <Show
+                                when={(task.kind ?? "sql") === "chat"}
+                                fallback={
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
+                                    <polyline points="4 17 10 11 4 5"></polyline>
+                                    <line x1="12" y1="19" x2="20" y2="19"></line>
+                                  </svg>
+                                }
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
+                                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                                </svg>
+                              </Show>
                             </span>
                             <span class="leaf-label">{task.name}</span>
                             <span class="task-time" style="font-size: 10px; color: var(--text-dim); margin-left: auto; padding-left: 8px; flex-shrink: 0;">
