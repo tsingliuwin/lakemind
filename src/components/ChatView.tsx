@@ -236,11 +236,18 @@ export default function ChatView(props: {
                           <Match when={seg.type === "reasoning"}>
                             <div class="chat-reasoning">
                               <div class="chat-reasoning__header" onClick={() => toggleReasoning(seg.id)}>
-                                <span class="chat-reasoning__icon">💭</span>
-                                <span class="chat-reasoning__label">思考过程</span>
-                                <span class="chat-reasoning__toggle">
-                                  {openReasoningIds().has(seg.id) ? "▾" : "▸"}
+                                <span class="chat-reasoning__icon">
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                                    <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1 0-3.12 3 3 0 0 1 0-4.88 2.5 2.5 0 0 1 0-3.12A2.5 2.5 0 0 1 9.5 2Z" />
+                                    <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 0-3.12 3 3 0 0 0 0-4.88 2.5 2.5 0 0 0 0-3.12A2.5 2.5 0 0 0 14.5 2Z" />
+                                  </svg>
                                 </span>
+                                <span class="chat-reasoning__label">思考过程</span>
+                                 <span class="chat-reasoning__toggle" classList={{ "chat-reasoning__toggle--open": openReasoningIds().has(seg.id) }}>
+                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 10px; height: 10px; transition: transform 0.15s ease;">
+                                     <polyline points="9 18 15 12 9 6"></polyline>
+                                   </svg>
+                                 </span>
                               </div>
                               <Show when={openReasoningIds().has(seg.id) && rs()}>
                                 <div class="chat-reasoning__body">{rs()!.text}</div>

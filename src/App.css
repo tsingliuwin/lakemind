@@ -3414,7 +3414,7 @@ select:hover:not(:disabled) {
   padding: 16px 24px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
 }
 
 .chat-empty {
@@ -3456,21 +3456,22 @@ select:hover:not(:disabled) {
   align-items: flex-end;
 }
 .chat-msg--user .chat-msg__text {
-  background: rgba(59, 130, 246, 0.14);
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.2);
   color: var(--text-primary);
   white-space: pre-wrap;
   border-radius: 12px 12px 2px 12px;
   max-width: 85%;
 }
 .chat-msg--assistant .chat-msg__text {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
+  background: transparent;
+  border: none;
   color: var(--text-primary);
-  border-radius: 12px 12px 12px 2px;
+  border-radius: 0;
+  padding: 4px 0;
 }
 .chat-msg__typing {
-  padding: 10px 14px;
+  padding: 8px 12px;
   color: var(--text-dim);
   font-style: italic;
   background: var(--bg-elevated);
@@ -3501,7 +3502,7 @@ select:hover:not(:disabled) {
 .md-rendered h2 {
   font-size: 14px;
   font-weight: 600;
-  margin: 16px 0 6px;
+  margin: 14px 0 6px;
   color: var(--text-primary);
   border-bottom: 1px solid var(--border-faint);
   padding-bottom: 4px;
@@ -3509,7 +3510,7 @@ select:hover:not(:disabled) {
 .md-rendered h3 {
   font-size: 13px;
   font-weight: 600;
-  margin: 12px 0 4px;
+  margin: 10px 0 4px;
   color: var(--text-primary);
 }
 .md-rendered h4,
@@ -3517,7 +3518,7 @@ select:hover:not(:disabled) {
 .md-rendered h6 {
   font-size: 13px;
   font-weight: 500;
-  margin: 10px 0 4px;
+  margin: 8px 0 4px;
   color: var(--text-secondary);
 }
 
@@ -3528,10 +3529,10 @@ select:hover:not(:disabled) {
 
 /* 行内代码 — 截图中彩色背景圆角标签 */
 .md-rendered code:not(pre code) {
-  background: rgba(59, 130, 246, 0.12);
+  background: rgba(59, 130, 246, 0.1);
   color: #93c5fd;
-  padding: 1px 6px;
-  border-radius: 4px;
+  padding: 1px 5px;
+  border-radius: 3px;
   font-family: var(--font-mono);
   font-size: 0.88em;
   font-weight: 500;
@@ -3540,9 +3541,9 @@ select:hover:not(:disabled) {
 /* 代码块 — 截图中深色背景 + 语言标签 */
 .md-rendered pre {
   background: #0a0a0d;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-faint);
   border-radius: 8px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   overflow-x: auto;
   margin: 8px 0;
   position: relative;
@@ -3648,10 +3649,11 @@ select:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 14px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
-  border-radius: 12px 12px 12px 2px;
+  padding: 8px 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-faint);
+  border-radius: 0;
   font-size: 12px;
   color: var(--text-secondary);
 }
@@ -3726,9 +3728,8 @@ select:hover:not(:disabled) {
 /* --- 思考过程 — 参考截图中的内嵌展示 --- */
 
 .chat-reasoning {
-  border-left: 2px solid var(--accent-blue);
-  background: rgba(59, 130, 246, 0.04);
-  border-radius: 0 8px 8px 0;
+  background: transparent;
+  border-radius: 0;
   overflow: hidden;
   margin-bottom: 2px;
 }
@@ -3736,35 +3737,51 @@ select:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 4px 0;
   cursor: pointer;
   user-select: none;
   font-size: 12px;
   color: var(--text-dim);
-  transition: background 0.12s;
+  transition: opacity 0.12s;
 }
 .chat-reasoning__header:hover {
-  background: rgba(59, 130, 246, 0.08);
+  opacity: 0.8;
 }
 .chat-reasoning__icon {
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
 }
 .chat-reasoning__label {
   font-weight: 500;
 }
 .chat-reasoning__toggle {
-  margin-left: auto;
-  font-size: 10px;
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  margin-left: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-dim);
 }
+.chat-reasoning__header:hover .chat-reasoning__toggle {
+  opacity: 1;
+}
+.chat-reasoning__toggle--open svg {
+  transform: rotate(90deg);
+}
 .chat-reasoning__body {
-  padding: 6px 12px 10px;
+  padding: 6px 0 10px 20px;
   font-size: 12px;
   line-height: 1.6;
   color: var(--text-secondary);
   white-space: pre-wrap;
-  max-height: 300px;
+  max-height: 250px;
   overflow-y: auto;
+  border-left: 1px solid var(--border-faint);
+  margin-left: 6px;
 }
 
 /* --- 卡片 --- */
@@ -3944,45 +3961,32 @@ select:hover:not(:disabled) {
    Expanded (running step, or user-toggled): shows SQL + inline table + actions.
    =========================================================================== */
 .tool-seg {
-  border: 1px solid var(--border-faint);
-  border-left: 3px solid var(--border-strong);
-  border-radius: 6px;
-  margin: 6px 0;
-  background: var(--bg-surface);
+  margin: 4px 0;
+  background: transparent;
+  border-radius: 0;
   overflow: hidden;
-}
-.tool-seg--running {
-  border-left-color: var(--accent-blue);
-}
-.tool-seg--ok {
-  border-left-color: var(--accent-green);
-}
-.tool-seg--error {
-  border-left-color: var(--accent-red);
 }
 .tool-seg__summary {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
+  padding: 4px 0;
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-dim);
   cursor: pointer;
   user-select: none;
   line-height: 1.4;
+  transition: opacity 0.12s;
 }
 .tool-seg__summary:hover {
-  background: var(--bg-hover);
+  opacity: 0.8;
 }
 .tool-seg__status {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 14px;
-  font-weight: 600;
-}
-.tool-seg--ok .tool-seg__status {
-  color: var(--accent-green);
+  height: 14px;
 }
 .tool-seg--error .tool-seg__status {
   color: var(--accent-red);
@@ -3991,14 +3995,14 @@ select:hover:not(:disabled) {
   color: var(--accent-blue);
 }
 .tool-seg__name {
-  color: var(--text-primary);
+  color: var(--text-dim);
   font-weight: 500;
 }
 .tool-seg__meta {
   color: var(--text-dim);
 }
 .tool-seg__summary-text {
-  color: var(--text-secondary);
+  color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4006,8 +4010,19 @@ select:hover:not(:disabled) {
   min-width: 0;
 }
 .tool-seg__chevron {
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  margin-left: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-dim);
-  margin-left: auto;
+}
+.tool-seg__summary:hover .tool-seg__chevron {
+  opacity: 1;
+}
+.tool-seg__chevron--open svg {
+  transform: rotate(90deg);
 }
 .tool-seg__spinner {
   width: 10px;
@@ -4024,31 +4039,33 @@ select:hover:not(:disabled) {
   }
 }
 .tool-seg__body {
-  padding: 0 10px 10px;
+  padding: 6px 0 10px 20px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  border-left: 1px solid var(--border-faint);
+  margin-left: 6px;
 }
 .tool-seg__arg {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--text-secondary);
 }
 .tool-seg__arg code {
   background: var(--bg-active);
-  padding: 1px 5px;
+  padding: 1px 4px;
   border-radius: 3px;
-  font-size: 11px;
+  font-size: 10.5px;
 }
 .tool-seg__code {
   position: relative;
   margin: 0;
-  padding: 10px 64px 10px 12px;
+  padding: 6px 48px 6px 10px;
   background: var(--bg-base);
   border: 1px solid var(--border-faint);
-  border-radius: 5px;
+  border-radius: 4px;
   font-family: "SF Mono", "Menlo", "Consolas", monospace;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 11.5px;
+  line-height: 1.45;
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
