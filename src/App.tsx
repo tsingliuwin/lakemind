@@ -1068,10 +1068,11 @@ export default function App() {
                     <Show when={activeTaskId()}>
                       {(id) => (
                         <ChatView
+                          taskId={id()}
                           messages={activeTask()?.messages ?? []}
                           workspace={currentWorkspace().name}
                           taskName={activeTask()?.name ?? ""}
-                          streaming={streamingTaskId() !== null && streamingTaskId() === id()}
+                          streaming={streamingTaskId() === id()}
                           onSend={sendChatMessage}
                           onOpenInSqlPanel={openInSqlPanel}
                           onDelete={() => deleteTask(id())}

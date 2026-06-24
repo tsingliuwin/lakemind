@@ -25,6 +25,7 @@ const TOOL_LABELS: Record<string, string> = {
 };
 
 export default function ChatView(props: {
+  taskId: string;
   messages: ChatMessage[];
   workspace: string;
   taskName: string;
@@ -208,16 +209,13 @@ export default function ChatView(props: {
   });
 
   // 切换对话时重置折叠状态并跳到最新消息。
-  // ⚠️ 关键：props.taskName 的 getter 间接依赖 tasks() 信号。
-  // 流式输出中每个 delta 都调用 setTasks(...)，导致此 effect 重跑。
-  // 如果不做值比较，每个 delta 都会执行 setStickToBottom(true) 和滚到底部，
-  // 这就是「第二层贴底」——用户无论如何都逃不开。
-  // 解决：比较前后值，只在任务名真正改变（切换对话）时才重置。
-  let prevResetTaskName: string | undefined;
+  // ⚠️ 关键：根据 props.taskId 的变更来检测对话切换，避免依赖 tasks() 导致流式输出中反复重置，
+  // 并且保证即使对话同名也能正确触发重置。
+  let prevTaskId: string | undefined;
   createEffect(() => {
-    const currentName = props.taskName;
-    if (currentName === prevResetTaskName) return; // 同一个对话，跳过
-    prevResetTaskName = currentName;
+    const currentId = props.taskId;
+    if (currentId === prevTaskId) return; // 同一个对话，跳过
+    prevTaskId = currentId;
     setOpenReasoningIds(new Set<string>());
     setExpandedToolIds(new Set<string>());
     setManualReasoningIds(new Set<string>());
