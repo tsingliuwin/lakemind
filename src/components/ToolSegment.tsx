@@ -28,69 +28,80 @@ export default function ToolSegment(props: {
   // ToolSegment is only ever rendered for `type === "tool"` segments (filtered
   // by the parent). Narrow once into a local typed variable so the tool-shape
   // fields (status/sql/table/...) resolve.
-  const t = props.seg.type === "tool" ? props.seg : null;
-  if (!t) return null;
+  const t = () => props.seg.type === "tool" ? props.seg : null;
 
-  const sqlFromArgs =
-    t.args && typeof t.args === "object" && "sql" in (t.args as any)
-      ? String((t.args as any).sql)
+  const sqlFromArgs = () => {
+    const s = t();
+    if (!s) return undefined;
+    return s.args && typeof s.args === "object" && "sql" in (s.args as any)
+      ? String((s.args as any).sql)
       : undefined;
-  const tableFromArgs =
-    t.args && typeof t.args === "object" && "table_name" in (t.args as any)
-      ? String((t.args as any).table_name)
-      : undefined;
-
-  const tablesList = () => {
-    if (t.tool !== "list_tables" || !t.summary) return [];
-    const marker = "张表: ";
-    const idx = t.summary.indexOf(marker);
-    if (idx < 0) return [];
-    return t.summary.substring(idx + marker.length).split(",").map(s => s.trim()).filter(Boolean);
   };
 
-  const hasBody = () => !!(
-    (sqlFromArgs && t.tool === "execute_query") ||
-    (tableFromArgs && t.tool !== "execute_query") ||
-    t.sql ||
-    t.table ||
-    (t.tool === "list_tables" && tablesList().length > 0)
-  );
+  const tableFromArgs = () => {
+    const s = t();
+    if (!s) return undefined;
+    return s.args && typeof s.args === "object" && "table_name" in (s.args as any)
+      ? String((s.args as any).table_name)
+      : undefined;
+  };
+
+  const tablesList = () => {
+    const s = t();
+    if (!s || s.tool !== "list_tables" || !s.summary) return [];
+    const marker = "张表: ";
+    const idx = s.summary.indexOf(marker);
+    if (idx < 0) return [];
+    return s.summary.substring(idx + marker.length).split(",").map(item => item.trim()).filter(Boolean);
+  };
+
+  const hasBody = () => {
+    const s = t();
+    if (!s) return false;
+    return !!(
+      (sqlFromArgs() && s.tool === "execute_query") ||
+      (tableFromArgs() && s.tool !== "execute_query") ||
+      s.sql ||
+      s.table ||
+      (s.tool === "list_tables" && tablesList().length > 0)
+    );
+  };
 
   return (
     <div
-      class={`tool-seg tool-seg--${t.status}`}
+      class={`tool-seg tool-seg--${t()?.status}`}
       classList={{ "tool-seg--open": props.expanded && hasBody() }}
     >
       <div
         class="tool-seg__summary"
-        classList={{ "tool-seg__summary--clickable": hasBody() && t.status !== "running" }}
+        classList={{ "tool-seg__summary--clickable": hasBody() && t()?.status !== "running" }}
         onClick={() => {
-          if (hasBody() && t.status !== "running") {
-            props.onToggle(t.id);
+          if (hasBody() && t()?.status !== "running") {
+            props.onToggle(t()!.id);
           }
         }}
       >
         <span class="tool-seg__status">
-          {t.status === "running" ? (
+          {t()?.status === "running" ? (
             <span class="tool-seg__spinner" />
-          ) : t.status !== "ok" ? (
+          ) : t()?.status !== "ok" ? (
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; color: var(--accent-red);">
               <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
               <line x1="12" y1="9" x2="12" y2="13"></line>
               <line x1="12" y1="17" x2="12.01" y2="17"></line>
             </svg>
-          ) : (t.tool === "list_tables" || t.tool === "describe_table") ? (
+          ) : (t()?.tool === "list_tables" || t()?.tool === "describe_table") ? (
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
               <circle cx="11" cy="11" r="8"></circle>
               <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
             </svg>
-          ) : t.tool === "execute_query" ? (
+          ) : t()?.tool === "execute_query" ? (
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
               <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
               <path d="M3 5V19A9 3 0 0 0 21 19V5"></path>
               <path d="M3 12A9 3 0 0 0 21 12"></path>
             </svg>
-          ) : t.tool === "sample_data" ? (
+          ) : t()?.tool === "sample_data" ? (
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
               <line x1="18" y1="20" x2="18" y2="10"></line>
               <line x1="12" y1="20" x2="12" y2="4"></line>
@@ -103,14 +114,14 @@ export default function ToolSegment(props: {
             </svg>
           )}
         </span>
-        <span class="tool-seg__name">{TOOL_LABELS[t.tool] ?? t.tool}</span>
-        <Show when={t.elapsedMs != null}>
-          <span class="tool-seg__meta">· {fmtMs(t.elapsedMs!)}</span>
+        <span class="tool-seg__name">{TOOL_LABELS[t()!.tool] ?? t()!.tool}</span>
+        <Show when={t()?.elapsedMs != null}>
+          <span class="tool-seg__meta">· {fmtMs(t()!.elapsedMs!)}</span>
         </Show>
-        <Show when={t.summary}>
-          <span class="tool-seg__summary-text">· {t.summary}</span>
+        <Show when={t()?.summary}>
+          <span class="tool-seg__summary-text">· {t()!.summary}</span>
         </Show>
-        <Show when={t.status !== "running" && hasBody()}>
+        <Show when={t()?.status !== "running" && hasBody()}>
           <span class="tool-seg__chevron" classList={{ "tool-seg__chevron--open": props.expanded }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 10px; height: 10px; transition: transform 0.15s ease;">
               <polyline points="9 18 15 12 9 6"></polyline>
@@ -122,7 +133,7 @@ export default function ToolSegment(props: {
       <Show when={props.expanded && hasBody()}>
         <div class="tool-seg__body">
           {/* Tables list from list_tables */}
-          <Show when={t.tool === "list_tables" && tablesList().length > 0}>
+          <Show when={t()?.tool === "list_tables" && tablesList().length > 0}>
             <div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0;">
               <span style="font-size: 11.5px; color: var(--text-dim); margin-right: 2px; align-self: center;">数据表:</span>
               <For each={tablesList()}>
@@ -136,21 +147,21 @@ export default function ToolSegment(props: {
           </Show>
 
           {/* Args / SQL preview */}
-          <Show when={sqlFromArgs && t.tool === "execute_query"}>
-            <SqlBlock sql={sqlFromArgs!} onCopy onOpenInSqlPanel={props.onOpenInSqlPanel} />
+          <Show when={sqlFromArgs() && t()?.tool === "execute_query"}>
+            <SqlBlock sql={sqlFromArgs()!} onCopy onOpenInSqlPanel={props.onOpenInSqlPanel} />
           </Show>
-          <Show when={tableFromArgs && t.tool !== "execute_query"}>
-            <div class="tool-seg__arg">表: <code>{tableFromArgs}</code></div>
+          <Show when={tableFromArgs() && t()?.tool !== "execute_query"}>
+            <div class="tool-seg__arg">表: <code>{tableFromArgs()}</code></div>
           </Show>
           {/* SQL from the result (execute_query success carries it) */}
-          <Show when={t.sql && !sqlFromArgs}>
-            <SqlBlock sql={t.sql!} onCopy onOpenInSqlPanel={props.onOpenInSqlPanel} />
+          <Show when={t()?.sql && !sqlFromArgs()}>
+            <SqlBlock sql={t()!.sql!} onCopy onOpenInSqlPanel={props.onOpenInSqlPanel} />
           </Show>
 
           {/* Inline result table */}
-          <Show when={t.table}>
+          <Show when={t()?.table}>
             <div class="tool-seg__table">
-              <ResultTable result={t.table!} compact />
+              <ResultTable result={t()!.table!} compact />
             </div>
           </Show>
         </div>

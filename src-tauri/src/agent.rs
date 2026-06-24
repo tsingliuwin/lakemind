@@ -42,6 +42,7 @@ pub enum Segment {
     },
     /// One tool call + its result merged into a single logical step.
     /// `status` goes running → ok|error when the tool_result event arrives.
+    #[serde(rename_all = "camelCase")]
     Tool {
         id: String,
         tool: String,
@@ -153,6 +154,19 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Monotonic counter that guarantees unique tool-call ids. `now_ms()` alone is
+/// millisecond-resolution, so two tools of the same kind starting in the same
+/// millisecond (concurrent turns, or back-to-back fast metadata calls) would
+/// collide — and the frontend merges a `tool_result` into the FIRST segment
+/// matching that id, leaving the duplicate spinning forever. The counter makes
+/// every id unique regardless of timing.
+static TOOL_CALL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn next_tool_id(prefix: &str) -> String {
+    let n = TOOL_CALL_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    format!("tool-{prefix}-{}-{n}", now_ms())
+}
+
 fn emit_event(window: &tauri::Window, task_id: &str, kind: &str, text: Option<String>, segment: Option<Segment>) {
     let _ = window.emit(
         "agent-event",
@@ -241,7 +255,7 @@ impl Tool for ListTablesTool {
     }
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let call_id = format!("tool-list-{}", now_ms());
+        let call_id = next_tool_id("list");
         emit_tool_call(&self.window, &self.task_id, &call_id, "list_tables", json!({}));
 
         let start = std::time::Instant::now();
@@ -327,7 +341,7 @@ impl Tool for DescribeTableTool {
             return Err(ToolError("表名包含非法字符，仅允许字母、数字和下划线。".to_string()));
         }
 
-        let call_id = format!("tool-desc-{}", now_ms());
+        let call_id = next_tool_id("desc");
         emit_tool_call(
             &self.window, &self.task_id, &call_id, "describe_table",
             json!({ "table_name": table_name }),
@@ -414,7 +428,7 @@ impl Tool for ExecuteQueryTool {
             }
         }
 
-        let call_id = format!("tool-exec-{}", now_ms());
+        let call_id = next_tool_id("exec");
         emit_tool_call(
             &self.window, &self.task_id, &call_id, "execute_query",
             json!({ "sql": sql }),
@@ -501,7 +515,7 @@ impl Tool for SampleDataTool {
             return Err(ToolError("表名包含非法字符，仅允许字母、数字和下划线。".to_string()));
         }
 
-        let call_id = format!("tool-sample-{}", now_ms());
+        let call_id = next_tool_id("sample");
         emit_tool_call(
             &self.window, &self.task_id, &call_id, "sample_data",
             json!({ "table_name": table_name }),
