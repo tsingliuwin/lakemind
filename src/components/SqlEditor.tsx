@@ -1,4 +1,4 @@
-import { For, Show, createEffect, onMount, onCleanup } from "solid-js";
+import { For, Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import { EditorView, keymap } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -25,6 +25,8 @@ export default function SqlEditor(props: {
   onSave?: () => void;
   onClose?: () => void;
 }) {
+  const [copied, setCopied] = createSignal(false);
+  const [saved, setSaved] = createSignal(false);
   let host!: HTMLDivElement;
   let view: EditorView | undefined;
 
@@ -45,6 +47,8 @@ export default function SqlEditor(props: {
             key: "Mod-s",
             run: () => {
               props.onSave?.();
+              setSaved(true);
+              setTimeout(() => setSaved(false), 1500);
               return true;
             },
           },
@@ -94,18 +98,52 @@ export default function SqlEditor(props: {
           >
             <For each={[...ROW_CAP_OPTIONS]}>{(o) => <option value={o.value}>{o.label}</option>}</For>
           </select>
-          <button class="icon-btn" title={t("copySql")} onClick={() => props.onCopy()}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style={{ width: "14px", height: "14px" }}>
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
+          <button
+            class="icon-btn"
+            title={copied() ? "已复制" : t("copySql")}
+            onClick={() => {
+              props.onCopy();
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            }}
+          >
+            <Show
+              when={copied()}
+              fallback={
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style={{ width: "14px", height: "14px" }}>
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+              }
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green, #10b981)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style={{ width: "14px", height: "14px" }}>
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            </Show>
           </button>
-          <button class="icon-btn" title="保存查询 (Ctrl+S)" onClick={() => props.onSave?.()}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style={{ width: "14px", height: "14px" }}>
-              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
-              <path d="M17 21v-8H7v8"></path>
-              <path d="M7 3v5h8"></path>
-            </svg>
+          <button
+            class="icon-btn"
+            title={saved() ? "已保存" : "保存查询 (Ctrl+S)"}
+            onClick={() => {
+              props.onSave?.();
+              setSaved(true);
+              setTimeout(() => setSaved(false), 1500);
+            }}
+          >
+            <Show
+              when={saved()}
+              fallback={
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style={{ width: "14px", height: "14px" }}>
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                  <path d="M17 21v-8H7v8"></path>
+                  <path d="M7 3v5h8"></path>
+                </svg>
+              }
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green, #10b981)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style={{ width: "14px", height: "14px" }}>
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            </Show>
           </button>
           <button class="header-close-btn" title="关闭并放弃查询" onClick={() => props.onClose?.()}>
             ✕
