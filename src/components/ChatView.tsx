@@ -302,7 +302,7 @@ export default function ChatView(props: {
       const last = running[running.length - 1];
       return `正在${TOOL_LABELS[last.tool] ?? "执行工具"}…`;
     }
-    return "思考中…";
+    return undefined;
   }
 
   async function send() {
