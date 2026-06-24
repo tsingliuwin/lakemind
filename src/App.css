@@ -3451,11 +3451,8 @@ body.is-resizing-column * {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 0 1 auto;
-  min-width: 0;
+  word-break: break-word;
+  line-height: 1.4;
 }
 .chat-header__ws {
   border: 1px solid var(--border-faint);

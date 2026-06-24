@@ -71,6 +71,22 @@ export default function ChatView(props: {
     } catch {}
   };
 
+  const displayTitle = createMemo(() => {
+    if (props.taskName && !props.taskName.endsWith("...")) {
+      return props.taskName;
+    }
+    const firstMsg = props.messages.find((m) => m.role === "user");
+    if (firstMsg) {
+      for (const seg of firstMsg.segments) {
+        const ts = asText(seg);
+        if (ts) {
+          return ts.text.trim().replace(/\n/g, " ");
+        }
+      }
+    }
+    return props.taskName || "对话";
+  });
+
   // 流式输出状态：发送瞬间的本地 busy 与父级 streaming 合成，覆盖
   // start_agent_chat 立即返回但流式仍在进行的窗口期。
   const isStreaming = createMemo(() => busy() || props.streaming);
@@ -394,7 +410,7 @@ export default function ChatView(props: {
     <div class="chat-view">
       <div class="chat-header">
         <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;">
-          <span class="chat-header__title">{props.taskName || "对话"}</span>
+          <span class="chat-header__title">{displayTitle()}</span>
           <span class="chat-header__ws" title={`当前工作区: ${props.workspace}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; flex-shrink: 0; color: var(--text-dim);">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
@@ -530,28 +546,30 @@ export default function ChatView(props: {
                       );
                     }}
                   </Index>
-                  <div class="chat-msg__actions">
-                    <span class="chat-msg__time">{formatTime(msg().ts)}</span>
-                    <button
-                      class="chat-msg__copy-btn"
-                      title={copiedMessageId() === msg().id ? "已复制" : "复制"}
-                      onClick={() => handleCopyMessage(msg())}
-                    >
-                      <Show
-                        when={copiedMessageId() === msg().id}
-                        fallback={
-                          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                          </svg>
-                        }
+                  <Show when={!(msg().role === "assistant" && isStreaming() && msg().id === props.messages[props.messages.length - 1]?.id)}>
+                    <div class="chat-msg__actions">
+                      <span class="chat-msg__time">{formatTime(msg().ts)}</span>
+                      <button
+                        class="chat-msg__copy-btn"
+                        title={copiedMessageId() === msg().id ? "已复制" : "复制"}
+                        onClick={() => handleCopyMessage(msg())}
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green, #10b981)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                          <polyline points="20 6 9 17 4 12"></polyline>
-                        </svg>
-                      </Show>
-                    </button>
-                  </div>
+                        <Show
+                          when={copiedMessageId() === msg().id}
+                          fallback={
+                            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                          }
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green, #10b981)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                          </svg>
+                        </Show>
+                      </button>
+                    </div>
+                  </Show>
                 </div>
               </div>
             )}

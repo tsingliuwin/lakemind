@@ -328,11 +328,7 @@ export default function App() {
 
   function createTask(prompt: string, kind: TaskKind = "chat") {
     const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    let name = prompt.trim();
-    if (name.length > 20) {
-      name = name.slice(0, 18) + "...";
-    }
-    name = name.replace(/\n/g, " ");
+    let name = prompt.trim().replace(/\n/g, " ");
     if (!name) name = kind === "chat" ? "新对话" : "新查询";
 
     const newTask: QueryTask = {
@@ -453,11 +449,7 @@ export default function App() {
 
   async function createChatTaskAndSend(prompt: string, modelId?: string) {
     const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    let name = prompt.trim();
-    if (name.length > 20) {
-      name = name.slice(0, 18) + "...";
-    }
-    name = name.replace(/\n/g, " ");
+    let name = prompt.trim().replace(/\n/g, " ");
     if (!name) name = "新对话";
 
     if (availableModels().length === 0) {
@@ -528,11 +520,7 @@ export default function App() {
       ts: Date.now(),
     };
 
-    let name = prompt.trim();
-    if (name.length > 20) {
-      name = name.slice(0, 18) + "...";
-    }
-    name = name.replace(/\n/g, " ");
+    let name = prompt.trim().replace(/\n/g, " ");
 
     if (availableModels().length === 0) {
       alert("请先前往设置中心（右上角菜单 -> 模型设置中心）配置并启用大模型供应商及模型。");
@@ -634,9 +622,6 @@ export default function App() {
     let name = task.sql.trim();
     const lines = name.split("\n");
     name = lines[0].trim();
-    if (name.length > 20) {
-      name = name.slice(0, 18) + "...";
-    }
     if (!name) name = "已保存查询";
 
     setTasks((prev) =>
