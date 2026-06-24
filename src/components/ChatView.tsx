@@ -1,4 +1,4 @@
-import { For, Show, Switch, Match, createSignal, createEffect, onMount, onCleanup } from "solid-js";
+import { For, Index, Show, Switch, Match, createSignal, createEffect, onMount, onCleanup, untrack } from "solid-js";
 import type { ChatMessage, Segment } from "../lib/types";
 import ToolSegment from "./ToolSegment";
 import MarkdownRenderer from "./MarkdownRenderer";
@@ -36,6 +36,8 @@ export default function ChatView(props: {
   onSelectModel: (model: string) => void;
   selectedPriority: string;
   onSelectPriority: (priority: string) => void;
+  /** 该对话是否正在流式输出（由父级 streamingTaskId 派生）。 */
+  streaming: boolean;
 }) {
   const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
   const [priorityDropdownOpen, setPriorityDropdownOpen] = createSignal(false);
@@ -61,6 +63,10 @@ export default function ChatView(props: {
   const [busy, setBusy] = createSignal(false);
   const [showConfirm, setShowConfirm] = createSignal(false);
 
+  // 流式输出状态：发送瞬间的本地 busy 与父级 streaming 合成，覆盖
+  // start_agent_chat 立即返回但流式仍在进行的窗口期。
+  const isStreaming = () => busy() || props.streaming;
+
   createEffect(() => {
     // Reset confirmation state when messages or active conversation changes
     props.messages;
@@ -68,22 +74,37 @@ export default function ChatView(props: {
     setShowConfirm(false);
   });
 
-  // Reasoning fold state: latest assistant message open while streaming.
+  // Reasoning fold state: the latest reasoning run auto-opens while streaming
+  // (so the in-progress 思考过程 is visible by default). A segment the user has
+  // manually folded is left alone thereafter.
   const [openReasoningIds, setOpenReasoningIds] = createSignal<Set<string>>(new Set());
+  const [manualReasoningIds, setManualReasoningIds] = createSignal<Set<string>>(new Set());
   // Tool segment fold state: a tool segment is auto-expanded while running,
-  // auto-collapsed when its result arrives; user can toggle manually.
+  // auto-collapsed when its result arrives. Segments the user has manually
+  // toggled are never auto-collapsed, so expanded results stay open mid-stream.
   const [expandedToolIds, setExpandedToolIds] = createSignal<Set<string>>(new Set());
+  const [manualToolIds, setManualToolIds] = createSignal<Set<string>>(new Set());
 
-  function toggleReasoning(msgId: string) {
+  function toggleReasoning(segId: string) {
+    setManualReasoningIds((prev) => {
+      const next = new Set(prev);
+      next.add(segId);
+      return next;
+    });
     setOpenReasoningIds((prev) => {
       const next = new Set(prev);
-      if (next.has(msgId)) next.delete(msgId);
-      else next.add(msgId);
+      if (next.has(segId)) next.delete(segId);
+      else next.add(segId);
       return next;
     });
   }
 
   function toggleTool(segId: string) {
+    setManualToolIds((prev) => {
+      const next = new Set(prev);
+      next.add(segId);
+      return next;
+    });
     setExpandedToolIds((prev) => {
       const next = new Set(prev);
       if (next.has(segId)) next.delete(segId);
@@ -96,7 +117,7 @@ export default function ChatView(props: {
   const [elapsedSec, setElapsedSec] = createSignal(0);
 
   createEffect(() => {
-    if (busy()) {
+    if (isStreaming()) {
       const start = Date.now();
       const handle = setInterval(() => {
         setElapsedSec(Math.floor((Date.now() - start) / 1000));
@@ -109,20 +130,100 @@ export default function ChatView(props: {
 
   let scrollEl: HTMLDivElement | undefined;
 
+  // ── 贴底滚动 ──
+  // 核心策略：用「程序性滚动」标志精确区分程序滚动与用户滚动，取代旧的
+  //   scrollHeight 变化启发式——旧启发式在流式输出中会把用户的滚动事件一并
+  //   吃掉，导致滚回底部也无法恢复贴底。
+  //   - 自动贴底 / 回到底部按钮的滚动前置位标志，scroll 事件中标志为真则忽略。
+  //   - 流式中 scroll 事件只负责「取消贴底」，不主动恢复（避免小幅上滚被误判
+  //     为到底而反复贴底回弹）；改由 wheel 向下且接近底部时恢复贴底。
+  //   - 非流式中 scroll 事件既可取消也可恢复贴底。
+  const [stickToBottom, setStickToBottom] = createSignal(true);
   const [showScrollDown, setShowScrollDown] = createSignal(false);
+  let isProgrammaticScroll = false;
+
   const handleScroll = (e: Event) => {
+    if (isProgrammaticScroll) return; // 忽略程序性贴底滚动
     const el = e.currentTarget as HTMLDivElement;
     const diff = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setShowScrollDown(diff > 150);
+    const nearBottom = diff <= 30;
+    if (!nearBottom) {
+      // 离开底部 → 取消贴底（无论是否流式）
+      setStickToBottom(false);
+    } else if (!isStreaming()) {
+      // 非流式状态下滚到底部 → 恢复贴底
+      // 流式中不在此恢复（见 wheel），避免贴底回弹
+      setStickToBottom(true);
+    }
+    setShowScrollDown(!nearBottom);
   };
 
-  // 新消息到达或状态变为 busy 时滚到底部。
+  // wheel 事件在 scroll 事件之前同步触发，用于捕获滚动意图：
+  //   向上 → 立即取消贴底；向下且已接近底部 → 恢复贴底（流式中亦然）。
+  const handleWheel = (e: WheelEvent) => {
+    if (e.deltaY < 0) {
+      setStickToBottom(false);
+    } else if (e.deltaY > 0 && scrollEl) {
+      const diff = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+      if (diff <= 30) setStickToBottom(true);
+    }
+  };
+
+  // 程序性贴底：赋值前置位标志。由 scrollTop 赋值触发的 scroll 事件在当前帧
+  // 的渲染步骤中派发（早于 rAF 回调），故下一帧清除标志即可安全忽略。
+  function stickScrollToBottom() {
+    if (!scrollEl) return;
+    isProgrammaticScroll = true;
+    scrollEl.scrollTop = scrollEl.scrollHeight;
+    requestAnimationFrame(() => {
+      isProgrammaticScroll = false;
+    });
+  }
+
+  // 「回到底部」按钮：平滑滚动跨多帧，标志在 scrollend 后清除；
+  // scrollend 不可用时由兜底定时器清除，避免标志滞留导致后续用户滚动被忽略。
+  function smoothStickToBottom() {
+    if (!scrollEl) return;
+    const el = scrollEl;
+    isProgrammaticScroll = true;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    let t: ReturnType<typeof setTimeout>;
+    const clear = () => {
+      isProgrammaticScroll = false;
+      el.removeEventListener("scrollend", clear);
+      clearTimeout(t);
+    };
+    el.addEventListener("scrollend", clear);
+    t = setTimeout(clear, 600);
+  }
+
+  // 新消息 / 流式 delta 到达时，若贴底则跟随滚动。
+  // 用 untrack 读取 stickToBottom，避免 stickToBottom 变化本身触发此 effect。
   createEffect(() => {
     props.messages;
-    busy();
-    if (scrollEl) {
-      scrollEl.scrollTop = scrollEl.scrollHeight;
+    isStreaming();
+    if (scrollEl && untrack(stickToBottom)) {
+      stickScrollToBottom();
     }
+  });
+
+  // 切换对话时重置折叠状态并跳到最新消息。
+  // ⚠️ 关键：props.taskName 的 getter 间接依赖 tasks() 信号。
+  // 流式输出中每个 delta 都调用 setTasks(...)，导致此 effect 重跑。
+  // 如果不做值比较，每个 delta 都会执行 setStickToBottom(true) 和滚到底部，
+  // 这就是「第二层贴底」——用户无论如何都逃不开。
+  // 解决：比较前后值，只在任务名真正改变（切换对话）时才重置。
+  let prevResetTaskName: string | undefined;
+  createEffect(() => {
+    const currentName = props.taskName;
+    if (currentName === prevResetTaskName) return; // 同一个对话，跳过
+    prevResetTaskName = currentName;
+    setOpenReasoningIds(new Set<string>());
+    setExpandedToolIds(new Set<string>());
+    setManualReasoningIds(new Set<string>());
+    setManualToolIds(new Set<string>());
+    setStickToBottom(true);
+    stickScrollToBottom();
   });
 
   // The latest assistant message id (streaming target).
@@ -133,25 +234,29 @@ export default function ChatView(props: {
     return last.role === "assistant" ? last.id : undefined;
   }
 
-  // Auto-expand the latest reasoning segment of the streaming assistant
-  // message (there can be several, interleaved between tool calls). Each new
-  // reasoning run auto-opens as it starts receiving deltas.
+  // 折叠策略：只有「正在进行中的思考过程」默认展开——即流式输出中且
+  // 消息的最后一段仍是 reasoning（还在往里追加）。一旦后面来了 tool/text
+  // 段，这段思考即视为已结束 → 默认折叠。用户手动展开/收起的段保持原状。
   createEffect(() => {
     const id = lastAssistantId();
-    if (!id || !busy()) return;
+    if (!id) return;
     const msg = props.messages.find((m) => m.id === id);
     if (!msg) return;
-    for (let i = msg.segments.length - 1; i >= 0; i--) {
-      const s = msg.segments[i];
-      if (s.type === "reasoning") {
-        setOpenReasoningIds((prev) => {
-          const next = new Set(prev);
-          next.add(s.id);
-          return next;
-        });
-        break;
+    const segs = msg.segments;
+    const last = segs[segs.length - 1];
+    const activeId =
+      isStreaming() && last && last.type === "reasoning" ? last.id : undefined;
+    const manual = manualReasoningIds();
+    setOpenReasoningIds((prev) => {
+      const next = new Set(prev);
+      for (const s of segs) {
+        if (s.type !== "reasoning") continue;
+        if (manual.has(s.id)) continue; // 用户操作过的段保持原状
+        if (s.id === activeId) next.add(s.id);
+        else next.delete(s.id);
       }
-    }
+      return next;
+    });
   });
 
   // Drive tool-segment auto-expand/collapse: any tool segment whose status is
@@ -170,9 +275,16 @@ export default function ChatView(props: {
     setExpandedToolIds((prev) => {
       const next = new Set(prev);
       for (const r of running) next.add(r);
-      // Drop completed tools that the user hasn't manually toggled open.
+      // Drop completed tools that the user hasn't manually toggled. Manually
+      // opened results stay expanded even while new deltas keep arriving.
+      const manual = manualToolIds();
       for (const s of msg.segments) {
-        if (s.type === "tool" && s.status !== "running" && !running.includes(s.id)) {
+        if (
+          s.type === "tool" &&
+          s.status !== "running" &&
+          !running.includes(s.id) &&
+          !manual.has(s.id)
+        ) {
           next.delete(s.id);
         }
       }
@@ -197,9 +309,10 @@ export default function ChatView(props: {
 
   async function send() {
     const text = input().trim();
-    if (!text || busy()) return;
+    if (!text || isStreaming()) return;
     setInput("");
     setBusy(true);
+    setStickToBottom(true); // 发送新消息时重置为贴底
     try {
       await props.onSend(text);
     } finally {
@@ -265,25 +378,25 @@ export default function ChatView(props: {
           </div>
         </Show>
       </div>
-      <div class="chat-stream" ref={scrollEl} onScroll={handleScroll}>
+      <div class="chat-stream" ref={scrollEl} onScroll={handleScroll} onWheel={handleWheel}>
         <Show
           when={props.messages.length > 0}
           fallback={<div class="chat-empty">向 LakeMind 提问，开始探索你的数据。</div>}
         >
-          <For each={props.messages}>
+          <Index each={props.messages}>
             {(msg) => (
-              <div class={`chat-msg chat-msg--${msg.role}`}>
+              <div class={`chat-msg chat-msg--${msg().role}`}>
                 <div class="chat-msg__body">
                   {/* Single ordered loop: preserves the real reasoning → tool →
                       … → text transcript instead of grouping by type. */}
-                  <For each={msg.segments}>
+                  <Index each={msg().segments}>
                     {(seg) => {
-                      const rs = () => asReasoning(seg);
-                      const ts = () => asText(seg);
-                      const es = () => asError(seg);
+                      const rs = () => asReasoning(seg());
+                      const ts = () => asText(seg());
+                      const es = () => asError(seg());
                       return (
                         <Switch>
-                          <Match when={seg.type === "error" && es()}>
+                          <Match when={seg().type === "error" && es()}>
                             <div class="chat-terminal-error">
                               <span class="chat-terminal-error__icon">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
@@ -295,9 +408,9 @@ export default function ChatView(props: {
                               <span class="chat-terminal-error__text">{es()!.text}</span>
                             </div>
                           </Match>
-                          <Match when={seg.type === "reasoning"}>
+                          <Match when={seg().type === "reasoning"}>
                             <div class="chat-reasoning">
-                              <div class="chat-reasoning__header" onClick={() => toggleReasoning(seg.id)}>
+                              <div class="chat-reasoning__header" onClick={() => toggleReasoning(seg().id)}>
                                 <span class="chat-reasoning__icon">
                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
                                     <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1 0-3.12 3 3 0 0 1 0-4.88 2.5 2.5 0 0 1 0-3.12A2.5 2.5 0 0 1 9.5 2Z" />
@@ -305,29 +418,33 @@ export default function ChatView(props: {
                                   </svg>
                                 </span>
                                 <span class="chat-reasoning__label">思考过程</span>
-                                 <span class="chat-reasoning__toggle" classList={{ "chat-reasoning__toggle--open": openReasoningIds().has(seg.id) }}>
+                                 <span class="chat-reasoning__toggle" classList={{ "chat-reasoning__toggle--open": openReasoningIds().has(seg().id) }}>
                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 10px; height: 10px; transition: transform 0.15s ease;">
                                      <polyline points="9 18 15 12 9 6"></polyline>
                                    </svg>
                                  </span>
                               </div>
-                              <Show when={openReasoningIds().has(seg.id) && rs()}>
-                                <div class="chat-reasoning__body">{rs()!.text}</div>
+                              <Show when={openReasoningIds().has(seg().id) && rs()}>
+                                <ReasoningBody text={rs()!.text} />
                               </Show>
                             </div>
                           </Match>
-                          <Match when={seg.type === "tool"}>
-                            <ToolSegment
-                              seg={seg}
-                              expanded={expandedToolIds().has(seg.id)}
-                              onToggle={toggleTool}
-                              onOpenInSqlPanel={props.onOpenInSqlPanel}
-                            />
+                          <Match when={seg().type === "tool"}>
+                            <Show when={seg()}>
+                              {(s) => (
+                                <ToolSegment
+                                  seg={s()}
+                                  expanded={expandedToolIds().has(s().id)}
+                                  onToggle={toggleTool}
+                                  onOpenInSqlPanel={props.onOpenInSqlPanel}
+                                />
+                              )}
+                            </Show>
                           </Match>
-                          <Match when={seg.type === "text" && ts()}>
+                          <Match when={seg().type === "text" && ts()}>
                             <div class="chat-msg__text">
                               <Show
-                                when={msg.role === "assistant"}
+                                when={msg().role === "assistant"}
                                 fallback={ts()!.text}
                               >
                                 <MarkdownRenderer content={ts()!.text} />
@@ -337,14 +454,15 @@ export default function ChatView(props: {
                         </Switch>
                       );
                     }}
-                  </For>
+                  </Index>
                 </div>
               </div>
             )}
-          </For>
+          </Index>
+
 
           {/* Busy / streaming indicator — single-line status */}
-          <Show when={busy()}>
+          <Show when={isStreaming()}>
             <div class="chat-msg chat-msg--assistant">
               <div class="chat-msg__body">
                 <div class="chat-agent-status">
@@ -363,9 +481,8 @@ export default function ChatView(props: {
         <button
           class="chat-view__scroll-down"
           onClick={() => {
-            if (scrollEl) {
-              scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: "smooth" });
-            }
+            setStickToBottom(true);
+            smoothStickToBottom();
           }}
           title="回到底部"
         >
@@ -384,7 +501,7 @@ export default function ChatView(props: {
             value={input()}
             onInput={(e) => setInput(e.currentTarget.value)}
             onkeydown={onKeydown}
-            disabled={busy()}
+            disabled={isStreaming()}
             rows={2}
           />
           <div class="chat-composer__toolbar">
@@ -467,9 +584,9 @@ export default function ChatView(props: {
 
               <button
                 class="chat-composer__send-square"
-                disabled={busy() || !input().trim()}
+                disabled={isStreaming() || !input().trim()}
                 onClick={() => void send()}
-                title={busy() ? "运行中" : "发送"}
+                title={isStreaming() ? "运行中" : "发送"}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
                   <line x1="12" y1="19" x2="12" y2="5"></line>
@@ -480,6 +597,71 @@ export default function ChatView(props: {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 思考过程内容区：自带独立的贴底滚动管理。
+ * - 默认贴底，随新文本自动滚动到最新内容。
+ * - 用户向上滚动时停止贴底，可自由翻阅。
+ * - 用户滚回底部时恢复贴底。
+ * - wheel 事件在内层可滚动时阻止冒泡，使内外层滚动互不干扰。
+ */
+function ReasoningBody(props: { text: string }) {
+  let bodyRef: HTMLDivElement | undefined;
+  const [stick, setStick] = createSignal(true);
+  let lastScrollHeight = 0;
+
+  // 文本变化时，若贴底则自动滚到最新内容
+  createEffect(() => {
+    props.text;
+    if (bodyRef && untrack(stick)) {
+      bodyRef.scrollTop = bodyRef.scrollHeight;
+    }
+  });
+
+  const handleScroll = () => {
+    if (!bodyRef) return;
+    const currentScrollHeight = bodyRef.scrollHeight;
+
+    // 若高度改变，说明是内容加载/排版变化，忽略此事件，防止误触取消贴底
+    if (currentScrollHeight !== lastScrollHeight) {
+      lastScrollHeight = currentScrollHeight;
+      return;
+    }
+
+    // 根据滚动后位置自动判断贴底状态：
+    // 只要位于底部附近（包含程序滚动产生的到底），就保持贴底状态；
+    // 向上滑动后偏离底部（diff > 15），则设为不贴底，允许自由翻阅。
+    const diff = bodyRef.scrollHeight - bodyRef.scrollTop - bodyRef.clientHeight;
+    setStick(diff <= 15);
+  };
+
+  const handleWheel = (e: WheelEvent) => {
+    if (!bodyRef) return;
+    const el = bodyRef;
+    if (e.deltaY < 0) {
+      // 向上滚动时，立即取消贴底，无需等待 scroll 事件
+      setStick(false);
+      // 内层还能向上滚 → 阻止冒泡，不影响外层
+      if (el.scrollTop > 0) e.stopPropagation();
+    } else if (e.deltaY > 0) {
+      // 向下滚动，内层还能向下滚 → 阻止冒泡
+      if (el.scrollHeight - el.scrollTop - el.clientHeight > 1) {
+        e.stopPropagation();
+      }
+    }
+  };
+
+  return (
+    <div
+      class="chat-reasoning__body"
+      ref={bodyRef}
+      onScroll={handleScroll}
+      onWheel={handleWheel}
+    >
+      {props.text}
     </div>
   );
 }

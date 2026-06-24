@@ -71,6 +71,10 @@ export default function App() {
   const [availableModels, setAvailableModels] = createSignal<string[]>([]);
   const [selectedModel, setSelectedModel] = createSignal<string>("");
   const [selectedPriority, setSelectedPriority] = createSignal<string>("最高");
+  // 当前正在流式输出的对话任务 id。start_agent_chat 是 fire-and-forget
+  // （tokio::spawn 后立即返回），真正的流式通过 agent-event 异步回来，
+  // 所以用一个独立信号准确跟踪执行状态，供 ChatView 派生 streaming。
+  const [streamingTaskId, setStreamingTaskId] = createSignal<string | null>(null);
 
   async function loadModelsFromSettings() {
     try {
@@ -180,6 +184,11 @@ export default function App() {
           return { ...t, messages };
         }),
       );
+
+      // 流式结束（成功或出错）：清除执行状态，解除输入锁定。
+      if (payload.kind === "done" || payload.kind === "error") {
+        setStreamingTaskId(null);
+      }
     });
 
     try {
@@ -401,6 +410,7 @@ export default function App() {
     await saveChatTaskBackend(id, task.name, updatedMessages);
 
     try {
+      setStreamingTaskId(id);
       const activeModel = task.modelId || selectedModel();
       const historyToSend = task.messages ?? [];
       const historyJson = JSON.stringify(historyToSend);
@@ -414,6 +424,7 @@ export default function App() {
       });
     } catch (err) {
       console.error("Failed to start agent chat:", err);
+      setStreamingTaskId(null);
       const errorMsg: ChatMessage = {
         id: `msg-err-${Date.now()}`,
         role: "assistant",
@@ -472,6 +483,7 @@ export default function App() {
 
     try {
       const historyJson = JSON.stringify([]);
+      setStreamingTaskId(id);
       await invoke("start_agent_chat", {
         taskId: id,
         modelId: targetModel,
@@ -481,6 +493,7 @@ export default function App() {
       });
     } catch (err) {
       console.error("Failed to start agent chat:", err);
+      setStreamingTaskId(null);
       const errorMsg: ChatMessage = {
         id: `msg-err-${Date.now()}`,
         role: "assistant",
@@ -536,6 +549,7 @@ export default function App() {
 
     try {
       const historyJson = JSON.stringify([]);
+      setStreamingTaskId(id);
       await invoke("start_agent_chat", {
         taskId: id,
         modelId: targetModel,
@@ -545,6 +559,7 @@ export default function App() {
       });
     } catch (err) {
       console.error("Failed to start agent chat:", err);
+      setStreamingTaskId(null);
       const errorMsg: ChatMessage = {
         id: `msg-err-${Date.now()}`,
         role: "assistant",
@@ -1042,36 +1057,41 @@ export default function App() {
               >
                 <Switch>
                   <Match when={(activeTask()?.kind ?? "sql") === "chat"}>
-                    <ChatView
-                      messages={activeTask()?.messages ?? []}
-                      workspace={currentWorkspace().name}
-                      taskName={activeTask()?.name ?? ""}
-                      onSend={sendChatMessage}
-                      onOpenInSqlPanel={openInSqlPanel}
-                      onDelete={() => deleteTask(activeTaskId()!)}
-                      availableModels={availableModels()}
-                      selectedModel={activeTask()?.modelId || selectedModel()}
-                      onSelectModel={(model) => {
-                        const activeId = activeTaskId();
-                        if (activeId) {
-                          setTasks((prev) =>
-                            prev.map((t) =>
-                              t.id === activeId ? { ...t, modelId: model } : t
-                            )
-                          );
-                          setTimeout(() => {
-                            const updated = tasks().find((t) => t.id === activeId);
-                            if (updated) {
-                              void saveChatTaskBackend(activeId, updated.name, updated.messages || []);
+                    <Show when={activeTaskId()}>
+                      {(id) => (
+                        <ChatView
+                          messages={activeTask()?.messages ?? []}
+                          workspace={currentWorkspace().name}
+                          taskName={activeTask()?.name ?? ""}
+                          streaming={streamingTaskId() !== null && streamingTaskId() === id()}
+                          onSend={sendChatMessage}
+                          onOpenInSqlPanel={openInSqlPanel}
+                          onDelete={() => deleteTask(id())}
+                          availableModels={availableModels()}
+                          selectedModel={activeTask()?.modelId || selectedModel()}
+                          onSelectModel={(model) => {
+                            const activeId = id();
+                            if (activeId) {
+                              setTasks((prev) =>
+                                prev.map((t) =>
+                                  t.id === activeId ? { ...t, modelId: model } : t
+                                )
+                              );
+                              setTimeout(() => {
+                                const updated = tasks().find((t) => t.id === activeId);
+                                if (updated) {
+                                  void saveChatTaskBackend(activeId, updated.name, updated.messages || []);
+                                }
+                              }, 0);
                             }
-                          }, 0);
-                        }
-                        setSelectedModel(model);
-                        localStorage.setItem("default_model", model);
-                      }}
-                      selectedPriority={selectedPriority()}
-                      onSelectPriority={setSelectedPriority}
-                    />
+                            setSelectedModel(model);
+                            localStorage.setItem("default_model", model);
+                          }}
+                          selectedPriority={selectedPriority()}
+                          onSelectPriority={setSelectedPriority}
+                        />
+                      )}
+                    </Show>
                   </Match>
                   <Match when={(activeTask()?.kind ?? "sql") === "sql"}>
                     <div class="sql-view">
