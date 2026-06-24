@@ -56,6 +56,20 @@ export default function ChatView(props: {
   const [input, setInput] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [showConfirm, setShowConfirm] = createSignal(false);
+  const [copiedMessageId, setCopiedMessageId] = createSignal<string | null>(null);
+
+  const handleCopyMessage = async (msg: ChatMessage) => {
+    const textToCopy = getMessageCopyText(msg);
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setCopiedMessageId(msg.id);
+      setTimeout(() => {
+        if (copiedMessageId() === msg.id) {
+          setCopiedMessageId(null);
+        }
+      }, 1500);
+    } catch {}
+  };
 
   // 流式输出状态：发送瞬间的本地 busy 与父级 streaming 合成，覆盖
   // start_agent_chat 立即返回但流式仍在进行的窗口期。
@@ -516,6 +530,28 @@ export default function ChatView(props: {
                       );
                     }}
                   </Index>
+                  <div class="chat-msg__actions">
+                    <span class="chat-msg__time">{formatTime(msg().ts)}</span>
+                    <button
+                      class="chat-msg__copy-btn"
+                      title={copiedMessageId() === msg().id ? "已复制" : "复制"}
+                      onClick={() => handleCopyMessage(msg())}
+                    >
+                      <Show
+                        when={copiedMessageId() === msg().id}
+                        fallback={
+                          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                          </svg>
+                        }
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green, #10b981)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                          <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                      </Show>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -727,4 +763,29 @@ function ReasoningBody(props: { text: string }) {
 function fmtMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  const h = d.getHours().toString().padStart(2, '0');
+  const m = d.getMinutes().toString().padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+function getMessageCopyText(msg: ChatMessage): string {
+  const texts = msg.segments
+    .filter((s) => s.type === "text")
+    .map((s) => (s as any).text);
+  if (texts.length > 0) {
+    return texts.join("\n");
+  }
+  return msg.segments
+    .map((s) => {
+      if (s.type === "text" || s.type === "reasoning" || s.type === "error") {
+        return (s as any).text;
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
 }

@@ -3568,6 +3568,48 @@ body.is-resizing-column * {
   gap: 8px;
 }
 
+.chat-msg__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease-in-out;
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+
+.chat-msg:hover .chat-msg__actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.chat-msg__time {
+  font-size: 11px;
+  color: var(--text-dim);
+  user-select: none;
+}
+
+.chat-msg__copy-btn {
+  background: transparent;
+  border: none;
+  padding: 4px;
+  margin: -4px;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.chat-msg__copy-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-hover);
+}
+
+
 /* --- Markdown 渲染样式（参考截图中的代码块、表格、行内代码等） --- */
 
 /* 消息内 Markdown 容器 */
