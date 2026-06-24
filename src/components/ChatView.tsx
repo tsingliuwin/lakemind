@@ -14,15 +14,8 @@ const asError = (s: Segment): ErrorSeg | null => (s.type === "error" ? s : null)
  * 对话模式主区：消息流（上）+ 段内嵌 + 底部常驻输入框。
  *
  * 消息按 segment 顺序渲染：reasoning（折叠）→ tool（混合折叠）→ text（Markdown）。
- * 进度指示为单行「⏱ 已工作 N 秒 · 正在执行 SQL…」，由当前 running tool 派生。
+ * 底部进度指示为单行「⏱ 已工作 N 秒」。
  */
-
-const TOOL_LABELS: Record<string, string> = {
-  list_tables: "探索数据库",
-  describe_table: "分析表结构",
-  execute_query: "执行 SQL",
-  sample_data: "采样数据",
-};
 
 export default function ChatView(props: {
   taskId: string;
@@ -89,9 +82,6 @@ export default function ChatView(props: {
   // 若在此期间已完成则取消展开，避免快速执行时「展开又收起」的闪烁。
   const TOOL_EXPAND_DELAY_MS = 200;
   const pendingToolExpand = new Map<string, ReturnType<typeof setTimeout>>();
-  // 已运行 ≥ TOOL_EXPAND_DELAY_MS 的工具集合（"可见运行中"）。展开与底部「正在…」
-  // 阶段文字都以此为据，使快速执行的工具既不展开、也不闪现阶段文字。
-  const [visiblyRunning, setVisiblyRunning] = createSignal<Set<string>>(new Set());
   onCleanup(() => {
     pendingToolExpand.forEach((h) => clearTimeout(h));
     pendingToolExpand.clear();
@@ -253,7 +243,6 @@ export default function ChatView(props: {
     prevTaskId = currentId;
     setOpenReasoningIds(new Set<string>());
     setExpandedToolIds(new Set<string>());
-    setVisiblyRunning(new Set<string>());
     pendingToolExpand.forEach((h) => clearTimeout(h));
     pendingToolExpand.clear();
     setManualReasoningIds(new Set<string>());
@@ -333,11 +322,6 @@ export default function ChatView(props: {
         r,
         setTimeout(() => {
           pendingToolExpand.delete(r);
-          setVisiblyRunning((prev) => {
-            const n = new Set(prev);
-            n.add(r);
-            return n;
-          });
           setExpandedToolIds((prev) => {
             if (prev.has(r)) return prev;
             const next = new Set(prev);
@@ -349,12 +333,10 @@ export default function ChatView(props: {
     }
 
     // 已完成（不再运行）的工具：取消其等待中的展开（快速执行 → 不展开），
-    // 并按原策略从展开集中移除（用户手动操作过的除外），同时退出「可见运行中」。
+    // 并按原策略从展开集中移除（用户手动操作过的除外）。
     const manual = manualToolIds();
     const expanded = untrack(expandedToolIds);
-    const visible = untrack(visiblyRunning);
     const toCollapse: string[] = [];
-    const toHide: string[] = [];
     for (const s of msg.segments) {
       if (s.type !== "tool" || running.has(s.id)) continue;
       const handle = pendingToolExpand.get(s.id);
@@ -363,7 +345,6 @@ export default function ChatView(props: {
         pendingToolExpand.delete(s.id);
       }
       if (!manual.has(s.id) && expanded.has(s.id)) toCollapse.push(s.id);
-      if (visible.has(s.id)) toHide.push(s.id);
     }
     if (toCollapse.length > 0) {
       setExpandedToolIds((prev) => {
@@ -372,34 +353,7 @@ export default function ChatView(props: {
         return next;
       });
     }
-    if (toHide.length > 0) {
-      setVisiblyRunning((prev) => {
-        const next = new Set(prev);
-        for (const c of toHide) next.delete(c);
-        return next;
-      });
-    }
   });
-
-  // Current single-line action label derived from the *visibly* running tool —
-  // i.e. one that has run ≥ TOOL_EXPAND_DELAY_MS, so fast tools don't flash a
-  // "正在执行 SQL…" label that vanishes an instant later.
-  function currentAction(): string | undefined {
-    const id = lastAssistantId();
-    if (!id) return undefined;
-    const msg = props.messages.find((m) => m.id === id);
-    if (!msg) return undefined;
-    const visible = visiblyRunning();
-    const tools = msg.segments.filter(
-      (s): s is Extract<Segment, { type: "tool" }> =>
-        s.type === "tool" && s.status === "running" && visible.has(s.id),
-    );
-    if (tools.length > 0) {
-      const last = tools[tools.length - 1];
-      return `正在${TOOL_LABELS[last.tool] ?? "执行工具"}…`;
-    }
-    return undefined;
-  }
 
   async function send() {
     const text = input().trim();
@@ -574,9 +528,6 @@ export default function ChatView(props: {
               <div class="chat-msg__body">
                 <div class="chat-agent-status">
                   <span class="agent-status__timer">⏱ 已工作 <span id="chat-bottom-timer">{Math.floor((now() - streamStart) / 1000)}</span> 秒</span>
-                  <Show when={currentAction()}>
-                    <span class="agent-status__phase">{currentAction()}</span>
-                  </Show>
                 </div>
               </div>
             </div>
