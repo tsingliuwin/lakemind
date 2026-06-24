@@ -809,15 +809,12 @@ select:hover:not(:disabled) {
 .tree-leaf.selected {
   background: var(--bg-active);
   color: #fff;
-  border-left: 2px solid var(--accent-blue);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  padding-left: 6px;
 }
 .tree-section-header {
   display: flex;
   align-items: center;
   cursor: pointer;
-  padding: 5px 8px 5px 18px;
+  padding: 5px 8px;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-dim);
@@ -839,6 +836,7 @@ select:hover:not(:disabled) {
   text-align: center;
   color: var(--text-dim);
   transition: transform 0.1s ease;
+  margin-left: auto;
 }
 .tree-section-header:hover .tree-section-arrow {
   color: var(--text-secondary);
@@ -868,12 +866,19 @@ select:hover:not(:disabled) {
   font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
-  padding: 1px 4px;
+  padding: 0 4px;
   border-radius: 3px;
   background: var(--bg-elevated);
   color: var(--text-secondary);
   flex-shrink: 0;
   letter-spacing: 0.2px;
+  min-width: 36px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  text-align: center;
 }
 .kind-badge[data-kind="parquet"] {
   color: var(--type-str);
@@ -4452,8 +4457,13 @@ body.is-resizing-column * {
 
 /* --- task kind 图标（LeftNav） --- */
 .task-kind-icon {
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
+  color: inherit;
 }
 
 /* --- Added for interaction fixes --- */

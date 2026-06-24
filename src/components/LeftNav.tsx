@@ -66,6 +66,9 @@ export default function LeftNav(props: {
   // backing file in the Files tree, and clicking a file highlights its table.
   const [highlightFile, setHighlightFile] = createSignal<string | null>(null);
   const [highlightTable, setHighlightTable] = createSignal<string | null>(null);
+  // The file the user actively clicked — shown with the same dark "selected"
+  // treatment as task/data leaves (distinct from the soft cross-link highlight).
+  const [selectedFile, setSelectedFile] = createSignal<string | null>(null);
 
   const fileToTable = createMemo(() => {
     const m = new Map<string, string>();
@@ -82,6 +85,7 @@ export default function LeftNav(props: {
   };
 
   const handleFileClick = (item: FileItem) => {
+    setSelectedFile(item.path);
     setHighlightFile(item.path);
     setHighlightTable(fileToTable().get(item.path) ?? null);
     props.onImportFile?.(item.path);
@@ -154,24 +158,30 @@ export default function LeftNav(props: {
       : contents;
 
     return (
-      <div class="fe-tree-container" style={{ "padding-left": `${depth > 0 ? 12 : 28}px` }}>
+      <div class="fe-tree-container" style={{ "padding-left": `${depth > 0 ? 12 : 0}px` }}>
         <For each={filteredContents}>
           {(item) => {
             const isExpanded = !!expandedPaths()[item.path];
             return (
               <div class="fe-tree-node">
                 <div
-                  class="fe-node-row"
-                  classList={{ "is-dir": item.is_dir }}
+                  class="tree-leaf fe-node-row"
+                  classList={{
+                    "is-dir": item.is_dir,
+                    selected: selectedFile() === item.path,
+                    "no-active-bar": true,
+                  }}
                   style={{
-                     display: "flex",
-                     "align-items": "center",
-                     padding: "4px 8px",
-                     "border-radius": "4px",
-                     cursor: "pointer",
-                     transition: "background 0.1s",
-                     background: highlightFile() === item.path ? "rgba(80, 160, 255, 0.14)" : undefined,
-                     "box-shadow": highlightFile() === item.path ? "inset 2px 0 0 var(--accent-blue, #50a0ff)" : undefined,
+                    display: "flex",
+                    "align-items": "center",
+                    padding: "4px 8px",
+                    "border-radius": "var(--radius-sm)",
+                    cursor: "pointer",
+                    transition: "background 0.12s ease",
+                    background:
+                      highlightFile() === item.path && selectedFile() !== item.path
+                        ? "rgba(80, 160, 255, 0.14)"
+                        : undefined,
                   }}
                   onClick={() => {
                     if (item.is_dir) {
@@ -184,16 +194,16 @@ export default function LeftNav(props: {
                   <Show
                     when={item.is_dir}
                     fallback={
-                      <span class="kind-badge" data-kind={fileKind(item.name)} style="margin-right: 6px;">
+                      <span class="kind-badge" data-kind={fileKind(item.name)}>
                         {fileKind(item.name)}
                       </span>
                     }
                   >
-                    <span class="fe-node-icon" style="margin-right: 6px; font-size: 11px;">
+                    <span class="fe-node-icon" style="font-size: 11px;">
                       {isExpanded ? "▾ 📁" : "▸ 📁"}
                     </span>
                   </Show>
-                  <span class="fe-node-name" style="flex: 1; font-size: 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary);">
+                  <span class="fe-node-name" style="flex: 1; font-size: 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                     {item.name}
                   </span>
                   <Show when={item.is_modified}>
@@ -432,7 +442,6 @@ export default function LeftNav(props: {
                       setTasksSectionExpanded(!tasksSectionExpanded());
                     }}
                   >
-                    <span class="tree-section-arrow">{tasksSectionExpanded() ? "▼" : "▶"}</span>
                     <span class="tree-section-icon">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
                         <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
@@ -445,6 +454,7 @@ export default function LeftNav(props: {
                     </span>
                     <span class="tree-section-label">任务</span>
                     <span class="leaf-count">{(props.tasks ?? []).length}</span>
+                    <span class="tree-section-arrow">{tasksSectionExpanded() ? "▼" : "▶"}</span>
                   </div>
                   <Show when={tasksSectionExpanded()}>
                     <div class="tree-section-content" style="display: flex; flex-direction: column; gap: 1px;">
@@ -454,19 +464,26 @@ export default function LeftNav(props: {
                             class="tree-leaf task-leaf"
                             classList={{ selected: props.activeTaskId === task.id }}
                             onClick={() => props.onSelectTask?.(task.id)}
-                            style="padding-left: 28px; display: flex; align-items: center; gap: 6px; position: relative;"
+                            style="padding-left: 8px; display: flex; align-items: center; gap: 8px; position: relative;"
                           >
-                            <span class="task-kind-icon" title={(task.kind ?? "sql") === "chat" ? "对话" : "SQL 查询"} style="display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px;">
+                            <span
+                              class="task-kind-icon"
+                              classList={{
+                                "chat-icon": (task.kind ?? "sql") === "chat",
+                                "sql-icon": (task.kind ?? "sql") !== "chat",
+                              }}
+                              title={(task.kind ?? "sql") === "chat" ? "对话" : "SQL 查询"}
+                            >
                               <Show
                                 when={(task.kind ?? "sql") === "chat"}
                                 fallback={
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px; display: block;">
                                     <polyline points="4 17 10 11 4 5"></polyline>
                                     <line x1="12" y1="19" x2="20" y2="19"></line>
                                   </svg>
                                 }
                               >
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px; display: block;">
                                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                                 </svg>
                               </Show>
@@ -479,7 +496,7 @@ export default function LeftNav(props: {
                         )}
                       </For>
                       <Show when={(props.tasks ?? []).length === 0}>
-                        <div class="empty-section-item" style="padding: 4px 8px 4px 28px; color: var(--text-dim); font-size: 11px; font-style: italic; text-align: left;">
+                        <div class="empty-section-item" style="padding: 4px 8px 4px 8px; color: var(--text-dim); font-size: 11px; font-style: italic; text-align: left;">
                           暂无任务
                         </div>
                       </Show>
@@ -494,19 +511,19 @@ export default function LeftNav(props: {
                       setFilesSectionExpanded(!filesSectionExpanded());
                     }}
                   >
-                    <span class="tree-section-arrow">{filesSectionExpanded() ? "▼" : "▶"}</span>
                     <span class="tree-section-icon">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
                         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                       </svg>
                     </span>
                     <span class="tree-section-label">文件</span>
+                    <span class="tree-section-arrow">{filesSectionExpanded() ? "▼" : "▶"}</span>
                   </div>
                   <Show when={filesSectionExpanded()}>
                     <div class="tree-section-content" style="display: flex; flex-direction: column; gap: 1px;">
                       {renderFileTree(ws.path)}
                       <Show when={!(directoryContents()[ws.path]?.length > 0)}>
-                        <div class="empty-section-item" style="padding: 4px 8px 4px 28px; color: var(--text-dim); font-size: 11px; font-style: italic; text-align: left;">
+                        <div class="empty-section-item" style="padding: 4px 8px 4px 8px; color: var(--text-dim); font-size: 11px; font-style: italic; text-align: left;">
                           暂无文件
                         </div>
                       </Show>
@@ -521,7 +538,6 @@ export default function LeftNav(props: {
                       setDataSectionExpanded(!dataSectionExpanded());
                     }}
                   >
-                    <span class="tree-section-arrow">{dataSectionExpanded() ? "▼" : "▶"}</span>
                     <span class="tree-section-icon">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
                         <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
@@ -531,12 +547,13 @@ export default function LeftNav(props: {
                     </span>
                     <span class="tree-section-label">数据</span>
                     <span class="leaf-count">{props.sources.length}</span>
+                    <span class="tree-section-arrow">{dataSectionExpanded() ? "▼" : "▶"}</span>
                   </div>
                   <Show when={dataSectionExpanded()}>
                     <div class="tree-section-content" style="display: flex; flex-direction: column; gap: 1px;">
                       <For each={groups()}>
                         {(group) => (
-                          <div class="tree-subgroup" style="margin-left: 28px;">
+                          <div class="tree-subgroup" style={{ "margin-left": groups().length > 1 ? "12px" : "0" }}>
                             <Show when={groups().length > 1}>
                               <div class="tree-group-label" title={group[0]} style="display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 0;">
                                 <span style="display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim);">
@@ -560,10 +577,6 @@ export default function LeftNav(props: {
                                     background:
                                       highlightTable() === t.name && props.selected !== t.name
                                         ? "rgba(80, 160, 255, 0.12)"
-                                        : undefined,
-                                    "box-shadow":
-                                      highlightTable() === t.name && props.selected !== t.name
-                                        ? "inset 2px 0 0 var(--accent-blue, #50a0ff)"
                                         : undefined,
                                   }}
                                 >
@@ -590,7 +603,7 @@ export default function LeftNav(props: {
                         )}
                       </For>
                       <Show when={props.sources.length === 0}>
-                        <div class="empty-section-item" style="padding: 4px 8px 4px 28px; color: var(--text-dim); font-size: 11px; font-style: italic; text-align: left;">
+                        <div class="empty-section-item" style="padding: 4px 8px 4px 8px; color: var(--text-dim); font-size: 11px; font-style: italic; text-align: left;">
                           暂无数据
                         </div>
                       </Show>
