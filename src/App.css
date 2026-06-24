@@ -32,6 +32,10 @@
   --accent-red-bg: #2d1616;
   --accent-violet: #8b5cf6;  /* Special data type badges */
 
+  /* --- CodeMirror selection highlight (must stay readable over --bg-surface) --- */
+  --cm-selection-bg: rgba(59, 130, 246, 0.22);         /* unfocused, still visible */
+  --cm-selection-bg-focused: rgba(59, 130, 246, 0.34); /* focused, more saturated */
+
   /* --- Column Type Family Badges (DuckDB) --- */
   --type-int: #3b82f6;       /* Blue */
   --type-float: #8b5cf6;     /* Purple */
@@ -99,6 +103,10 @@
   --accent-amber-bg: #fef3c7;
   --accent-red: #dc2626;
   --accent-red-bg: #fee2e2;
+
+  /* --- CodeMirror selection highlight (readable on white) --- */
+  --cm-selection-bg: rgba(37, 99, 235, 0.16);
+  --cm-selection-bg-focused: rgba(37, 99, 235, 0.27);
 }
 
 * {

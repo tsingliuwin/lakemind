@@ -128,6 +128,17 @@ export default function SqlEditor(props: {
           "&": { backgroundColor: "var(--bg-surface)" },
           ".cm-gutters": { backgroundColor: "var(--bg-surface)", border: "none" },
           "&.cm-focused": { outline: "none" },
+          // 选区高亮：聚焦/失焦都保持清晰可辨。oneDark 默认选区色在
+          // 自定义 --bg-surface 上对比不足，这里用主题变量显式覆盖。
+          ".cm-selectionBackground": {
+            backgroundColor: "var(--cm-selection-bg) !important",
+          },
+          "&.cm-focused .cm-selectionBackground": {
+            backgroundColor: "var(--cm-selection-bg-focused) !important",
+          },
+          "::selection": {
+            backgroundColor: "var(--cm-selection-bg-focused) !important",
+          },
         }),
       ],
     });
