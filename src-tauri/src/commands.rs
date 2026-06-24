@@ -12,11 +12,13 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use tauri::{State, Emitter};
+use tokio::sync::Mutex;
 
 use crate::db::{self, SourceRecord};
-use crate::duckdb::{execute, register, scan, schema};
+use crate::duckdb::{execute, naming, register, scan, schema};
 use crate::error::{AppError, AppResult};
 use crate::model::{SourceKind, SourceTable, SqlResult, StorageKind};
 use crate::state::AppState;
@@ -142,53 +144,17 @@ pub async fn import_file_to_workspace(
     // future optimization — see `decide_storage`.)
     let target_path = copy_into_workspace_if_needed(&src_path, &ws_dir)?;
 
-    let conn = state.conn.clone();
-    let sources = state.sources.clone();
-    let ws_path_str = workspace.clone();
-
-    let join = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<SourceTable>> {
-        let entries = scan::scan_path(&target_path, false);
-
-        let guard = conn.blocking_lock();
-        load_extensions_if_needed(&guard, &entries);
-
-        let sqlite = db::get_db_conn()?;
-        let now = now_ms();
-        let mut created = Vec::new();
-        for e in &entries {
-            let storage = decide_storage(e);
-            // For TABLE storage we materialize from a workspace-local copy (already
-            // produced above for the whole import); for VIEW we read in place.
-            let work = if storage == StorageKind::Table {
-                materialize_into_workspace(e, &ws_dir)?
-            } else {
-                e.clone()
-            };
-            match register::register(&guard, &work, storage) {
-                Ok(t) => {
-                    let rec = source_record_from(&t, now);
-                    let _ = db::upsert_source(&sqlite, &ws_path_str, &rec);
-                    created.push(t);
-                }
-                Err(err) => eprintln!("skip source {}: {err}", e.label),
-            }
-        }
-        drop(guard);
-
-        let mut registry = sources.blocking_lock();
-        for t in &created {
-            registry.retain(|existing| existing.name != t.name);
-            registry.push(t.clone());
-        }
-        Ok(created)
-    })
-    .await;
-
-    match join {
-        Ok(Ok(created)) => Ok(created),
-        Ok(Err(e)) => Err(e.to_string()),
-        Err(join_err) => Err(format!("task join error: {join_err}")),
-    }
+    // Scan the imported target (blocking), then run the shared sync (naming +
+    // register/rename). The lake for this workspace is assumed already attached
+    // (it is attached on workspace load via register_workspace_sources).
+    let target_for_scan = target_path.clone();
+    let entries = match tauri::async_runtime::spawn_blocking(move || scan::scan_path(&target_for_scan, false)).await {
+        Ok(v) => v,
+        Err(e) => return Err(format!("scan task join error: {e}")),
+    };
+    sync_entries(state.conn.clone(), state.sources.clone(), workspace, ws_dir, entries)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Switch to a workspace (re-attach its DuckLake) and incrementally sync sources
@@ -207,90 +173,190 @@ pub async fn register_workspace_sources_inner(
     state: &AppState,
 ) -> Result<Vec<SourceTable>, String> {
     let ws_dir = resolve_workspace_dir(&workspace_path)?;
-    let ws_dir_for_scan = ws_dir.clone();
-    let ws_path_for_sync = workspace_path.clone();
 
-    // 1. Rebuild the session connection and attach this workspace's DuckLake.
+    // Rebuild the session connection and attach this workspace's DuckLake.
     switch_workspace_lake(state, workspace_path.clone(), ws_dir.clone()).await?;
 
-    let conn = state.conn.clone();
-    let sources_cache = state.sources.clone();
+    // Scan the workspace dir for the files currently present (blocking).
+    let ws_dir_for_scan = ws_dir.clone();
+    let entries = match tauri::async_runtime::spawn_blocking(move || scan::scan_path(&ws_dir_for_scan, true)).await {
+        Ok(v) => v,
+        Err(e) => return Err(format!("scan task join error: {e}")),
+    };
 
+    sync_entries(state.conn.clone(), state.sources.clone(), workspace_path, ws_dir, entries)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Synchronize a set of scan entries against the persisted mappings: pick a
+/// good ASCII table name for each (LLM → pinyin fallback), rename the lake
+/// object when the name changed (matched by `scan_path`, so a name change does
+/// NOT re-materialize), register brand-new sources, drop orphans, and refresh
+/// the in-memory cache. Shared by workspace sync and single-file import.
+async fn sync_entries(
+    conn: Arc<Mutex<duckdb::Connection>>,
+    sources_cache: Arc<Mutex<Vec<SourceTable>>>,
+    ws_path: String,
+    ws_dir: PathBuf,
+    entries: Vec<scan::ScanEntry>,
+) -> AppResult<Vec<SourceTable>> {
+    use std::collections::{HashMap, HashSet};
+
+    // 1. Load existing mappings, indexed by scan_path (stable file identity).
+    let sqlite = db::get_db_conn()?;
+    let existing = db::list_sources(&sqlite, &ws_path)?;
+    let existing_by_scan: HashMap<String, SourceRecord> =
+        existing.iter().map(|r| (r.scan_path.clone(), r.clone())).collect();
+    let entry_scan_paths: HashSet<String> = entries.iter().map(|e| e.scan_path.clone()).collect();
+    drop(sqlite);
+
+    // 2. Decide each entry's target view name + name_source.
+    //    - matched record already settled ("llm") → reuse its name, no LLM call.
+    //    - otherwise (new / "legacy" / "fallback") → choose_name (LLM → pinyin),
+    //      concurrent with per-call timeout.
+    let mut decisions: Vec<(String, &'static str)> = vec![(String::new(), "fallback"); entries.len()];
+    let need_choose: Vec<(usize, String)> = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(i, e)| {
+            if let Some(rec) = existing_by_scan.get(&e.scan_path) {
+                if rec.name_source == "llm" {
+                    decisions[i] = (rec.table_name.clone(), "llm");
+                    return None;
+                }
+            }
+            Some((i, e.label.clone()))
+        })
+        .collect();
+    let chosen = futures_util::future::join_all(
+        need_choose.iter().map(|(i, label)| async move {
+            let (name, src) = naming::choose_name(label).await;
+            (*i, name, src)
+        }),
+    )
+    .await;
+    for (i, name, src) in chosen {
+        decisions[i] = (name, src);
+    }
+    // Safety net: any entry that still has no name (shouldn't happen) → pinyin.
+    for (i, e) in entries.iter().enumerate() {
+        if decisions[i].0.is_empty() {
+            decisions[i] = (naming::view_name(&e.label), "fallback");
+        }
+    }
+
+    // 3. Blocking: dedup names, rename/create, hydrate, drop orphans.
     let join = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<SourceTable>> {
-        // 2. Scan the workspace dir for the files currently present.
-        let entries = scan::scan_path(&ws_dir_for_scan, true);
-
-        let sqlite = db::get_db_conn()?;
-        let existing = db::list_sources(&sqlite, &ws_path_for_sync)?;
-        let existing_by_name: std::collections::HashMap<String, &SourceRecord> =
-            existing.iter().map(|r| (r.table_name.clone(), r)).collect();
-        let entry_names: HashSet<&str> = entries.iter().map(|e| e.view_name.as_str()).collect();
         let now = now_ms();
+        let sqlite = db::get_db_conn()?;
+
+        // Dedup target names within this batch (append _2, _3, …).
+        let mut used: HashSet<String> = HashSet::new();
+        let final_names: Vec<String> = decisions
+            .iter()
+            .map(|(base, _)| {
+                let mut name = base.clone();
+                let mut suffix = 2;
+                while used.contains(&name) {
+                    name = format!("{}_{}", base, suffix);
+                    suffix += 1;
+                }
+                used.insert(name.clone());
+                name
+            })
+            .collect();
 
         let guard = conn.blocking_lock();
         load_extensions_if_needed(&guard, &entries);
 
         let mut result: Vec<SourceTable> = Vec::new();
 
-        // 3. Register new sources (present on disk, not yet mapped).
-        for e in &entries {
-            if existing_by_name.contains_key(&e.view_name) {
-                continue;
-            }
-            let storage = decide_storage(e);
-            let work = if storage == StorageKind::Table {
-                materialize_into_workspace(e, &ws_dir_for_scan)?
-            } else {
-                e.clone()
-            };
-            match register::register(&guard, &work, storage) {
-                Ok(t) => {
-                    let rec = source_record_from(&t, now);
-                    let _ = db::upsert_source(&sqlite, &ws_path_for_sync, &rec);
-                    result.push(t);
-                }
-                Err(err) => eprintln!("register {} failed: {err}", e.label),
-            }
-        }
+        // Present sources: rename to the target name if it changed, else hydrate
+        // (rebuild the lake object if it vanished).
+        for (i, e) in entries.iter().enumerate() {
+            let target = &final_names[i];
+            let src = decisions[i].1;
+            let matched = existing_by_scan.get(&e.scan_path).cloned();
 
-        // 4. Drop orphan sources (mapped, but file no longer present).
-        for rec in &existing {
-            if !entry_names.contains(rec.table_name.as_str()) {
-                drop_lake_object(&guard, &rec.table_name);
-                let _ = db::delete_source_by_table(&sqlite, &ws_path_for_sync, &rec.table_name);
-            }
-        }
-
-        // 5. For sources still present, verify the lake object exists; rebuild if
-        //    it vanished (e.g. lake file was deleted), otherwise hydrate from the
-        //    mapping record + live metadata.
-        for rec in &existing {
-            if !entry_names.contains(rec.table_name.as_str()) {
-                continue;
-            }
-            if !table_exists_in_lake(&guard, &rec.table_name) {
-                if let Some(e) = entries.iter().find(|x| x.view_name == rec.table_name) {
-                    let storage = StorageKind::from_db_str(&rec.storage);
-                    let work = if storage == StorageKind::Table {
-                        materialize_into_workspace(e, &ws_dir_for_scan)?
+            if let Some(rec) = matched {
+                let storage = StorageKind::from_db_str(&rec.storage);
+                let needs_rename = rec.table_name != *target;
+                if table_exists_in_lake(&guard, &rec.table_name) {
+                    if needs_rename {
+                        // Rename preserves the data; no re-materialization.
+                        if let Err(err) = rename_lake_object(&guard, &rec.table_name, target, storage) {
+                            eprintln!("rename {} -> {} failed: {err}", rec.table_name, target);
+                            if let Ok(t) = build_source_table_from_record(&guard, &rec) {
+                                result.push(t);
+                            }
+                            continue;
+                        }
+                    }
+                    // Update the record (name + label + name_source) and hydrate.
+                    let mut updated = rec.clone();
+                    updated.table_name = target.clone();
+                    updated.label = e.label.clone();
+                    updated.name_source = src.to_string();
+                    let _ = db::upsert_source(&sqlite, &ws_path, &updated);
+                    // upsert is keyed by (ws, table_name); if renamed, the old row
+                    // under the old name is now stale — drop it.
+                    if needs_rename {
+                        let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
+                    }
+                    if let Ok(t) = build_source_table_from_record(&guard, &updated) {
+                        result.push(t);
+                    }
+                } else {
+                    // Lake object vanished — rebuild under the target name.
+                    let mut work = if storage == StorageKind::Table {
+                        materialize_into_workspace(e, &ws_dir)?
                     } else {
                         e.clone()
                     };
-                    if let Ok(t) = register::register(&guard, &work, storage) {
-                        let new_rec = source_record_from(&t, rec.created_at);
-                        let _ = db::upsert_source(&sqlite, &ws_path_for_sync, &new_rec);
-                        result.push(t);
-                        continue;
+                    work.view_name = target.clone();
+                    drop_lake_object(&guard, &rec.table_name);
+                    match register::register(&guard, &work, storage) {
+                        Ok(t) => {
+                            let new_rec = source_record_from(&t, rec.created_at, src);
+                            let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
+                            let _ = db::upsert_source(&sqlite, &ws_path, &new_rec);
+                            result.push(t);
+                        }
+                        Err(err) => eprintln!("rebuild {} failed: {err}", e.label),
                     }
                 }
-            }
-            if let Ok(t) = build_source_table_from_record(&guard, rec) {
-                result.push(t);
+            } else {
+                // New source: register under the target name.
+                let storage = decide_storage(e);
+                let mut work = if storage == StorageKind::Table {
+                    materialize_into_workspace(e, &ws_dir)?
+                } else {
+                    e.clone()
+                };
+                work.view_name = target.clone();
+                match register::register(&guard, &work, storage) {
+                    Ok(t) => {
+                        let rec = source_record_from(&t, now, src);
+                        let _ = db::upsert_source(&sqlite, &ws_path, &rec);
+                        result.push(t);
+                    }
+                    Err(err) => eprintln!("register {} failed: {err}", e.label),
+                }
             }
         }
+
+        // Orphans: mapped but no longer on disk.
+        for rec in &existing {
+            if !entry_scan_paths.contains(&rec.scan_path) {
+                drop_lake_object(&guard, &rec.table_name);
+                let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
+            }
+        }
+
         drop(guard);
 
-        // 6. Refresh the in-memory cache.
+        // 4. Refresh the in-memory cache.
         let mut cache = sources_cache.blocking_lock();
         cache.clear();
         cache.extend(result.iter().cloned());
@@ -299,9 +365,8 @@ pub async fn register_workspace_sources_inner(
     .await;
 
     match join {
-        Ok(Ok(v)) => Ok(v),
-        Ok(Err(e)) => Err(e.to_string()),
-        Err(e) => Err(format!("task join error: {e}")),
+        Ok(v) => v,
+        Err(e) => Err(AppError::new(format!("task join error: {e}"))),
     }
 }
 
@@ -725,6 +790,25 @@ fn drop_lake_object(conn: &duckdb::Connection, name: &str) {
     let _ = conn.execute(&format!("DROP TABLE IF EXISTS \"{}\";", name), []);
 }
 
+/// Rename a lake table/view. `ALTER TABLE` for materialized tables, `ALTER VIEW`
+/// for zero-copy views. Used by the sync path when a source's generated name
+/// changes (so the file↔table identity — tracked by scan_path — is preserved
+/// without re-materializing).
+fn rename_lake_object(
+    conn: &duckdb::Connection,
+    old: &str,
+    new: &str,
+    storage: StorageKind,
+) -> AppResult<()> {
+    let sql = match storage {
+        StorageKind::View => format!("ALTER VIEW \"{}\" RENAME TO \"{}\";", old, new),
+        _ => format!("ALTER TABLE \"{}\" RENAME TO \"{}\";", old, new),
+    };
+    conn.execute(&sql, [])
+        .map_err(|e| AppError::new(format!("重命名 {old} → {new} 失败: {e}")))?;
+    Ok(())
+}
+
 /// True if a table or view named `name` exists in the attached lake. Tables and
 /// views are queried separately so a flaky `duckdb_views()` (seen under DuckLake)
 /// cannot make an existing table look absent (which would trigger needless
@@ -781,7 +865,7 @@ fn build_source_table_from_record(conn: &duckdb::Connection, rec: &SourceRecord)
 }
 
 /// Build a mapping record from a freshly-registered source.
-fn source_record_from(t: &SourceTable, created_at: i64) -> SourceRecord {
+fn source_record_from(t: &SourceTable, created_at: i64, name_source: &str) -> SourceRecord {
     SourceRecord {
         table_name: t.name.clone(),
         label: t.label.clone(),
@@ -791,6 +875,7 @@ fn source_record_from(t: &SourceTable, created_at: i64) -> SourceRecord {
         scan_path: t.scan_path.clone(),
         partition_keys: t.partition_keys.clone(),
         created_at,
+        name_source: name_source.to_string(),
     }
 }
 

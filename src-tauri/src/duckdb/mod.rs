@@ -10,6 +10,7 @@
 
 pub mod execute;
 pub mod lake;
+pub mod naming;
 pub mod pathutil;
 pub mod register;
 pub mod scan;

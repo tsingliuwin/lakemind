@@ -63,19 +63,23 @@ pub struct SourceRecord {
     pub scan_path: String,
     pub partition_keys: Vec<String>,
     pub created_at: i64,
+    /// How `table_name` was generated: `"legacy"` (pre-naming-module),
+    /// `"fallback"` (pinyin, LLM unavailable/failed), or `"llm"` (LLM-generated
+    /// and cached). Only `legacy`/`fallback` trigger a re-evaluation on sync.
+    pub name_source: String,
 }
 
 /// Insert or update a source mapping (keyed by `(workspace_path, table_name)`).
 pub fn upsert_source(conn: &Connection, ws_path: &str, r: &SourceRecord) -> Result<(), String> {
     let keys = serde_json::to_string(&r.partition_keys).unwrap_or_else(|_| "[]".into());
     conn.execute(
-        "INSERT INTO sources (workspace_path, table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO sources (workspace_path, table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(workspace_path, table_name) DO UPDATE SET
             label=excluded.label, kind=excluded.kind, storage=excluded.storage,
             file_path=excluded.file_path, scan_path=excluded.scan_path,
-            partition_keys=excluded.partition_keys",
-        rusqlite::params![ws_path, r.table_name, r.label, r.kind, r.storage, r.file_path, r.scan_path, keys, r.created_at],
+            partition_keys=excluded.partition_keys, name_source=excluded.name_source",
+        rusqlite::params![ws_path, r.table_name, r.label, r.kind, r.storage, r.file_path, r.scan_path, keys, r.created_at, r.name_source],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -85,7 +89,7 @@ pub fn upsert_source(conn: &Connection, ws_path: &str, r: &SourceRecord) -> Resu
 pub fn list_sources(conn: &Connection, ws_path: &str) -> Result<Vec<SourceRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at
+            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source
              FROM sources WHERE workspace_path = ? ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -103,6 +107,7 @@ pub fn list_sources(conn: &Connection, ws_path: &str) -> Result<Vec<SourceRecord
                 scan_path: row.get(5)?,
                 partition_keys,
                 created_at: row.get(7)?,
+                name_source: row.get(8).unwrap_or_else(|_| "legacy".to_string()),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -124,7 +129,7 @@ pub fn get_source_by_table(
 ) -> Result<Option<SourceRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at
+            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source
              FROM sources WHERE workspace_path = ? AND table_name = ?",
         )
         .map_err(|e| e.to_string())?;
@@ -142,6 +147,7 @@ pub fn get_source_by_table(
                 scan_path: row.get(5)?,
                 partition_keys,
                 created_at: row.get(7)?,
+                name_source: row.get(8).unwrap_or_else(|_| "legacy".to_string()),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -258,12 +264,17 @@ pub fn init_global_db() -> Result<(), String> {
             scan_path      TEXT NOT NULL DEFAULT '',
             partition_keys TEXT NOT NULL DEFAULT '[]',
             created_at     INTEGER NOT NULL,
+            name_source    TEXT NOT NULL DEFAULT 'legacy',
             PRIMARY KEY (workspace_path, table_name),
             FOREIGN KEY(workspace_path) REFERENCES workspaces(path) ON DELETE CASCADE
         )",
         [],
     )
     .map_err(|e| format!("Failed to create sources table: {e}"))?;
+
+    // Migrate existing sources table to add name_source (idempotent; errors if
+    // the column already exists, which we ignore).
+    let _ = conn.execute("ALTER TABLE sources ADD COLUMN name_source TEXT NOT NULL DEFAULT 'legacy';", []);
 
     // config: key/value user settings (NEW)
     conn.execute(

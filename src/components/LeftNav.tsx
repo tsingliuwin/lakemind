@@ -553,7 +553,7 @@ export default function LeftNav(props: {
                                   class="tree-leaf"
                                   classList={{ selected: props.selected === t.name }}
                                   disabled={props.busy}
-                                  title={t.scanPath}
+                                  title={t.path.split("/").pop() ?? t.path}
                                   onClick={() => handleSelectTable(t)}
                                   style={{
                                     "padding-left": "8px",

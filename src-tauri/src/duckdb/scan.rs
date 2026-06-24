@@ -22,7 +22,8 @@ use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
 
-use crate::duckdb::pathutil::{forward_slashes, sanitize_label, to_view_name};
+use crate::duckdb::naming;
+use crate::duckdb::pathutil::forward_slashes;
 use crate::model::SourceKind;
 
 /// Maximum number of files to walk before bailing. Guards against pathological
@@ -144,7 +145,7 @@ pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
                 }
             } else {
                 // Nested directory -> group them as a single view glob!
-                let label = sanitize_label(dir.file_name().and_then(|s| s.to_str()).unwrap_or("parquet"));
+                let label = dir.file_name().and_then(|s| s.to_str()).unwrap_or("parquet").to_string();
                 let keys = hive_keys_of(&dir, &root_str);
                 let exts = present_parquet_exts(&files);
                 out.push(build_entry(&label, &dir, SourceKind::Parquet, &root_str, keys, &exts, group_size));
@@ -201,12 +202,15 @@ pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
 }
 
 fn build_individual_entry(file: &Path, file_size: u64, kind: SourceKind, root: &Path) -> ScanEntry {
+    // Keep the original (possibly Chinese) stem as the human-friendly label; the
+    // ASCII SQL identifier is derived from it via the naming module (and may be
+    // further refined by the registration layer).
     let label = file
         .file_stem()
         .and_then(|s| s.to_str())
-        .map(sanitize_label)
-        .unwrap_or_else(|| "data".to_string());
-    let view_name = to_view_name(&label);
+        .unwrap_or("data")
+        .to_string();
+    let view_name = naming::view_name(&label);
     let _ = root; // root retained for potential relative-path formatting later
     ScanEntry {
         label,
@@ -227,7 +231,7 @@ fn group_by_dir(files: &[(PathBuf, u64)]) -> Vec<(String, PathBuf, u64)> {
     }
     map.into_iter()
         .map(|(dir, total)| {
-            let label = sanitize_label(dir.file_name().and_then(|s| s.to_str()).unwrap_or("data"));
+            let label = dir.file_name().and_then(|s| s.to_str()).unwrap_or("data").to_string();
             (label, dir, total)
         })
         .collect()
@@ -251,9 +255,9 @@ fn build_entry(
     let label = dir
         .file_name()
         .and_then(|s| s.to_str())
-        .map(sanitize_label)
-        .unwrap_or_else(|| base_label.to_string());
-    let view_name = to_view_name(&label);
+        .unwrap_or(base_label)
+        .to_string();
+    let view_name = naming::view_name(&label);
     let glob_tail = match kind {
         // Single extension → "*.<ext>"; mixed → "*" (all files here are parquet).
         SourceKind::Parquet => {
