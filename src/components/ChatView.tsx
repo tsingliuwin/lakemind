@@ -85,6 +85,17 @@ export default function ChatView(props: {
   // toggled are never auto-collapsed, so expanded results stay open mid-stream.
   const [expandedToolIds, setExpandedToolIds] = createSignal<Set<string>>(new Set());
   const [manualToolIds, setManualToolIds] = createSignal<Set<string>>(new Set());
+  // 工具段延时展开：运行中的工具不立即展开，等 TOOL_EXPAND_DELAY_MS 后仍运行才展开；
+  // 若在此期间已完成则取消展开，避免快速执行时「展开又收起」的闪烁。
+  const TOOL_EXPAND_DELAY_MS = 200;
+  const pendingToolExpand = new Map<string, ReturnType<typeof setTimeout>>();
+  // 已运行 ≥ TOOL_EXPAND_DELAY_MS 的工具集合（"可见运行中"）。展开与底部「正在…」
+  // 阶段文字都以此为据，使快速执行的工具既不展开、也不闪现阶段文字。
+  const [visiblyRunning, setVisiblyRunning] = createSignal<Set<string>>(new Set());
+  onCleanup(() => {
+    pendingToolExpand.forEach((h) => clearTimeout(h));
+    pendingToolExpand.clear();
+  });
 
   function toggleReasoning(segId: string) {
     setManualReasoningIds((prev) => {
@@ -242,6 +253,9 @@ export default function ChatView(props: {
     prevTaskId = currentId;
     setOpenReasoningIds(new Set<string>());
     setExpandedToolIds(new Set<string>());
+    setVisiblyRunning(new Set<string>());
+    pendingToolExpand.forEach((h) => clearTimeout(h));
+    pendingToolExpand.clear();
     setManualReasoningIds(new Set<string>());
     setManualToolIds(new Set<string>());
     setStickToBottom(true);
@@ -292,49 +306,96 @@ export default function ChatView(props: {
     });
   });
 
-  // Drive tool-segment auto-expand/collapse: any tool segment whose status is
-  // "running" is expanded; once it transitions to ok|error it is removed from
-  // the expanded set (collapses to one line). Latest tool thus stays expanded
-  // while running, history collapses.
+  // Drive tool-segment auto-expand/collapse. A running tool is NOT expanded
+  // immediately — we wait TOOL_EXPAND_DELAY_MS and only expand if it's still
+  // running (so genuinely slow tools show their progress). If it finishes within
+  // the delay, the pending expand is cancelled, avoiding the expand→collapse
+  // flicker for fast tools. Completed tools collapse to one line (unless the
+  // user has manually toggled them).
   createEffect(() => {
     const id = lastAssistantId();
     if (!id) return;
     const msg = props.messages.find((m) => m.id === id);
     if (!msg) return;
-    const running = msg.segments
-      .filter((s): s is Extract<Segment, { type: "tool" }> => s.type === "tool")
-      .filter((s) => s.status === "running")
-      .map((s) => s.id);
-    setExpandedToolIds((prev) => {
-      const next = new Set(prev);
-      for (const r of running) next.add(r);
-      // Drop completed tools that the user hasn't manually toggled. Manually
-      // opened results stay expanded even while new deltas keep arriving.
-      const manual = manualToolIds();
-      for (const s of msg.segments) {
-        if (
-          s.type === "tool" &&
-          s.status !== "running" &&
-          !running.includes(s.id) &&
-          !manual.has(s.id)
-        ) {
-          next.delete(s.id);
-        }
+    const running = new Set(
+      msg.segments
+        .filter((s): s is Extract<Segment, { type: "tool" }> => s.type === "tool")
+        .filter((s) => s.status === "running")
+        .map((s) => s.id),
+    );
+
+    // 为仍在运行、尚未展开且未在等待中的工具启动延时展开计时器。
+    // 读 expandedToolIds 用 untrack，避免本 effect 因自身写入而反复重跑。
+    for (const r of running) {
+      if (pendingToolExpand.has(r)) continue;
+      if (untrack(() => expandedToolIds().has(r))) continue; // 已展开（手动或计时器已触发）
+      pendingToolExpand.set(
+        r,
+        setTimeout(() => {
+          pendingToolExpand.delete(r);
+          setVisiblyRunning((prev) => {
+            const n = new Set(prev);
+            n.add(r);
+            return n;
+          });
+          setExpandedToolIds((prev) => {
+            if (prev.has(r)) return prev;
+            const next = new Set(prev);
+            next.add(r);
+            return next;
+          });
+        }, TOOL_EXPAND_DELAY_MS),
+      );
+    }
+
+    // 已完成（不再运行）的工具：取消其等待中的展开（快速执行 → 不展开），
+    // 并按原策略从展开集中移除（用户手动操作过的除外），同时退出「可见运行中」。
+    const manual = manualToolIds();
+    const expanded = untrack(expandedToolIds);
+    const visible = untrack(visiblyRunning);
+    const toCollapse: string[] = [];
+    const toHide: string[] = [];
+    for (const s of msg.segments) {
+      if (s.type !== "tool" || running.has(s.id)) continue;
+      const handle = pendingToolExpand.get(s.id);
+      if (handle != null) {
+        clearTimeout(handle);
+        pendingToolExpand.delete(s.id);
       }
-      return next;
-    });
+      if (!manual.has(s.id) && expanded.has(s.id)) toCollapse.push(s.id);
+      if (visible.has(s.id)) toHide.push(s.id);
+    }
+    if (toCollapse.length > 0) {
+      setExpandedToolIds((prev) => {
+        const next = new Set(prev);
+        for (const c of toCollapse) next.delete(c);
+        return next;
+      });
+    }
+    if (toHide.length > 0) {
+      setVisiblyRunning((prev) => {
+        const next = new Set(prev);
+        for (const c of toHide) next.delete(c);
+        return next;
+      });
+    }
   });
 
-  // Current single-line action label derived from the running tool (or "思考中…").
+  // Current single-line action label derived from the *visibly* running tool —
+  // i.e. one that has run ≥ TOOL_EXPAND_DELAY_MS, so fast tools don't flash a
+  // "正在执行 SQL…" label that vanishes an instant later.
   function currentAction(): string | undefined {
     const id = lastAssistantId();
     if (!id) return undefined;
     const msg = props.messages.find((m) => m.id === id);
     if (!msg) return undefined;
-    const tools = msg.segments.filter((s): s is Extract<Segment, { type: "tool" }> => s.type === "tool");
-    const running = tools.filter((s) => s.status === "running");
-    if (running.length > 0) {
-      const last = running[running.length - 1];
+    const visible = visiblyRunning();
+    const tools = msg.segments.filter(
+      (s): s is Extract<Segment, { type: "tool" }> =>
+        s.type === "tool" && s.status === "running" && visible.has(s.id),
+    );
+    if (tools.length > 0) {
+      const last = tools[tools.length - 1];
       return `正在${TOOL_LABELS[last.tool] ?? "执行工具"}…`;
     }
     return undefined;
