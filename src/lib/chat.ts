@@ -33,14 +33,14 @@ export function appendDelta(
   const last = next[next.length - 1];
   if (last && last.type === type) {
     const updated = { ...last, text: last.text + delta } as any;
-    if (type === "reasoning" && last.startTime) {
-      updated.elapsedMs = Date.now() - last.startTime;
+    if (type === "reasoning" && (last as any).startTime) {
+      updated.elapsedMs = Date.now() - (last as any).startTime;
     }
     next[next.length - 1] = updated;
   } else {
     // If the previous segment was reasoning, set its final elapsedMs
-    if (last && last.type === "reasoning" && last.startTime && !last.elapsedMs) {
-      next[next.length - 1] = { ...last, elapsedMs: Date.now() - last.startTime };
+    if (last && last.type === "reasoning" && (last as any).startTime && !last.elapsedMs) {
+      next[next.length - 1] = { ...last, elapsedMs: Date.now() - (last as any).startTime };
     }
     next.push({
       type,

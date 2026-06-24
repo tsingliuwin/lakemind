@@ -875,7 +875,7 @@ export default function App() {
     previewTable(t);
   }
 
-  /** 检查器 → 编辑器：注入一段 SQL（不自动执行）。 */
+  /** 检查器 → 编辑器：注入一段 SQL 并自动执行。 */
   function injectSql(s: string) {
     setSql(s);
     setResult(null);
@@ -890,12 +890,12 @@ export default function App() {
         setTasks((prev) => prev.map((t) => (t.id === activeId ? { ...t, sql: s } : t)));
       }
     }
+    void run();
   }
 
   /** 检查器 → 直接预览某表（SELECT * LIMIT 50）。 */
   function previewTable(t: SourceTable) {
     injectSql(`SELECT * FROM "${t.name}" LIMIT 50;`);
-    void run();
   }
 
   async function copySql() {
