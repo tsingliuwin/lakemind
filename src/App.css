@@ -1405,7 +1405,7 @@ body.dragging-active-v * {
   color: var(--text-secondary);
 }
 .result-tab-item.active {
-  color: var(--accent-blue);
+  color: #fff;
   background: var(--bg-elevated);
   border-color: var(--border-faint);
   border-bottom: 1px solid var(--bg-elevated);
