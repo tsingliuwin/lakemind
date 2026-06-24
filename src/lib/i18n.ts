@@ -35,6 +35,8 @@ const translations: Record<Language, Record<string, string>> = {
     // SqlEditor
     sqlEditorTag: "📊 DuckDB SQL",
     rowCountLimit: "行数上限",
+    formatSql: "格式化 SQL",
+    formatSqlFailed: "格式化失败",
     copySql: "复制 SQL",
     run: "运行",
     running: "执行中…",
@@ -152,6 +154,8 @@ const translations: Record<Language, Record<string, string>> = {
     // SqlEditor
     sqlEditorTag: "📊 DuckDB SQL",
     rowCountLimit: "Row Limit",
+    formatSql: "Format SQL",
+    formatSqlFailed: "Format failed",
     copySql: "Copy SQL",
     run: "Run",
     running: "Running...",

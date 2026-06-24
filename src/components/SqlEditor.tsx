@@ -4,6 +4,7 @@ import { EditorState } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { sql } from "@codemirror/lang-sql";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { formatDuckdbSql } from "../lib/sqlFormat";
 import { ROW_CAP_OPTIONS } from "../lib/types";
 import { t } from "../lib/i18n";
 
@@ -28,6 +29,8 @@ export default function SqlEditor(props: {
   const [copied, setCopied] = createSignal(false);
   const [saved, setSaved] = createSignal(false);
   const [editorHeight, setEditorHeight] = createSignal(180);
+  const [formatState, setFormatState] = createSignal<"idle" | "ok" | "err">("idle");
+  const [formatErr, setFormatErr] = createSignal<string | null>(null);
   let host!: HTMLDivElement;
 
   function startDraggingHeight(e: MouseEvent) {
@@ -53,6 +56,35 @@ export default function SqlEditor(props: {
   }
   let view: EditorView | undefined;
 
+  /**
+   * 用 sql-formatter 的 DuckDB 方言格式化当前编辑器全文。成功后替换整个文档
+   * （进入 history，可 Ctrl/Cmd+Z 撤销；updateListener 会自动把新内容同步给父组件）。
+   * 失败时按钮短暂变红，title 与浏览器控制台输出错误信息。
+   */
+  function formatSql() {
+    const v = view;
+    if (!v) return;
+    const sqlText = v.state.doc.toString();
+    if (!sqlText.trim()) return;
+    try {
+      const formatted = formatDuckdbSql(sqlText);
+      if (formatted !== sqlText) {
+        v.dispatch({
+          changes: { from: 0, to: v.state.doc.length, insert: formatted },
+        });
+      }
+      setFormatErr(null);
+      setFormatState("ok");
+      setTimeout(() => setFormatState("idle"), 1500);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setFormatErr(msg);
+      setFormatState("err");
+      console.error("[SqlEditor] format failed:", msg);
+      setTimeout(() => setFormatState("idle"), 3000);
+    }
+  }
+
   onMount(() => {
     const state = EditorState.create({
       doc: props.initialSql,
@@ -72,6 +104,13 @@ export default function SqlEditor(props: {
               props.onSave?.();
               setSaved(true);
               setTimeout(() => setSaved(false), 1500);
+              return true;
+            },
+          },
+          {
+            key: "Mod-Shift-F",
+            run: () => {
+              formatSql();
               return true;
             },
           },
@@ -122,6 +161,27 @@ export default function SqlEditor(props: {
           >
             <For each={[...ROW_CAP_OPTIONS]}>{(o) => <option value={o.value}>{o.label}</option>}</For>
           </select>
+          <button
+            class="icon-btn"
+            title={formatErr() ? `${t("formatSqlFailed")}：${formatErr()}` : `${t("formatSql")} (Ctrl/Cmd+Shift+F)`}
+            onClick={formatSql}
+          >
+            {formatState() === "err" ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-red, #ef4444)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style={{ width: "14px", height: "14px" }}>
+                <path d="M12 9v4"></path>
+                <path d="M12 17h.01"></path>
+              </svg>
+            ) : formatState() === "ok" ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green, #10b981)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style={{ width: "14px", height: "14px" }}>
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style={{ width: "14px", height: "14px" }}>
+                <polygon points="14,4 20,10 14,16 8,10"></polygon>
+                <path d="M11 13L4 20"></path>
+              </svg>
+            )}
+          </button>
           <button
             class="icon-btn"
             title={copied() ? "已复制" : t("copySql")}

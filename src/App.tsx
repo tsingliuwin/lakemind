@@ -11,6 +11,7 @@ import BottomConsole, { type ConsoleState } from "./components/BottomConsole";
 import SettingsPage from "./components/SettingsPage";
 import HomePanel from "./components/HomePanel";
 import { executeSql, importFileToWorkspace } from "./lib/duckdb";
+import { tryFormatDuckdbSql } from "./lib/sqlFormat";
 import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage } from "./lib/types";
 import ChatView from "./components/ChatView";
 import { appendDelta, pushToolCall, mergeToolResult, normalizeMessage } from "./lib/chat";
@@ -594,9 +595,9 @@ export default function App() {
     }
   }
 
-  /** ToolSegment「在 SQL 面板打开」：新建 SQL task 注入 SQL 并自动执行。 */
+  /** ToolSegment「在 SQL 面板打开」：新建 SQL task 注入（已格式化的）SQL 并自动执行。 */
   function openInSqlPanel(sql: string) {
-    createTask(sql, "sql");
+    createTask(tryFormatDuckdbSql(sql), "sql");
     void run();
   }
 
@@ -963,17 +964,18 @@ export default function App() {
     previewTable(t);
   }
 
-  /** 检查器 → 编辑器：注入一段 SQL 并自动执行。 */
+  /** 检查器 → 编辑器：注入一段 SQL（格式化后）并自动执行。 */
   function injectSql(s: string) {
-    setSql(s);
+    const formatted = tryFormatDuckdbSql(s);
+    setSql(formatted);
 
     const active = activeTask();
     if (!active || active.kind !== "sql") {
-      createTask(s, "sql");
+      createTask(formatted, "sql");
     } else {
       const activeId = activeTaskId();
       if (activeId) {
-        setTasks((prev) => prev.map((t) => (t.id === activeId ? { ...t, sql: s } : t)));
+        setTasks((prev) => prev.map((t) => (t.id === activeId ? { ...t, sql: formatted } : t)));
       }
     }
     void run();
