@@ -1052,9 +1052,7 @@ export default function App() {
                 consoleOpen={consoleState() !== "folded"}
                 onToggleInspector={() => setInspectorOpen((v) => !v)}
                 onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
-                onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
                 selectedTable={selectedTable()}
-                onOpenSettings={onSettings}
                 busy={busy()}
                 leftOpen={leftOpen()}
                 onToggleLeft={() => setLeftOpen(!leftOpen())}
@@ -1104,9 +1102,7 @@ export default function App() {
             consoleOpen={consoleState() !== "folded"}
             onToggleInspector={() => setInspectorOpen((v) => !v)}
             onToggleConsole={() => setConsoleState((s) => (s === "folded" ? "default" : "folded"))}
-            onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
             selectedTable={selectedTable()}
-            onOpenSettings={onSettings}
             busy={busy()}
             leftOpen={leftOpen()}
             onToggleLeft={() => setLeftOpen(!leftOpen())}

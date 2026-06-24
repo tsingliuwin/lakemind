@@ -15,7 +15,7 @@ export default function TopBar(props: {
 }) {
   return (
     <header class="topbar">
-      <span class="brand">⚓ LakeMind</span>
+      <span class="brand">LakeMind</span>
       <span class="brand-sub">M1 · 纯算力客户端</span>
       <span class="spacer" />
       <div class="toggle-group">

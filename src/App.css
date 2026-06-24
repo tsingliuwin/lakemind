@@ -383,9 +383,22 @@ select:hover:not(:disabled) {
   position: relative;
 }
 
+/* Wrapper around the menu trigger button; serves as the positioning anchor
+ * for the dropdown so it aligns with the button regardless of platform
+ * (macOS has no window-control buttons, so a fixed `right` offset would be wrong). */
+.tb-menu-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+}
+
 .tb-dropdown-menu.right-aligned {
-  right: 138px;
-  top: 30px;
+  /* Anchor to the trigger wrapper: right-aligned with the button, flush below
+   * the titlebar. `top: 100%` (of .titlebar) == 30px but stays correct if the
+   * bar height ever changes. */
+  right: 0;
+  top: calc(100% + 2px);
   left: auto;
 }
 
