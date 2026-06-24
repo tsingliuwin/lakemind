@@ -105,6 +105,22 @@ export default function App() {
     return currentTabs().find((t: QueryResultTab) => t.id === tabId) ?? null;
   });
 
+  // Ref to the scrollable result-tab bar; used to keep the active/new tab visible.
+  let resultTabsBarRef: HTMLDivElement | undefined;
+  // Track refs of each tab item so we can scrollIntoView the active one.
+  const tabItemRefs = new Map<string, HTMLDivElement>();
+
+  // Whenever the active tab changes, scroll it into view (covers click / new-result / close cases).
+  createEffect(() => {
+    const id = currentActiveTabId();
+    if (!id) return;
+    const el = tabItemRefs.get(id);
+    if (el) {
+      // 'nearest' avoids jumping when the tab is already partially visible.
+      el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  });
+
   async function loadModelsFromSettings() {
     try {
       const json = await invoke<string>("load_settings_json");
@@ -631,6 +647,9 @@ export default function App() {
   function closeTab(tabId: string) {
     const taskId = activeTaskId();
     if (!taskId) return;
+
+    // Drop the DOM ref so the active-tab effect / Map doesn't hold a stale node.
+    tabItemRefs.delete(tabId);
 
     setTaskTabs((prev) => {
       const list = prev[taskId] || [];
@@ -1210,12 +1229,24 @@ export default function App() {
                         fallback={<div class="result-empty">暂无执行结果，点击运行开始查询。</div>}
                       >
                         <div class="query-result-card">
-                          <div class="result-tabs-bar">
+                          <div
+                            class="result-tabs-bar"
+                            ref={resultTabsBarRef}
+                            onWheel={(e) => {
+                              // Map vertical wheel to horizontal scroll so users
+                              // don't have to hold Shift to traverse the tab strip.
+                              const bar = e.currentTarget;
+                              if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                                bar.scrollLeft += e.deltaY;
+                              }
+                            }}
+                          >
                             <For each={currentTabs()}>
                               {(tab: QueryResultTab) => (
                                 <div
                                   class="result-tab-item"
                                   classList={{ active: currentActiveTabId() === tab.id }}
+                                  ref={(el: HTMLDivElement) => { tabItemRefs.set(tab.id, el); }}
                                   onClick={() => {
                                     const taskId = activeTaskId();
                                     if (taskId) {

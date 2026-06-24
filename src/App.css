@@ -1377,6 +1377,8 @@ body.dragging-active-v * {
   overflow: hidden;
 }
 
+/* The bar is a flex container; children must NOT shrink, otherwise tabs get
+ * squeezed together instead of overflowing and triggering horizontal scroll. */
 .result-tabs-bar {
   display: flex;
   align-items: center;
@@ -1386,10 +1388,21 @@ body.dragging-active-v * {
   padding: 4px 12px 0;
   overflow-x: auto;
   flex-shrink: 0;
-  scrollbar-width: none; /* Firefox */
+  scroll-behavior: smooth;
+  scrollbar-width: thin; /* Firefox */
 }
 .result-tabs-bar::-webkit-scrollbar {
-  display: none; /* Safari and Chrome */
+  height: 6px; /* show a slim bar so users can tell there's more to scroll */
+}
+.result-tabs-bar::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+.result-tabs-bar::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+.result-tabs-bar::-webkit-scrollbar-track {
+  background: transparent;
 }
 .result-tab-item {
   display: inline-flex;
@@ -1408,6 +1421,8 @@ body.dragging-active-v * {
   margin-bottom: -1px;
   transition: all 0.15s ease;
   user-select: none;
+  flex-shrink: 0; /* keep natural width → overflow instead of compressing */
+  white-space: nowrap;
 }
 .result-tab-item:hover {
   color: var(--text-secondary);
