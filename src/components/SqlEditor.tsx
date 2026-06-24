@@ -1,5 +1,5 @@
 import { For, Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { sql } from "@codemirror/lang-sql";
@@ -78,6 +78,7 @@ export default function SqlEditor(props: {
           ...defaultKeymap,
           ...historyKeymap,
         ]),
+        lineNumbers(),
         sql(),
         oneDark,
         EditorView.lineWrapping,
