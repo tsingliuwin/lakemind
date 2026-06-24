@@ -178,6 +178,14 @@ export default function App() {
           messages[messages.length - 1] = { ...lastMsg, segments };
 
           if (kind === "done" || kind === "error") {
+            const lastIdx = segments.length - 1;
+            if (lastIdx >= 0) {
+              const lastSeg = segments[lastIdx];
+              if (lastSeg.type === "reasoning" && lastSeg.startTime && !lastSeg.elapsedMs) {
+                segments[lastIdx] = { ...lastSeg, elapsedMs: Date.now() - lastSeg.startTime };
+                messages[messages.length - 1] = { ...lastMsg, segments };
+              }
+            }
             void saveChatTaskBackend(targetId, t.name, messages);
           }
 

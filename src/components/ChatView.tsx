@@ -418,6 +418,9 @@ export default function ChatView(props: {
                                   </svg>
                                 </span>
                                 <span class="chat-reasoning__label">思考过程</span>
+                                 <Show when={rs()?.elapsedMs != null}>
+                                   <span style="color: var(--text-dim); margin-left: 2px;">· {fmtMs(rs()!.elapsedMs!)}</span>
+                                 </Show>
                                  <span class="chat-reasoning__toggle" classList={{ "chat-reasoning__toggle--open": openReasoningIds().has(seg().id) }}>
                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 10px; height: 10px; transition: transform 0.15s ease;">
                                      <polyline points="9 18 15 12 9 6"></polyline>
@@ -664,4 +667,9 @@ function ReasoningBody(props: { text: string }) {
       {props.text}
     </div>
   );
+}
+
+function fmtMs(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
 }

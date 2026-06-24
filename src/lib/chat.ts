@@ -32,13 +32,22 @@ export function appendDelta(
   const next = [...segments];
   const last = next[next.length - 1];
   if (last && last.type === type) {
-    next[next.length - 1] = { ...last, text: last.text + delta } as Segment;
+    const updated = { ...last, text: last.text + delta } as any;
+    if (type === "reasoning" && last.startTime) {
+      updated.elapsedMs = Date.now() - last.startTime;
+    }
+    next[next.length - 1] = updated;
   } else {
+    // If the previous segment was reasoning, set its final elapsedMs
+    if (last && last.type === "reasoning" && last.startTime && !last.elapsedMs) {
+      next[next.length - 1] = { ...last, elapsedMs: Date.now() - last.startTime };
+    }
     next.push({
       type,
       id: newSegmentId(type === "reasoning" ? "r" : "txt"),
       text: delta,
-    });
+      ...(type === "reasoning" ? { startTime: Date.now() } : {}),
+    } as any);
   }
   return next;
 }
@@ -48,8 +57,13 @@ export function pushToolCall(
   segments: Segment[],
   seg: { id: string; tool: string; args?: unknown },
 ): Segment[] {
+  const next = [...segments];
+  const last = next[next.length - 1];
+  if (last && last.type === "reasoning" && last.startTime && !last.elapsedMs) {
+    next[next.length - 1] = { ...last, elapsedMs: Date.now() - last.startTime };
+  }
   return [
-    ...segments,
+    ...next,
     {
       type: "tool",
       id: seg.id,

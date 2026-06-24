@@ -86,7 +86,7 @@ export type TaskKind = "sql" | "chat";
  * 调用的时序关系。
  */
 export type Segment =
-  | { type: "reasoning"; id: string; text: string }
+  | { type: "reasoning"; id: string; text: string; elapsedMs?: number; startTime?: number }
   | {
       type: "tool";
       id: string;
