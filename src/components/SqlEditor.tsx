@@ -27,7 +27,30 @@ export default function SqlEditor(props: {
 }) {
   const [copied, setCopied] = createSignal(false);
   const [saved, setSaved] = createSignal(false);
+  const [editorHeight, setEditorHeight] = createSignal(180);
   let host!: HTMLDivElement;
+
+  function startDraggingHeight(e: MouseEvent) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = editorHeight();
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const deltaY = moveEvent.clientY - startY;
+      const newHeight = Math.max(50, Math.min(600, startHeight + deltaY));
+      setEditorHeight(newHeight);
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.classList.remove("dragging-active-v");
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    document.body.classList.add("dragging-active-v");
+  }
   let view: EditorView | undefined;
 
   onMount(() => {
@@ -162,7 +185,8 @@ export default function SqlEditor(props: {
           </button>
         </div>
       </div>
-      <div class="cm-host" ref={host} />
+      <div class="cm-host" ref={host} style={{ height: `${editorHeight()}px` }} />
+      <div class="editor-resizer-h" onMouseDown={startDraggingHeight} />
     </div>
   );
 }

@@ -1304,15 +1304,40 @@ select:hover:not(:disabled) {
 }
 
 .cm-host {
-  overflow: auto;
+  overflow: hidden;
+}
+.editor-resizer-h {
+  height: 6px;
+  margin-top: -6px;
+  background: transparent;
+  cursor: row-resize;
+  position: relative;
+  z-index: 10;
+  user-select: none;
+  border-bottom: 1px solid var(--border-faint);
+  transition: border-bottom-color 0.15s ease;
+}
+.editor-resizer-h:hover,
+body.dragging-active-v .editor-resizer-h {
+  border-bottom-color: rgba(255, 255, 255, 0.35);
+}
+body.dragging-active-v,
+body.dragging-active-v * {
+  cursor: row-resize !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 .cm-host .cm-editor {
   font-family: var(--font-mono);
   font-size: 13px;
   background: var(--bg-elevated);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 .cm-host .cm-editor .cm-scroller {
-  max-height: 180px;
+  flex: 1;
+  overflow: auto;
 }
 .cm-host .cm-gutters {
   background: var(--bg-elevated);
