@@ -1,4 +1,4 @@
-import { createSignal, Show, Switch, Match, onMount, onCleanup, createEffect } from "solid-js";
+import { createSignal, Show, Switch, Match, onMount, onCleanup, createEffect, createMemo, For } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import DropZone from "./components/DropZone";
@@ -33,8 +33,18 @@ export default function App() {
   // --- 编辑器 / 查询 ---
   const [sql, setSql] = createSignal<string>("SELECT 1 AS n;");
   const [rowCap, setRowCap] = createSignal<number>(10_000);
-  const [result, setResult] = createSignal<SqlResult | null>(null);
-  const [error, setError] = createSignal<string | null>(null);
+  interface QueryResultTab {
+    id: string;
+    name: string;
+    sql: string;
+    result: SqlResult | null;
+    error: string | null;
+    timestamp: number;
+  }
+  const [taskTabs, setTaskTabs] = createSignal<Record<string, QueryResultTab[]>>({});
+  const [taskActiveTabId, setTaskActiveTabId] = createSignal<Record<string, string | null>>({});
+  const [editingTabId, setEditingTabId] = createSignal<string | null>(null);
+  const [editingText, setEditingText] = createSignal<string>("");
   const [busy, setBusy] = createSignal<boolean>(false);
 
   // --- drawers & layout sizes ---
@@ -75,6 +85,24 @@ export default function App() {
   // （tokio::spawn 后立即返回），真正的流式通过 agent-event 异步回来，
   // 所以用一个独立信号准确跟踪执行状态，供 ChatView 派生 streaming。
   const [streamingTaskId, setStreamingTaskId] = createSignal<string | null>(null);
+
+  const currentTabs = createMemo<QueryResultTab[]>(() => {
+    const taskId = activeTaskId();
+    if (!taskId) return [];
+    return taskTabs()[taskId] || [];
+  });
+
+  const currentActiveTabId = createMemo<string | null>(() => {
+    const taskId = activeTaskId();
+    if (!taskId) return null;
+    return taskActiveTabId()[taskId] || null;
+  });
+
+  const activeTab = createMemo<QueryResultTab | null>(() => {
+    const tabId = currentActiveTabId();
+    if (!tabId) return null;
+    return currentTabs().find((t: QueryResultTab) => t.id === tabId) ?? null;
+  });
 
   async function loadModelsFromSettings() {
     try {
@@ -238,7 +266,6 @@ export default function App() {
     const ws = currentWorkspace();
     if (!ws) return;
     setBusy(true);
-    setError(null);
     try {
       // 1. Load tasks. Normalize legacy chat messages (flat content/reasoning/
       //    cards) into the segment model so old persisted chats stay readable.
@@ -262,8 +289,6 @@ export default function App() {
       } else {
         setActiveTaskId(null);
         setSql("SELECT 1 AS n;");
-        setResult(null);
-        setError(null);
       }
 
       // 2. Scan and register files in workspace, then load all DuckDB tables
@@ -273,7 +298,6 @@ export default function App() {
       setSelectedTable(null);
     } catch (err) {
       console.error("Failed to load workspace tasks & sources:", err);
-      setError(String(err));
     } finally {
       setBusy(false);
     }
@@ -346,8 +370,6 @@ export default function App() {
     setActiveTaskId(id);
     if (kind === "sql") {
       setSql(newTask.sql);
-      setResult(null);
-      setError(null);
     }
   }
 
@@ -357,8 +379,6 @@ export default function App() {
     setActiveTaskId(id);
     if ((task.kind ?? "sql") === "sql") {
       setSql(task.sql);
-      setResult(null);
-      setError(null);
     }
     // chat task：消息由 task 自带，主区读 task.messages 渲染，无需 injectSql。
   }
@@ -607,6 +627,41 @@ export default function App() {
     }
   }
 
+  function closeTab(tabId: string) {
+    const taskId = activeTaskId();
+    if (!taskId) return;
+
+    setTaskTabs((prev) => {
+      const list = prev[taskId] || [];
+      const filtered = list.filter((t) => t.id !== tabId);
+      return { ...prev, [taskId]: filtered };
+    });
+
+    if (taskActiveTabId()[taskId] === tabId) {
+      const remaining = (taskTabs()[taskId] || []).filter((t) => t.id !== tabId);
+      if (remaining.length > 0) {
+        setTaskActiveTabId((prev) => ({ ...prev, [taskId]: remaining[remaining.length - 1].id }));
+      } else {
+        setTaskActiveTabId((prev) => ({ ...prev, [taskId]: null }));
+      }
+    }
+  }
+
+  function saveRename(tabId: string) {
+    const nextName = editingText().trim();
+    if (nextName && activeTaskId()) {
+      const taskId = activeTaskId()!;
+      setTaskTabs((prev) => {
+        const list = prev[taskId] || [];
+        return {
+          ...prev,
+          [taskId]: list.map((t) => (t.id === tabId ? { ...t, name: nextName } : t)),
+        };
+      });
+    }
+    setEditingTabId(null);
+  }
+
   async function saveActiveTask() {
     const activeId = activeTaskId();
     if (!activeId) return;
@@ -747,7 +802,6 @@ export default function App() {
   async function handleDropFiles(paths: string[]) {
     if (busy()) return;
     setBusy(true);
-    setError(null);
     try {
       let imported = false;
       for (const p of paths) {
@@ -760,7 +814,7 @@ export default function App() {
         setFileTrigger((t) => t + 1);
       }
     } catch (e) {
-      setError(String(e));
+      console.error("Failed to drop files:", e);
     } finally {
       setBusy(false);
     }
@@ -769,7 +823,6 @@ export default function App() {
   async function handleImportFile(filePath: string) {
     if (busy()) return;
     setBusy(true);
-    setError(null);
     try {
       const res = await importFileToWorkspace(currentWorkspace().path, filePath);
       if (res.length > 0) {
@@ -782,7 +835,7 @@ export default function App() {
         setFileTrigger((t) => t + 1);
       }
     } catch (e) {
-      setError(String(e));
+      console.error("Failed to import file:", e);
     } finally {
       setBusy(false);
     }
@@ -795,32 +848,78 @@ export default function App() {
       const path = await selectDirectory();
       if (path) {
         setBusy(true);
-        setError(null);
-        const res = await importFileToWorkspace(currentWorkspace().path, path);
-        if (res.length > 0) {
-          const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
-          setSources(dbTables);
-          setFileTrigger((t) => t + 1);
+        try {
+          const res = await importFileToWorkspace(currentWorkspace().path, path);
+          if (res.length > 0) {
+            const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
+            setSources(dbTables);
+            setFileTrigger((t) => t + 1);
+          }
+        } catch (e) {
+          console.error("Failed to register folder source:", e);
+        } finally {
+          setBusy(false);
         }
       }
     } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
+      console.error("Failed to select directory:", e);
     }
   }
 
-  /** 执行当前 SQL，无论成功或失败都写入日志。 */
+  /** 执行当前 SQL，无论成功或失败都写入日志，并记录至结果 tab 列表中。 */
   async function run() {
     const q = sql().trim();
     if (!q || busy()) return;
     setBusy(true);
-    setError(null);
     const started = Date.now();
     let entry: LogEntry;
+
+    const tabId = `tab-${Date.now()}`;
+    const taskId = activeTaskId();
+
+    let tabName = "结果";
+    if (taskId) {
+      const list = taskTabs()[taskId] || [];
+      let nextNum = 0;
+      while (true) {
+        const candidate = nextNum === 0 ? "结果" : `结果${nextNum}`;
+        if (!list.some((t: QueryResultTab) => t.name === candidate)) {
+          tabName = candidate;
+          break;
+        }
+        nextNum++;
+      }
+    }
+
+    const newTab: QueryResultTab = {
+      id: tabId,
+      name: tabName,
+      sql: q,
+      result: null,
+      error: null,
+      timestamp: started,
+    };
+
+    if (taskId) {
+      setTaskTabs((prev) => {
+        const list = prev[taskId] || [];
+        return { ...prev, [taskId]: [...list, newTab] };
+      });
+      setTaskActiveTabId((prev) => ({ ...prev, [taskId]: tabId }));
+    }
+
     try {
       const res = await executeSql(q, rowCap());
-      setResult(res);
+      
+      if (taskId) {
+        setTaskTabs((prev) => {
+          const list = prev[taskId] || [];
+          return {
+            ...prev,
+            [taskId]: list.map((t) => t.id === tabId ? { ...t, result: res } : t),
+          };
+        });
+      }
 
       entry = {
         id: ++logSeq,
@@ -832,8 +931,6 @@ export default function App() {
         elapsedMs: res.elapsedMs,
       };
 
-      // Refresh the table list in case the query changed schemas. Non-fatal:
-      // a failure here must NOT clobber the query result we just set.
       try {
         const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
         setSources(dbTables);
@@ -842,10 +939,16 @@ export default function App() {
       }
     } catch (e) {
       const msg = String(e);
-      setResult(null);
-      setError(msg);
+      if (taskId) {
+        setTaskTabs((prev) => {
+          const list = prev[taskId] || [];
+          return {
+            ...prev,
+            [taskId]: list.map((t) => t.id === tabId ? { ...t, error: msg } : t),
+          };
+        });
+      }
       entry = { id: ++logSeq, ts: started, sql: q, status: "error", error: msg, elapsedMs: Date.now() - started };
-      // 失败时自动展开控制台，便于看到原始报错。
       setConsoleState((s) => (s === "folded" ? "default" : s));
     } finally {
       setBusy(false);
@@ -863,8 +966,6 @@ export default function App() {
   /** 检查器 → 编辑器：注入一段 SQL 并自动执行。 */
   function injectSql(s: string) {
     setSql(s);
-    setResult(null);
-    setError(null);
 
     const active = activeTask();
     if (!active || active.kind !== "sql") {
@@ -971,7 +1072,7 @@ export default function App() {
           onOpenSettings={onSettings}
           onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
           onNewChat={() => createTask("", "chat")}
-          onDisconnect={() => { setSources([]); setSelectedTable(null); setResult(null); setError(null); setTasks([]); setActiveTaskId(null); }}
+          onDisconnect={() => { setSources([]); setSelectedTable(null); setTaskTabs({}); setTaskActiveTabId({}); setTasks([]); setActiveTaskId(null); }}
           leftOpen={leftOpen()}
           onToggleLeft={() => setLeftOpen(!leftOpen())}
         />
@@ -1100,10 +1201,82 @@ export default function App() {
                         onSave={saveActiveTask}
                         onClose={() => deleteTask(activeTaskId()!)}
                       />
-                      <Show when={error()}>
-                        <pre class="error-box">{error()}</pre>
+                      
+                      {/* Unified Results Card */}
+                      <Show
+                        when={currentTabs().length > 0}
+                        fallback={<div class="result-empty">暂无执行结果，点击运行开始查询。</div>}
+                      >
+                        <div class="query-result-card">
+                          <div class="result-tabs-bar">
+                            <For each={currentTabs()}>
+                              {(tab: QueryResultTab) => (
+                                <div
+                                  class="result-tab-item"
+                                  classList={{ active: currentActiveTabId() === tab.id }}
+                                  onClick={() => {
+                                    const taskId = activeTaskId();
+                                    if (taskId) {
+                                      setTaskActiveTabId((prev) => ({ ...prev, [taskId]: tab.id }));
+                                    }
+                                  }}
+                                  onDblClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingTabId(tab.id);
+                                    setEditingText(tab.name);
+                                  }}
+                                  title={tab.sql}
+                                >
+                                  <Show
+                                    when={editingTabId() === tab.id}
+                                    fallback={<span class="tab-name">{tab.name}</span>}
+                                  >
+                                    <input
+                                      type="text"
+                                      class="tab-rename-input"
+                                      value={editingText()}
+                                      onInput={(e) => setEditingText(e.currentTarget.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                          saveRename(tab.id);
+                                        } else if (e.key === "Escape") {
+                                          setEditingTabId(null);
+                                        }
+                                      }}
+                                      onBlur={() => saveRename(tab.id)}
+                                      ref={(el: HTMLInputElement) => setTimeout(() => { el.focus(); el.select(); }, 0)}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  </Show>
+                                  <button
+                                    class="tab-close-btn"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      closeTab(tab.id);
+                                    }}
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              )}
+                            </For>
+                          </div>
+
+                          {/* Active Tab Content */}
+                          <Show when={activeTab()}>
+                            {(tabVal) => (
+                              <div class="result-tab-content">
+                                <Show when={tabVal().error}>
+                                  <pre class="error-box">{tabVal().error}</pre>
+                                </Show>
+                                <Show when={tabVal().result}>
+                                  <ResultTable result={tabVal().result} />
+                                </Show>
+                              </div>
+                            )}
+                          </Show>
+                        </div>
                       </Show>
-                      <ResultTable result={result()} />
                     </div>
                   </Match>
                 </Switch>
