@@ -1387,6 +1387,9 @@ body.dragging-active-v * {
   margin: 0;
   padding: 4px 12px 0;
   overflow-x: auto;
+  overflow-y: hidden; /* when overflow-x != visible, the spec forces the other
+                       * axis from `visible` to `auto`, which would otherwise
+                       * show a spurious vertical scrollbar. Pin it to hidden. */
   flex-shrink: 0;
   scroll-behavior: smooth;
   scrollbar-width: thin; /* Firefox */
@@ -1694,6 +1697,28 @@ body.is-resizing-column * {
   background: var(--bg-hover);
   padding: 1px 6px;
   border-radius: 4px;
+}
+.log-row .log-copy-btn {
+  background: transparent;
+  border: none;
+  padding: 3px;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+}
+.log-row:hover .log-copy-btn,
+.log-row .log-copy-btn:focus-visible {
+  opacity: 1;
+}
+.log-row .log-copy-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-hover);
 }
 .log-err {
   margin: 4px 16px 8px 98px;

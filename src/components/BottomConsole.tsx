@@ -20,6 +20,8 @@ export default function BottomConsole(props: {
   onClear: () => void;
 }) {
   const [expandedId, setExpandedId] = createSignal<number | null>(null);
+  /** Which log row is currently showing the "copied" checkmark feedback. */
+  const [copiedId, setCopiedId] = createSignal<number | null>(null);
 
   const summary = createMemo(() => {
     let ok = 0;
@@ -102,7 +104,7 @@ export default function BottomConsole(props: {
                     <span classList={{ "log-status": true, ok: log.status === "ok", err: log.status === "error" }}>
                       {log.status === "ok" ? "✓" : "✗"}
                     </span>
-                    <span class="log-sql">{summarizeSql(log.sql)}</span>
+                    <span class="log-sql" title={collapseWhitespace(log.sql)}>{collapseWhitespace(log.sql)}</span>
                     <span class="log-meta">
                       <Show when={log.rowCount != null}>
                         <span>{log.rowCount!.toLocaleString()} {t("rowsUnit")}</span>
@@ -114,6 +116,32 @@ export default function BottomConsole(props: {
                         <span title="truncated">⚠</span>
                       </Show>
                     </span>
+                    <button
+                      class="log-copy-btn"
+                      title={copiedId() === log.id ? "已复制" : t("copySql")}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          await navigator.clipboard.writeText(log.sql);
+                          setCopiedId(log.id);
+                          setTimeout(() => setCopiedId((cur) => (cur === log.id ? null : cur)), 1500);
+                        } catch {}
+                      }}
+                    >
+                      <Show
+                        when={copiedId() === log.id}
+                        fallback={
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                          </svg>
+                        }
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green, #10b981)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                          <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                      </Show>
+                    </button>
                   </div>
                   <Show when={log.status === "error" && expandedId() === log.id && log.error}>
                     <div class="log-err">{log.error}</div>
@@ -133,7 +161,9 @@ function formatTs(ms: number): string {
   return d.toLocaleTimeString("en-GB", { hour12: false });
 }
 
-function summarizeSql(sql: string): string {
-  const one = sql.replace(/\s+/g, " ").trim();
-  return one.length > 60 ? one.slice(0, 60) + "…" : one;
+/** Collapse SQL to a single line for the console row; width-based
+ *  truncation (with ellipsis) is handled by CSS, so we no longer hard-cut
+ *  at a fixed character count and waste the available horizontal space. */
+function collapseWhitespace(sql: string): string {
+  return sql.replace(/\s+/g, " ").trim();
 }
