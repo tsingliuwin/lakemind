@@ -1532,6 +1532,27 @@ body.is-resizing-column * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.right .ri-copy-btn {
+  background: transparent;
+  border: none;
+  padding: 3px;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.right .ri-copy-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-hover);
 }
 .right .ri-meta {
   display: flex;
