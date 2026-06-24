@@ -27,8 +27,8 @@ const translations: Record<Language, Record<string, string>> = {
     themeLight: "极致浅色",
     quotaLocal: "本地纯算力",
     quotaUnlimited: "额度无限制",
-    showInspector: "显示检查器",
-    hideInspector: "隐藏检查器",
+    showInspector: "显示表结构",
+    hideInspector: "隐藏表结构",
     showConsole: "显示控制台",
     hideConsole: "隐藏控制台",
 

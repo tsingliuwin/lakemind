@@ -172,16 +172,13 @@ export default function SqlEditor(props: {
           <button class="header-close-btn" title="关闭并放弃查询" onClick={() => props.onClose?.()}>
             ✕
           </button>
-          <button class="run-btn" title={`${t("run")} (Ctrl/Cmd+Enter)`} disabled={props.busy} onClick={() => props.onRun()}>
+          <button class="icon-btn" title={`${t("run")} (Ctrl/Cmd+Enter)`} disabled={props.busy} onClick={() => props.onRun()}>
             <Show when={props.busy} fallback={
-              <>
-                <svg viewBox="0 0 24 24" fill="currentColor" style="width: 10px; height: 10px; margin-right: 4px;">
-                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                </svg>
-                {t("run")}
-              </>
+              <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: "12px", height: "12px" }}>
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
             }>
-              {t("running")}
+              <div class="run-btn-spinner" />
             </Show>
           </button>
         </div>
