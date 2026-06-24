@@ -1,4 +1,4 @@
-import { For, Index, Show, Switch, Match, createSignal, createEffect, onMount, onCleanup, untrack } from "solid-js";
+import { For, Index, Show, Switch, Match, createSignal, createEffect, createMemo, onMount, onCleanup, untrack } from "solid-js";
 import type { ChatMessage, Segment } from "../lib/types";
 import ToolSegment from "./ToolSegment";
 import MarkdownRenderer from "./MarkdownRenderer";
@@ -66,7 +66,7 @@ export default function ChatView(props: {
 
   // 流式输出状态：发送瞬间的本地 busy 与父级 streaming 合成，覆盖
   // start_agent_chat 立即返回但流式仍在进行的窗口期。
-  const isStreaming = () => busy() || props.streaming;
+  const isStreaming = createMemo(() => busy() || props.streaming);
 
   createEffect(() => {
     // Reset confirmation state when messages or active conversation changes
@@ -114,19 +114,43 @@ export default function ChatView(props: {
     });
   }
 
-  // Elapsed timer for busy state
-  const [elapsedSec, setElapsedSec] = createSignal(0);
+  // ── 计时：按墙钟连续走表 ──
+  // 「已工作」「思考过程」计时共用一个每 100ms 推进的时钟，按真实墙钟连续走动，
+  // 不受流式 delta 到达节奏影响——模型卡顿（停顿一会儿再生成）时计时器依旧连续
+  // 推进，不会冻结。旧实现里「思考过程」计时读的是段内存储的 elapsedMs，它只在
+  // 收到 delta 时才更新，卡顿期间就表现为「停住」。
+  const [now, setNow] = createSignal(Date.now());
+  let streamStart = 0; // 当前流式开始的墙钟时间戳；0 表示未开始
 
   createEffect(() => {
     if (isStreaming()) {
-      const start = Date.now();
-      const handle = setInterval(() => {
-        setElapsedSec(Math.floor((Date.now() - start) / 1000));
-      }, 1000);
-      onCleanup(() => clearInterval(handle));
+      if (streamStart === 0) streamStart = Date.now();
     } else {
-      setElapsedSec(0);
+      streamStart = 0;
     }
+  });
+
+  onMount(() => {
+    const handle = setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      // Solid 在 setInterval 驱动下偶发不把 now() 刷新到深层 <Index>/<Show>
+      // 嵌套里的 DOM 文本（表现为「只有来 delta 时计时才动」）。这里直接写
+      // DOM 兜底，保证卡顿（无 delta 到达）期间计时也连续走动。
+      if (isStreaming() && streamStart > 0) {
+        const bt = document.getElementById("chat-bottom-timer");
+        if (bt) bt.textContent = String(Math.floor((t - streamStart) / 1000));
+      }
+      const lm = props.messages[props.messages.length - 1];
+      if (lm && lm.role === "assistant" && isStreaming()) {
+        const s = lm.segments[lm.segments.length - 1];
+        if (s && s.type === "reasoning" && s.startTime != null) {
+          const el = document.getElementById(`rs-timer-${s.id}`);
+          if (el) el.textContent = fmtMs(t - s.startTime);
+        }
+      }
+    }, 100);
+    onCleanup(() => clearInterval(handle));
   });
 
   let scrollEl: HTMLDivElement | undefined;
@@ -231,6 +255,17 @@ export default function ChatView(props: {
     const last = msgs[msgs.length - 1];
     return last.role === "assistant" ? last.id : undefined;
   }
+
+  // Active reasoning segment id during streaming
+  const activeReasoningId = createMemo(() => {
+    const id = lastAssistantId();
+    if (!id) return undefined;
+    const msg = props.messages.find((m) => m.id === id);
+    if (!msg) return undefined;
+    const segs = msg.segments;
+    const last = segs[segs.length - 1];
+    return isStreaming() && last && last.type === "reasoning" ? last.id : undefined;
+  });
 
   // 折叠策略：只有「正在进行中的思考过程」默认展开——即流式输出中且
   // 消息的最后一段仍是 reasoning（还在往里追加）。一旦后面来了 tool/text
@@ -392,6 +427,16 @@ export default function ChatView(props: {
                       const rs = () => asReasoning(seg());
                       const ts = () => asText(seg());
                       const es = () => asError(seg());
+                      // 本段思考耗时：进行中的段按墙钟实时走表（now() 每 100ms 推进，
+                      // 卡顿期间也连续走动）；已结束的段读后端记录的 elapsedMs。
+                      // 用 memo 显式声明对 now() 的依赖，避免内联表达式在深层
+                      // <Index>/<Switch>/<Show> 嵌套下漏更新。
+                      const reasoningMs = createMemo<number | undefined>(() => {
+                        if (seg().id === activeReasoningId() && rs()?.startTime != null) {
+                          return now() - rs()!.startTime!;
+                        }
+                        return rs()?.elapsedMs;
+                      });
                       return (
                         <Switch>
                           <Match when={seg().type === "error" && es()}>
@@ -416,8 +461,8 @@ export default function ChatView(props: {
                                   </svg>
                                 </span>
                                 <span class="chat-reasoning__label">思考过程</span>
-                                 <Show when={rs()?.elapsedMs != null}>
-                                   <span style="color: var(--text-dim); margin-left: 2px;">· {fmtMs(rs()!.elapsedMs!)}</span>
+                                 <Show when={reasoningMs() != null}>
+                                   <span style="color: var(--text-dim); margin-left: 2px;">· <span id={`rs-timer-${seg().id}`}>{fmtMs(reasoningMs()!)}</span></span>
                                  </Show>
                                  <span class="chat-reasoning__toggle" classList={{ "chat-reasoning__toggle--open": openReasoningIds().has(seg().id) }}>
                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 10px; height: 10px; transition: transform 0.15s ease;">
@@ -467,7 +512,7 @@ export default function ChatView(props: {
             <div class="chat-msg chat-msg--assistant">
               <div class="chat-msg__body">
                 <div class="chat-agent-status">
-                  <span class="agent-status__timer">⏱ 已工作 {elapsedSec()} 秒</span>
+                  <span class="agent-status__timer">⏱ 已工作 <span id="chat-bottom-timer">{Math.floor((now() - streamStart) / 1000)}</span> 秒</span>
                   <Show when={currentAction()}>
                     <span class="agent-status__phase">{currentAction()}</span>
                   </Show>
