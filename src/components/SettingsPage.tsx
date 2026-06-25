@@ -635,15 +635,12 @@ export default function SettingsPage(props: {
               
               <For each={settings().providers}>
                 {(prov) => (
-                  <button 
-                    class="sp-provider-item" 
+                  <button
+                    class="sp-provider-item"
                     classList={{ active: selectedProvider() === prov.id && !isAddingProvider() }}
                     onClick={() => { setSelectedProvider(prov.id); setIsAddingProvider(false); }}
                   >
                     <span class="provider-dot" classList={{ active: prov.enabled && !!prov.apiKey }} />
-                    <span class="provider-icon-lbl">
-                      {prov.id === "bigmodel" ? "🔹" : prov.id === "deepseek" ? "🐳" : prov.id === "siliconflow" ? "⚡" : prov.id === "openai" ? "🤖" : "⚙️"}
-                    </span>
                     <span class="provider-name">{prov.name}</span>
                   </button>
                 )}
@@ -661,12 +658,11 @@ export default function SettingsPage(props: {
                 when={!isAddingProvider()}
                 fallback={
                   <>
-                    <div class="provider-detail-header">
-                      <div class="pd-title-group">
-                        <span class="pd-icon">⚙️</span>
-                        <h3>添加模型供应商</h3>
+                      <div class="provider-detail-header">
+                        <div class="pd-title-group">
+                          <h3>添加模型供应商</h3>
+                        </div>
                       </div>
-                    </div>
                     <p class="settings-view-desc" style="margin-top: -10px; margin-bottom: 20px; color: var(--text-dim); font-size: 12px;">
                       配置一个完全自定义的 API 端点和初始模型。
                     </p>
@@ -705,7 +701,17 @@ export default function SettingsPage(props: {
                             onInput={(e) => setNewProviderApiKey(e.currentTarget.value)}
                           />
                           <button class="sp-pwd-toggle" onClick={() => setShowApiKey(!showApiKey())}>
-                            {showApiKey() ? "👁️" : "🙈"}
+                            {showApiKey() ? (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                              </svg>
+                            ) : (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                                <line x1="1" y1="1" x2="23" y2="23"></line>
+                              </svg>
+                            )}
                           </button>
                         </div>
                       </div>
@@ -739,8 +745,18 @@ export default function SettingsPage(props: {
                                     Out: {model.maxTokens || 4096}
                                   </span>
                                   <div class="model-actions-btns" style="display: flex; align-items: center; gap: 8px;">
-                                    <button class="sp-action-icon-btn" title="编辑模型" onClick={() => handleOpenEditTempModel(model)}>✏️</button>
-                                    <button class="sp-action-icon-btn" title="删除模型" onClick={() => setNewProviderModels(newProviderModels().filter(m => m.id !== model.id))}>🗑️</button>
+                                    <button class="sp-action-icon-btn" title="编辑模型" onClick={() => handleOpenEditTempModel(model)}>
+                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                      </svg>
+                                    </button>
+                                    <button class="sp-action-icon-btn" title="删除模型" onClick={() => setNewProviderModels(newProviderModels().filter(m => m.id !== model.id))}>
+                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                                        <polyline points="3 6 5 6 21 6"></polyline>
+                                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                      </svg>
+                                    </button>
                                   </div>
                                 </div>
                               </div>
@@ -780,18 +796,20 @@ export default function SettingsPage(props: {
                     <>
                       <div class="provider-detail-header" style="border-bottom: none; padding-bottom: 0; margin-bottom: 12px;">
                         <div class="pd-title-group">
-                          <span class="pd-icon">
-                            {prov.id === "bigmodel" ? "🔹" : prov.id === "deepseek" ? "🐳" : prov.id === "siliconflow" ? "⚡" : prov.id === "openai" ? "🤖" : "⚙️"}
-                          </span>
                           <Show
                             when={editingProviderId() === prov.id}
                             fallback={
                               <div style="display: flex; align-items: center; gap: 6px;">
                                 <h3>{prov.name}</h3>
-                                <button class="sp-edit-title-btn" onClick={() => {
+                                <button class="sp-edit-title-btn" title="编辑名称" onClick={() => {
                                   setEditingProviderId(prov.id);
                                   setTempName(prov.name);
-                                }}>✏️</button>
+                                }}>
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                  </svg>
+                                </button>
                               </div>
                             }
                           >
@@ -869,7 +887,17 @@ export default function SettingsPage(props: {
                               onInput={(e) => updateProviderProperty(prov.id, "apiKey", e.currentTarget.value)}
                             />
                             <button class="sp-pwd-toggle" onClick={() => setShowApiKey(!showApiKey())}>
-                              {showApiKey() ? "👁️" : "🙈"}
+                              {showApiKey() ? (
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                  <circle cx="12" cy="12" r="3"></circle>
+                                </svg>
+                              ) : (
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                                </svg>
+                              )}
                             </button>
                           </div>
                         </div>
@@ -890,8 +918,18 @@ export default function SettingsPage(props: {
                                     </span>
                                     <div class="model-actions-btns" style="display: flex; align-items: center; gap: 8px;">
 
-                                      <button class="sp-action-icon-btn" title="编辑模型" onClick={() => handleOpenEditModel(model)}>✏️</button>
-                                      <button class="sp-action-icon-btn" title="删除模型" onClick={() => handleDeleteModel(model.id)}>🗑️</button>
+                                      <button class="sp-action-icon-btn" title="编辑模型" onClick={() => handleOpenEditModel(model)}>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                        </svg>
+                                      </button>
+                                      <button class="sp-action-icon-btn" title="删除模型" onClick={() => handleDeleteModel(model.id)}>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                                          <polyline points="3 6 5 6 21 6"></polyline>
+                                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                        </svg>
+                                      </button>
                                     </div>
                                   </div>
                                 </div>

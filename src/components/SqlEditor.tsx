@@ -32,6 +32,10 @@ export default function SqlEditor(props: {
   const [editorHeight, setEditorHeight] = createSignal(180);
   const [formatState, setFormatState] = createSignal<"idle" | "ok" | "err">("idle");
   const [formatErr, setFormatErr] = createSignal<string | null>(null);
+  // 行数限制自定义下拉的展开状态。原生 <select> 的下拉面板宽度由系统控制、
+  // 无法与选择框等宽，改用自定义下拉以统一宽度。
+  const [rowcapOpen, setRowcapOpen] = createSignal(false);
+  let rowcapWrapperRef!: HTMLDivElement;
   let host!: HTMLDivElement;
 
   function startDraggingHeight(e: MouseEvent) {
@@ -106,6 +110,18 @@ export default function SqlEditor(props: {
       setTimeout(() => setFormatState("idle"), 3000);
     }
   }
+
+  // 点击行数下拉外部时收起。
+  onMount(() => {
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (rowcapOpen() && rowcapWrapperRef && !rowcapWrapperRef.contains(target)) {
+        setRowcapOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    onCleanup(() => document.removeEventListener("mousedown", onDocClick));
+  });
 
   onMount(() => {
     const state = EditorState.create({
@@ -202,15 +218,34 @@ export default function SqlEditor(props: {
     <div class="editor-card">
       <div class="editor-toolbar">
         <div class="right-tools">
-          <select
-            class="rowcap-select"
-            title={t("rowCountLimit")}
-            disabled={props.busy}
-            value={props.rowCap}
-            onChange={(e) => props.onRowCap(Number(e.currentTarget.value))}
-          >
-            <For each={[...ROW_CAP_OPTIONS]}>{(o) => <option value={o.value}>{o.label}</option>}</For>
-          </select>
+          <div class="rowcap-dropdown-wrapper" ref={rowcapWrapperRef}>
+            <button
+              class="rowcap-select"
+              title={t("rowCountLimit")}
+              disabled={props.busy}
+              onClick={() => setRowcapOpen(!rowcapOpen())}
+            >
+              <span>{ROW_CAP_OPTIONS.find(o => o.value === props.rowCap)?.label ?? ROW_CAP_OPTIONS[0].label}</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 10px; height: 10px;">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            <Show when={rowcapOpen()}>
+              <div class="rowcap-dropdown-list">
+                <For each={[...ROW_CAP_OPTIONS]}>
+                  {(o) => (
+                    <button
+                      class="rowcap-dropdown-item"
+                      classList={{ active: o.value === props.rowCap }}
+                      onClick={() => { props.onRowCap(o.value); setRowcapOpen(false); }}
+                    >
+                      {o.label}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </div>
           <button
             class="icon-btn"
             title={formatErr() ? `${t("formatSqlFailed")}：${formatErr()}` : `${t("formatSql")} (Ctrl/Cmd+Shift+F)`}

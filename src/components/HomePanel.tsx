@@ -105,7 +105,11 @@ export default function HomePanel(props: HomePanelProps) {
           <div class="pill-header">
             <div class="ws-dropdown-wrapper" ref={wsRef}>
               <button class="ws-trigger-btn" onClick={() => setWsMenuOpen(!wsMenuOpen())}>
-                <span class="ws-icon">📁</span>
+                <span class="ws-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                </span>
                 <span class="ws-name">{props.workspace}</span>
                 <span class="ws-caret">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -118,7 +122,12 @@ export default function HomePanel(props: HomePanelProps) {
               <Show when={wsMenuOpen()}>
                 <div class="ws-popover">
                   <div class="ws-search-box">
-                    <span class="search-icon">🔍</span>
+                    <span class="search-icon">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                      </svg>
+                    </span>
                     <input 
                       type="text" 
                       placeholder="搜索工作区" 
@@ -139,16 +148,23 @@ export default function HomePanel(props: HomePanelProps) {
                             setWsMenuOpen(false);
                           }}
                         >
-                          <span class="ws-item-icon">📁</span>
+                          <span class="ws-item-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                          </span>
                           <span class="ws-item-label">{ws.name}</span>
-                          <Show when={ws.name === props.workspace}>
-                            <span class="ws-item-check">✓</span>
-                          </Show>
                         </button>
                       )}
                     </For>
                     <button class="ws-item" onClick={handleOpenFolder}>
-                      <span class="ws-item-icon">📂</span>
+                      <span class="ws-item-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                          <line x1="12" y1="11" x2="12" y2="17"></line>
+                          <polyline points="9 14 12 11 15 14"></polyline>
+                        </svg>
+                      </span>
                       <span class="ws-item-label">打开文件夹</span>
                     </button>
                   </div>
@@ -162,7 +178,7 @@ export default function HomePanel(props: HomePanelProps) {
             {/* Text Area */}
             <div class="pill-body">
               <textarea
-                placeholder="向 ZCode 提问，输入 @ 添加文件, / 使用命令, $ 使用技能, # 关联对话"
+                placeholder="向 LakeMind 提问，或点击 + 添加数据文件"
                 value={inputValue()}
                 onInput={(e) => setInputValue(e.currentTarget.value)}
                 onKeyDown={handleKeyDown}
@@ -187,7 +203,19 @@ export default function HomePanel(props: HomePanelProps) {
                 {/* Confirmation Mode Selector Dropdown */}
                 <div class="dropdown-wrapper" ref={confirmRef}>
                   <button class="pill-btn select-btn" onClick={() => setConfirmDropdownOpen(!confirmDropdownOpen())}>
-                    <span class="btn-prefix">{selectedConfirm() === "自动执行" ? "⚡" : "✋"}</span>
+                    <span class="btn-prefix">
+                      {selectedConfirm() === "自动执行" ? (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                          <path d="M9 11V6a2 2 0 0 1 4 0v5"></path>
+                          <path d="M13 6a2 2 0 0 1 4 0v5"></path>
+                          <path d="M17 6a2 2 0 0 1 4 0v8a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path>
+                        </svg>
+                      )}
+                    </span>
                     <span>{selectedConfirm()}</span>
                     <span class="btn-caret">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -196,12 +224,22 @@ export default function HomePanel(props: HomePanelProps) {
                     </span>
                   </button>
                   <Show when={confirmDropdownOpen()}>
-                    <div class="custom-dropdown-list">
+                    <div class="custom-dropdown-list fit-trigger">
                       <button class="dropdown-item" onClick={() => { setSelectedConfirm("变更前确认"); setConfirmDropdownOpen(false); }}>
-                        <span class="btn-prefix">✋</span> 变更前确认
+                        <span class="btn-prefix">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                            <path d="M9 11V6a2 2 0 0 1 4 0v5"></path>
+                            <path d="M13 6a2 2 0 0 1 4 0v5"></path>
+                            <path d="M17 6a2 2 0 0 1 4 0v8a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path>
+                          </svg>
+                        </span> 变更前确认
                       </button>
                       <button class="dropdown-item" onClick={() => { setSelectedConfirm("自动执行"); setConfirmDropdownOpen(false); }}>
-                        <span class="btn-prefix">⚡</span> 自动执行
+                        <span class="btn-prefix">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                          </svg>
+                        </span> 自动执行
                       </button>
                     </div>
                   </Show>
@@ -212,7 +250,20 @@ export default function HomePanel(props: HomePanelProps) {
                 {/* Model Selector Dropdown */}
                 <div class="dropdown-wrapper" ref={modelRef}>
                   <button class="pill-btn select-btn" onClick={() => setModelDropdownOpen(!modelDropdownOpen())}>
-                    <span class="model-status-dot" classList={{ active: props.availableModels.length > 0 }} />
+                    <span class="model-icon">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                        <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+                        <rect x="9" y="9" width="6" height="6"></rect>
+                        <line x1="9" y1="1" x2="9" y2="4"></line>
+                        <line x1="15" y1="1" x2="15" y2="4"></line>
+                        <line x1="9" y1="20" x2="9" y2="23"></line>
+                        <line x1="15" y1="20" x2="15" y2="23"></line>
+                        <line x1="20" y1="9" x2="23" y2="9"></line>
+                        <line x1="20" y1="14" x2="23" y2="14"></line>
+                        <line x1="1" y1="9" x2="4" y2="9"></line>
+                        <line x1="1" y1="14" x2="4" y2="14"></line>
+                      </svg>
+                    </span>
                     <span>{props.selectedModel || "选择模型"}</span>
                     <span class="btn-caret">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -245,7 +296,12 @@ export default function HomePanel(props: HomePanelProps) {
                 {/* Priority Selector Dropdown */}
                 <div class="dropdown-wrapper" ref={priorityRef}>
                   <button class="pill-btn select-btn" onClick={() => setPriorityDropdownOpen(!priorityDropdownOpen())}>
-                    <span class="btn-prefix">⚙️</span>
+                    <span class="btn-prefix">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                        <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 0 0 12 18a3 3 0 0 0 0-6 3 3 0 0 0 0-6Z"></path>
+                        <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 0 1 12 18"></path>
+                      </svg>
+                    </span>
                     <span>{props.selectedPriority}</span>
                     <span class="btn-caret">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -254,7 +310,7 @@ export default function HomePanel(props: HomePanelProps) {
                     </span>
                   </button>
                   <Show when={priorityDropdownOpen()}>
-                    <div class="custom-dropdown-list">
+                    <div class="custom-dropdown-list fit-trigger">
                       <button class="dropdown-item" onClick={() => { props.onSelectPriority("最高"); setPriorityDropdownOpen(false); }}>
                         最高
                       </button>

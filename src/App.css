@@ -677,7 +677,7 @@ select:hover:not(:disabled) {
   color: var(--text-primary);
 }
 .ln-arrow-btn.active {
-  color: var(--accent-blue);
+  color: var(--text-primary);
 }
 
 /* Quick actions */
@@ -715,7 +715,7 @@ select:hover:not(:disabled) {
   height: 14px;
 }
 .ln-action-btn:hover .action-icon {
-  color: var(--accent-blue);
+  color: var(--text-primary);
 }
 .ln-action-btn .action-label {
   flex: 1;
@@ -1069,36 +1069,73 @@ select:hover:not(:disabled) {
   font-size: 11px;
   color: var(--text-secondary);
 }
+.rowcap-dropdown-wrapper {
+  position: relative;
+}
+
+/* 行数限制自定义下拉触发器（原为原生 <select>）。 */
 .rowcap-select {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
   font-size: 11px;
   font-family: var(--font-mono);
-  background-color: var(--bg-surface);
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  background-size: 10px;
+  background: var(--bg-surface);
   color: var(--text-secondary);
-  border: 1px solid var(--border-strong);
+  border: none;
   border-radius: 6px;
   height: 28px;
-  padding: 0 24px 0 10px;
+  padding: 0 8px;
   cursor: pointer;
   outline: none;
   transition: all 0.15s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 .rowcap-select:hover:not(:disabled) {
-  background-color: var(--bg-hover);
+  background: var(--bg-hover);
   color: var(--text-primary);
-  border-color: var(--border-strong);
 }
 .rowcap-select:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.rowcap-select svg {
+  color: var(--text-dim);
+}
+
+/* 下拉面板：宽度跟触发器等宽（min-width:100%），在工具栏下方展开。 */
+.rowcap-dropdown-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 110;
+}
+.rowcap-dropdown-item {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.rowcap-dropdown-item:hover,
+.rowcap-dropdown-item.active {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 .run-btn-spinner {
   width: 12px;
   height: 12px;
@@ -1111,7 +1148,7 @@ select:hover:not(:disabled) {
 .editor-toolbar .icon-btn {
   width: 28px;
   height: 28px;
-  border: 1px solid var(--border-strong);
+  border: none;
   background: var(--bg-surface);
   color: var(--text-secondary);
   border-radius: 6px;
@@ -1120,18 +1157,16 @@ select:hover:not(:disabled) {
   align-items: center;
   justify-content: center;
   transition: all 0.15s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 .editor-toolbar .icon-btn:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text-primary);
-  border-color: var(--border-strong);
 }
 
 .editor-toolbar .header-close-btn {
   width: 28px;
   height: 28px;
-  border: 1px solid var(--border-strong);
+  border: none;
   background: var(--bg-surface);
   color: var(--text-secondary);
   border-radius: 6px;
@@ -1141,12 +1176,10 @@ select:hover:not(:disabled) {
   align-items: center;
   justify-content: center;
   transition: all 0.15s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 .editor-toolbar .header-close-btn:hover {
-  background: rgba(239, 68, 68, 0.1) !important;
-  color: var(--accent-red) !important;
-  border-color: rgba(239, 68, 68, 0.2);
+  background: var(--bg-active) !important;
+  color: var(--text-primary) !important;
 }
 
 .editor-toolbar button:active:not(:disabled) {
@@ -1318,8 +1351,8 @@ body.dragging-active-v * {
   transition: all 0.15s ease;
 }
 .result-tab-item .tab-close-btn:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: var(--accent-red);
+  background: var(--bg-active);
+  color: var(--text-primary);
 }
 .result-tab-item .tab-rename-input {
   background: var(--bg-hover);
@@ -1478,7 +1511,7 @@ body.is-resizing-column * {
   font-size: 10px;
   font-weight: 700;
   color: var(--text-secondary);
-  border-bottom: 2px solid var(--accent-blue);
+  border-bottom: 2px solid var(--text-secondary);
   height: 100%;
   display: flex;
   align-items: center;
@@ -2197,7 +2230,7 @@ body.is-resizing-column * {
 
 .cmd-key {
   font-family: var(--font-mono, "SF Mono", Menlo, Consolas, monospace);
-  color: var(--accent-blue);
+  color: var(--text-primary);
   background: var(--bg-hover);
   border-radius: 4px;
   padding: 3px 8px !important;
@@ -2234,7 +2267,7 @@ body.is-resizing-column * {
   transition: transform 0.15s ease;
 }
 .ss-toggle.on {
-  background: var(--accent-blue);
+  background: var(--accent-green);
 }
 .ss-toggle.on::after {
   transform: translateX(16px);
@@ -2430,10 +2463,6 @@ body.is-resizing-column * {
   box-shadow: 0 0 4px var(--accent-green);
 }
 
-.provider-icon-lbl {
-  font-size: 12px;
-}
-
 .sp-add-btn {
   background: transparent;
   border: 1px dashed var(--border-strong);
@@ -2470,10 +2499,6 @@ body.is-resizing-column * {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.pd-title-group .pd-icon {
-  font-size: 18px;
 }
 
 .pd-title-group h3 {
@@ -2878,7 +2903,7 @@ body.is-resizing-column * {
 
 .ws-trigger-btn {
   background: transparent;
-  border: 1px solid transparent;
+  border: none;
   border-radius: 6px;
   padding: 4px 8px;
   display: flex;
@@ -2996,11 +3021,6 @@ body.is-resizing-column * {
   white-space: nowrap;
 }
 
-.ws-item-check {
-  color: var(--accent-blue);
-  font-weight: 700;
-}
-
 .ws-popover-divider {
   height: 1px;
   background: var(--border-faint);
@@ -3079,7 +3099,7 @@ body.is-resizing-column * {
 
 .pill-btn {
   background: transparent;
-  border: 1px solid transparent;
+  border: none;
   color: var(--text-secondary);
   cursor: pointer;
   display: flex;
@@ -3092,7 +3112,7 @@ body.is-resizing-column * {
   width: 24px;
   height: 24px;
   border-radius: 6px;
-  border: 1px solid transparent;
+  border: none;
   background: transparent;
   color: var(--text-secondary);
   padding: 0;
@@ -3115,7 +3135,7 @@ body.is-resizing-column * {
 
 .select-btn {
   background: transparent;
-  border: 1px solid transparent;
+  border: none;
   border-radius: 6px;
   padding: 4px 10px;
   font-size: 11px;
@@ -3131,13 +3151,11 @@ body.is-resizing-column * {
 .select-btn.active {
   background: var(--bg-hover);
   color: var(--text-primary);
-  border-color: transparent;
 }
 
 .select-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
-  border-color: transparent;
 }
 
 .btn-prefix {
@@ -3150,15 +3168,10 @@ body.is-resizing-column * {
   color: var(--text-dim);
 }
 
-.model-status-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  border: 1px solid var(--accent-green);
-  background: transparent;
-}
-.model-status-dot.active {
-  background: var(--accent-green);
+.model-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-dim);
 }
 
 /* Custom Dropdown Lists */
@@ -3193,6 +3206,14 @@ body.is-resizing-column * {
 .dropdown-item:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+/* 下拉面板宽度跟触发按钮等宽（与按钮左右对齐），
+ * 覆盖共用的 min-width:120px。变更前确认 / 思考等级共用。 */
+.custom-dropdown-list.fit-trigger {
+  min-width: 100%;
+  width: max-content;
+  max-width: 200px;
 }
 
 /* Send task button */
@@ -4676,9 +4697,9 @@ body.is-resizing-column * {
 
 /* Custom action buttons */
 .sp-btn-danger {
-  background: var(--accent-red-bg) !important;
-  border: 1px solid rgba(239, 68, 68, 0.2) !important;
-  color: var(--accent-red) !important;
+  background: transparent !important;
+  border: 1px solid var(--border-strong) !important;
+  color: var(--text-secondary) !important;
   padding: 4px 10px !important;
   font-size: 11px !important;
   border-radius: 4px !important;
@@ -4687,9 +4708,8 @@ body.is-resizing-column * {
 }
 
 .sp-btn-danger:hover {
-  border-color: var(--accent-red) !important;
-  background: var(--accent-red) !important;
-  color: #fff !important;
+  background: var(--bg-active) !important;
+  color: var(--text-primary) !important;
 }
 
 /* ===========================================================================
@@ -4727,13 +4747,13 @@ body.is-resizing-column * {
 }
 
 .sp-status-btn-group .status-btn.active.enabled-btn {
-  background: var(--accent-green) !important;
-  color: #fff !important;
+  background: var(--bg-active) !important;
+  color: var(--text-primary) !important;
   font-weight: 600;
 }
 
 .sp-status-btn-group .status-btn.active.disabled-btn {
-  background: rgba(255, 255, 255, 0.1) !important;
+  background: var(--bg-active) !important;
   color: var(--text-primary) !important;
   font-weight: 600;
 }
