@@ -1,10 +1,11 @@
 import { For, Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
-import { EditorState } from "@codemirror/state";
+import { EditorState, Compartment } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { sql } from "@codemirror/lang-sql";
-import { oneDark } from "@codemirror/theme-one-dark";
+import { githubLight, githubDark } from "@uiw/codemirror-theme-github";
 import { formatDuckdbSql } from "../lib/sqlFormat";
+import { isLightCodeTheme, codeLineNumbers, codeWrap, codeFontSize } from "../lib/codeConfig";
 import { ROW_CAP_OPTIONS } from "../lib/types";
 import { t } from "../lib/i18n";
 
@@ -55,6 +56,27 @@ export default function SqlEditor(props: {
     document.body.classList.add("dragging-active-v");
   }
   let view: EditorView | undefined;
+  // Compartments for runtime-swappable extensions: theme, line numbers, and
+  // line wrapping. Each can be reconfigured via dispatch({effects: ...reconfigure})
+  // without rebuilding the editor — the standard CodeMirror 6 pattern.
+  const themeCompartment = new Compartment();
+  const lineNumberCompartment = new Compartment();
+  const lineWrapCompartment = new Compartment();
+  /** Editor chrome theme (background, selection, font-size). Uses a compartment
+   *  so font-size changes from settings reconfigure without rebuilding. */
+  const styleCompartment = new Compartment();
+  /** Pick the CodeMirror theme matching the current code-theme light/dark. */
+  const cmTheme = () => (isLightCodeTheme() ? githubLight : githubDark);
+  /** Editor chrome theme extension driven by codeFontSize(). */
+  const cmStyle = () => EditorView.theme({
+    "&": { backgroundColor: "var(--bg-surface)" },
+    ".cm-content": { fontSize: `${codeFontSize()}px` },
+    ".cm-gutters": { backgroundColor: "var(--bg-surface)", border: "none", fontSize: `${codeFontSize()}px` },
+    "&.cm-focused": { outline: "none" },
+    ".cm-selectionBackground": { backgroundColor: "var(--cm-selection-bg) !important" },
+    "&.cm-focused .cm-selectionBackground": { backgroundColor: "var(--cm-selection-bg-focused) !important" },
+    "::selection": { backgroundColor: "var(--cm-selection-bg-focused) !important" },
+  });
 
   /**
    * 用 sql-formatter 的 DuckDB 方言格式化当前编辑器全文。成功后替换整个文档
@@ -117,29 +139,15 @@ export default function SqlEditor(props: {
           ...defaultKeymap,
           ...historyKeymap,
         ]),
-        lineNumbers(),
         sql(),
-        oneDark,
-        EditorView.lineWrapping,
+        themeCompartment.of(cmTheme()),
+        // 行号 / 换行由代码预览设置驱动，用 compartment 以便运行时切换。
+        lineNumberCompartment.of(codeLineNumbers() ? lineNumbers() : []),
+        lineWrapCompartment.of(codeWrap() ? EditorView.lineWrapping : []),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) props.onSql(u.state.doc.toString());
         }),
-        EditorView.theme({
-          "&": { backgroundColor: "var(--bg-surface)" },
-          ".cm-gutters": { backgroundColor: "var(--bg-surface)", border: "none" },
-          "&.cm-focused": { outline: "none" },
-          // 选区高亮：聚焦/失焦都保持清晰可辨。oneDark 默认选区色在
-          // 自定义 --bg-surface 上对比不足，这里用主题变量显式覆盖。
-          ".cm-selectionBackground": {
-            backgroundColor: "var(--cm-selection-bg) !important",
-          },
-          "&.cm-focused .cm-selectionBackground": {
-            backgroundColor: "var(--cm-selection-bg-focused) !important",
-          },
-          "::selection": {
-            backgroundColor: "var(--cm-selection-bg-focused) !important",
-          },
-        }),
+        styleCompartment.of(cmStyle()),
       ],
     });
     view = new EditorView({ state, parent: host });
@@ -157,6 +165,37 @@ export default function SqlEditor(props: {
         changes: { from: 0, to: v.state.doc.length, insert: next },
       });
     }
+  });
+
+  // 代码主题明暗变化时（设置页切换主题，或界面明暗切换）热替换编辑器主题。
+  // 读 isLightCodeTheme() 建立依赖；reconfigure 只换主题扩展，不动文档/光标。
+  createEffect(() => {
+    const v = view;
+    if (!v) return;
+    void isLightCodeTheme();
+    v.dispatch({ effects: themeCompartment.reconfigure(cmTheme()) });
+  });
+
+  // 行号 / 换行 / 字号变化时热替换对应扩展。分别读信号建立依赖。
+  createEffect(() => {
+    const v = view;
+    if (!v) return;
+    void codeLineNumbers();
+    v.dispatch({ effects: lineNumberCompartment.reconfigure(codeLineNumbers() ? lineNumbers() : []) });
+  });
+
+  createEffect(() => {
+    const v = view;
+    if (!v) return;
+    void codeWrap();
+    v.dispatch({ effects: lineWrapCompartment.reconfigure(codeWrap() ? EditorView.lineWrapping : []) });
+  });
+
+  createEffect(() => {
+    const v = view;
+    if (!v) return;
+    void codeFontSize();
+    v.dispatch({ effects: styleCompartment.reconfigure(cmStyle()) });
   });
 
   return (

@@ -2366,6 +2366,79 @@ body.is-resizing-column * {
   max-width: 680px;
 }
 
+/* Commands tab: card title + two-column reference table (快捷键 / AI 工具). */
+.settings-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  padding: 14px 20px 8px;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.cmd-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.cmd-table tr {
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.cmd-table tr:last-child {
+  border-bottom: none;
+}
+
+.cmd-table td {
+  padding: 11px 20px;
+  font-size: 12.5px;
+  vertical-align: middle;
+}
+
+.cmd-key {
+  font-family: var(--font-mono, "SF Mono", Menlo, Consolas, monospace);
+  color: var(--accent-blue);
+  background: var(--bg-hover);
+  border-radius: 4px;
+  padding: 3px 8px !important;
+  white-space: nowrap;
+  width: 1%;
+}
+
+.cmd-desc {
+  color: var(--text-secondary);
+  padding-left: 16px !important;
+}
+
+/* Code preview tab: toggle switch + live preview box. */
+.ss-toggle {
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  border: none;
+  background: var(--border-strong);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+.ss-toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  transition: transform 0.15s ease;
+}
+.ss-toggle.on {
+  background: var(--accent-blue);
+}
+.ss-toggle.on::after {
+  transform: translateX(16px);
+}
+
 .settings-row-control {
   display: flex;
   flex-direction: row;
@@ -3931,23 +4004,42 @@ body.is-resizing-column * {
 }
 
 /* 代码块 — 截图中深色背景 + 语言标签 */
+/* Shiki-highlighted code blocks: Shiki emits its own background/border-radius
+ * inline (from the theme), so we only constrain layout + apply the configurable
+ * font size. `.shiki` is the class Shiki wraps its output in. */
+.md-rendered .shiki,
 .md-rendered pre {
-  background: #0a0a0d;
-  border: 1px solid var(--border-faint);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   overflow-x: auto;
   margin: 8px 0;
   position: relative;
-}
-.md-rendered pre code {
+  font-size: var(--code-font-size, 12px);
   font-family: var(--font-mono);
-  font-size: 12px;
+}
+.md-rendered pre code,
+.md-rendered .shiki code {
+  font-family: var(--font-mono);
   line-height: 1.55;
-  color: var(--text-primary);
   background: transparent;
   padding: 0;
   border-radius: 0;
+}
+/* Line numbers: Shiki tags each line with .numbered-line; CSS renders the counter. */
+.md-rendered .shiki {
+  counter-reset: line;
+}
+.md-rendered .numbered-line {
+  counter-increment: line;
+}
+.md-rendered .numbered-line::before {
+  content: counter(line);
+  display: inline-block;
+  width: 1.8em;
+  margin-right: 1em;
+  text-align: right;
+  opacity: 0.4;
+  user-select: none;
 }
 
 /* 表格 — 截图中的结构化表格 */

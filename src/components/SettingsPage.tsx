@@ -2,6 +2,11 @@ import { createSignal, Show, onMount, For } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t, currentLanguage, setCurrentLanguage } from "../lib/i18n";
 import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom, logoSrc } from "../lib/theme";
+import {
+  codeFontSize, setCodeFontSizeP,
+  codeLineNumbers, setCodeLineNumbersP,
+  codeWrap, setCodeWrapP,
+} from "../lib/codeConfig";
 
 const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
@@ -517,6 +522,93 @@ export default function SettingsPage(props: {
           </div>
         </Show>
 
+        {/* Tab: Commands (命令) — 快捷键 + AI 数据工具的透明清单。
+            命令集相对固定，采用前端静态清单；新增命令/工具时需同步更新下表。 */}
+        <Show when={activeTab() === "commands"}>
+          <div class="settings-view-header">
+            <h2>{t("settingsCommands")}</h2>
+            <p class="settings-view-subtitle">查看应用支持的快捷键与 AI 数据工具。</p>
+          </div>
+
+          {/* 分类一：快捷键 */}
+          <div class="settings-section-card">
+            <div class="settings-card-title">快捷键</div>
+            <table class="cmd-table">
+              <tbody>
+                <tr><td class="cmd-key">⌘ N</td><td class="cmd-desc">新建查询</td></tr>
+                <tr><td class="cmd-key">⇧ ⌘ N</td><td class="cmd-desc">新建对话</td></tr>
+                <tr><td class="cmd-key">⌘ S</td><td class="cmd-desc">保存当前查询</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* 分类二：AI 数据工具（对话模式下 Agent 可调用的工具） */}
+          <div class="settings-section-card">
+            <div class="settings-card-title">AI 数据工具</div>
+            <table class="cmd-table">
+              <tbody>
+                <tr><td class="cmd-key">list_tables</td><td class="cmd-desc">列出当前数据库中的所有数据表和视图名。</td></tr>
+                <tr><td class="cmd-key">describe_table</td><td class="cmd-desc">获取指定表或视图的结构（列名、数据类型等）。</td></tr>
+                <tr><td class="cmd-key">execute_query</td><td class="cmd-desc">执行只读的 SQL 查询，并返回结果。</td></tr>
+                <tr><td class="cmd-key">sample_data</td><td class="cmd-desc">获取指定表或视图的前 5 行样例数据。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </Show>
+
+        {/* Tab: Code Preview (代码预览) — 代码块语法高亮配置，全部立即生效。 */}
+        <Show when={activeTab() === "codePreview"}>
+          <div class="settings-view-header">
+            <h2>{t("settingsCodePreview")}</h2>
+            <p class="settings-view-subtitle">调整代码块的显示样式，配色随界面主题自动切换。</p>
+          </div>
+
+          <div class="settings-section-card">
+            <div class="settings-card-title">显示</div>
+
+            <div class="settings-row-control">
+              <div class="settings-row-info">
+                <span class="label-title">显示行号</span>
+                <p class="settings-row-desc">在每行代码前标注序号，便于定位。</p>
+              </div>
+              <button
+                class="ss-toggle"
+                classList={{ on: codeLineNumbers() }}
+                onClick={() => setCodeLineNumbersP(!codeLineNumbers())}
+                aria-label="显示行号"
+              />
+            </div>
+
+            <div class="settings-row-control">
+              <div class="settings-row-info">
+                <span class="label-title">长行自动换行</span>
+                <p class="settings-row-desc">超出宽度的代码自动折行显示，避免横向滚动。</p>
+              </div>
+              <button
+                class="ss-toggle"
+                classList={{ on: codeWrap() }}
+                onClick={() => setCodeWrapP(!codeWrap())}
+                aria-label="长行自动换行"
+              />
+            </div>
+
+            <div class="settings-row-control">
+              <div class="settings-row-info">
+                <span class="label-title">代码字号</span>
+                <p class="settings-row-desc">代码块的字号大小，单位为像素。</p>
+              </div>
+              <div class="select-wrapper">
+                <select value={String(codeFontSize())} onChange={(e) => setCodeFontSizeP(parseInt(e.currentTarget.value))}>
+                  <option value="12">12</option>
+                  <option value="13">13</option>
+                  <option value="14">14</option>
+                  <option value="16">16</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </Show>
+
         {/* Tab 2: Model Settings (模型设置) - Premium High-Fidelity Details */}
         <Show when={activeTab() === "modelSettings"}>
           <div class="settings-view-header">
@@ -809,7 +901,7 @@ export default function SettingsPage(props: {
         </Show>
 
         {/* Placeholders for other tabs */}
-        <Show when={activeTab() !== "general" && activeTab() !== "modelSettings"}>
+        <Show when={activeTab() !== "general" && activeTab() !== "modelSettings" && activeTab() !== "commands" && activeTab() !== "codePreview"}>
           <div class="settings-view-header">
             <h2>{t("settings")}</h2>
             <p class="settings-view-subtitle">{t("moduleDeveloping")}...</p>
