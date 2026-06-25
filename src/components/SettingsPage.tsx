@@ -1,5 +1,6 @@
 import { createSignal, Show, onMount, For } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import Select from "./Select";
 import { t, currentLanguage, setCurrentLanguage } from "../lib/i18n";
 import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom, logoSrc } from "../lib/theme";
 import {
@@ -32,6 +33,30 @@ const HIDDEN_TABS = new Set<SettingsTab>([
   "stats",
   "guide",
 ]);
+
+/* 主题选项的小图标（月亮 = 暗色、太阳 = 浅色），线条风格，替代 emoji。 */
+function MoonIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+    </svg>
+  );
+}
+function SunIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  );
+}
 
 export interface ModelItem {
   id: string;
@@ -476,16 +501,16 @@ export default function SettingsPage(props: {
                 <span class="label-title">界面主题</span>
                 <p class="settings-row-desc">切换应用界面使用的主题外观。</p>
               </div>
-              <div class="select-wrapper">
-                <select 
-                  value={currentTheme()} 
-                  onChange={(e) => setCurrentTheme(e.currentTarget.value as any)}
-                >
-                  <option value="geek-dark">🌙 极客暗黑</option>
-                  <option value="classic-dark">🌙 经典深色</option>
-                  <option value="light">☀️ 极致浅色</option>
-                </select>
-              </div>
+              <Select
+                value={currentTheme()}
+                onChange={(v) => setCurrentTheme(v as any)}
+                width="140px"
+                options={[
+                  { value: "geek-dark", label: "极客暗黑", icon: <MoonIcon /> },
+                  { value: "classic-dark", label: "经典深色", icon: <MoonIcon /> },
+                  { value: "light", label: "极致浅色", icon: <SunIcon /> },
+                ]}
+              />
             </div>
 
             <div class="settings-row-control">
@@ -493,15 +518,15 @@ export default function SettingsPage(props: {
                 <span class="label-title">界面语言</span>
                 <p class="settings-row-desc">选择应用 UI 的显示语言。</p>
               </div>
-              <div class="select-wrapper">
-                <select 
-                  value={currentLanguage()} 
-                  onChange={(e) => setCurrentLanguage(e.currentTarget.value as any)}
-                >
-                  <option value="zh">简体中文</option>
-                  <option value="en">English</option>
-                </select>
-              </div>
+              <Select
+                value={currentLanguage()}
+                onChange={(v) => setCurrentLanguage(v as any)}
+                width="140px"
+                options={[
+                  { value: "zh", label: "简体中文" },
+                  { value: "en", label: "English" },
+                ]}
+              />
             </div>
 
             <div class="settings-row-control">
@@ -608,14 +633,17 @@ export default function SettingsPage(props: {
                 <span class="label-title">代码字号</span>
                 <p class="settings-row-desc">代码块的字号大小，单位为像素。</p>
               </div>
-              <div class="select-wrapper">
-                <select value={String(codeFontSize())} onChange={(e) => setCodeFontSizeP(parseInt(e.currentTarget.value))}>
-                  <option value="12">12</option>
-                  <option value="13">13</option>
-                  <option value="14">14</option>
-                  <option value="16">16</option>
-                </select>
-              </div>
+              <Select
+                value={String(codeFontSize())}
+                onChange={(v) => setCodeFontSizeP(parseInt(v))}
+                width="110px"
+                options={[
+                  { value: "12", label: "12" },
+                  { value: "13", label: "13" },
+                  { value: "14", label: "14" },
+                  { value: "16", label: "16" },
+                ]}
+              />
             </div>
           </div>
         </Show>
@@ -718,16 +746,16 @@ export default function SettingsPage(props: {
 
                       <div class="sp-form-row">
                         <span class="sp-form-label">API 格式</span>
-                        <div class="select-wrapper" style="width: 100%;">
-                          <select 
+                          <Select
                             value={newProviderFormat()}
-                            onChange={(e) => setNewProviderFormat(e.currentTarget.value as any)}
-                          >
-                            <option value="anthropic">Anthropic Messages (/v1/messages)</option>
-                            <option value="openai">Chat Completions (/chat/completions)</option>
-                            <option value="responses">Responses (/responses)</option>
-                          </select>
-                        </div>
+                            onChange={(v) => setNewProviderFormat(v as any)}
+                            width="100%"
+                            options={[
+                              { value: "anthropic", label: "Anthropic Messages (/v1/messages)" },
+                              { value: "openai", label: "Chat Completions (/chat/completions)" },
+                              { value: "responses", label: "Responses (/responses)" },
+                            ]}
+                          />
                       </div>
 
                       <div class="sp-form-row" style="margin-top: 10px;">
@@ -864,16 +892,16 @@ export default function SettingsPage(props: {
 
                         <div class="sp-form-row">
                           <span class="sp-form-label">API 格式</span>
-                          <div class="select-wrapper" style="width: 100%;">
-                            <select 
+                            <Select
                               value={prov.apiFormat}
-                              onChange={(e) => updateProviderProperty(prov.id, "apiFormat", e.currentTarget.value as any)}
-                            >
-                              <option value="anthropic">Anthropic Messages (/v1/messages)</option>
-                              <option value="openai">Chat Completions (/chat/completions)</option>
-                              <option value="responses">Responses (/responses)</option>
-                            </select>
-                          </div>
+                              onChange={(v) => updateProviderProperty(prov.id, "apiFormat", v as any)}
+                              width="100%"
+                              options={[
+                                { value: "anthropic", label: "Anthropic Messages (/v1/messages)" },
+                                { value: "openai", label: "Chat Completions (/chat/completions)" },
+                                { value: "responses", label: "Responses (/responses)" },
+                              ]}
+                            />
                         </div>
 
                         <div class="sp-form-row">

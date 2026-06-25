@@ -2309,12 +2309,12 @@ body.is-resizing-column * {
 }
 
 /* Custom styled select dropdown wrapper matching ZCode design */
-.select-wrapper {
+/* 通用自定义下拉（components/Select.tsx），替代原生 <select>。
+ * 面板宽度跟触发器等宽，配色跟随主题，消除系统蓝高亮。 */
+.lm-select-wrapper {
   position: relative;
-  width: 180px;
 }
-
-.select-wrapper select {
+.lm-select-trigger {
   width: 100%;
   height: 32px;
   padding: 6px 32px 6px 12px;
@@ -2326,28 +2326,72 @@ body.is-resizing-column * {
   cursor: pointer;
   outline: none;
   transition: all 0.12s ease;
-  appearance: none;
-  -webkit-appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
-
-.select-wrapper select:hover {
+.lm-select-trigger:hover {
   background: var(--bg-active);
   border-color: var(--text-secondary);
 }
-
-.select-wrapper::after {
-  content: "";
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
+.lm-select-trigger.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.lm-select-label {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lm-select-option-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--text-dim);
+  margin-right: 6px;
+}
+.lm-select-caret {
   width: 10px;
-  height: 6px;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23808080' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-size: contain;
-  background-repeat: no-repeat;
-  pointer-events: none;
-  opacity: 0.8;
+  height: 10px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+.lm-select-list {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 10000;
+}
+/* 浮层变体：通过 Portal 渲染到 body，用 fixed 定位脱离父级 overflow 裁剪。 */
+.lm-select-floating {
+  position: fixed;
+}
+.lm-select-item {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+}
+.lm-select-item:hover,
+.lm-select-item.active {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 /* Segmented control for Zoom preferences */
