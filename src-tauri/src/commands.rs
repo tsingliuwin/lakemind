@@ -189,6 +189,46 @@ pub async fn register_workspace_sources_inner(
         .map_err(|e| e.to_string())
 }
 
+/// Registration coverage for one workspace, surfaced as the colored dot next to
+/// the project name. `total` is what `scan_path` (same walk as the full sync,
+/// including the parquet group/dedupe rules) says *should* exist; `registered`
+/// is how many rows the SQLite `sources` mapping currently has. The frontend
+/// can't compute `total` itself (lazy file tree + parquet grouping), so it must
+/// come from here. Read-only: SQLite + filesystem walk, no DuckDB connection.
+#[derive(serde::Serialize)]
+pub struct RegisterStatus {
+    pub total: usize,
+    pub registered: usize,
+    /// "all" | "partial" | "none"
+    pub status: String,
+}
+
+#[tauri::command]
+pub async fn workspace_register_status(
+    workspace_path: String,
+) -> Result<RegisterStatus, String> {
+    let sqlite = db::get_db_conn().map_err(|e| e.to_string())?;
+    let registered = db::list_sources(&sqlite, &workspace_path)
+        .map_err(|e| e.to_string())?
+        .len();
+
+    let ws_dir = resolve_workspace_dir(&workspace_path)?;
+    // spawn_blocking: scan_path walks the filesystem synchronously.
+    let total = tokio::task::spawn_blocking(move || scan::scan_path(&ws_dir, true).len())
+        .await
+        .map_err(|e| format!("scan task join error: {e}"))?;
+
+    let status = if total == 0 || registered == total {
+        "all"
+    } else if registered == 0 {
+        "none"
+    } else {
+        "partial"
+    };
+
+    Ok(RegisterStatus { total, registered, status: status.to_string() })
+}
+
 /// Synchronize a set of scan entries against the persisted mappings: pick a
 /// good ASCII table name for each (LLM → pinyin fallback), rename the lake
 /// object when the name changed (matched by `scan_path`, so a name change does

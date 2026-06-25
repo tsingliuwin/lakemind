@@ -12,7 +12,7 @@ import SettingsPage from "./components/SettingsPage";
 import HomePanel from "./components/HomePanel";
 import { executeSql, importFileToWorkspace } from "./lib/duckdb";
 import { tryFormatDuckdbSql } from "./lib/sqlFormat";
-import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage } from "./lib/types";
+import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage, RegisterStatus } from "./lib/types";
 import ChatView from "./components/ChatView";
 import { appendDelta, pushToolCall, mergeToolResult, normalizeMessage } from "./lib/chat";
 import "./App.css";
@@ -30,6 +30,19 @@ export default function App() {
   // --- data ---
   const [sources, setSources] = createSignal<SourceTable[]>([]);
   const [selectedTable, setSelectedTable] = createSignal<SourceTable | null>(null);
+  // File-registration coverage of the active workspace → colored dot by the
+  // project name (all/partial/none). Refreshed after workspace switch + import.
+  const [registerStatus, setRegisterStatus] = createSignal<RegisterStatus>("all");
+
+  /** Fetch registration coverage for a workspace and update the status dot. */
+  async function refreshRegisterStatus(wsPath: string) {
+    try {
+      const r = await invoke<{ status: string }>("workspace_register_status", { workspacePath: wsPath });
+      setRegisterStatus(r.status as RegisterStatus);
+    } catch (e) {
+      console.error("refresh register status failed:", e);
+    }
+  }
 
   // --- 编辑器 / 查询 ---
   const [sql, setSql] = createSignal<string>("SELECT 1 AS n;");
@@ -313,6 +326,7 @@ export default function App() {
       const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
       setSources(dbTables);
       setSelectedTable(null);
+      refreshRegisterStatus(ws.path);
     } catch (err) {
       console.error("Failed to load workspace tasks & sources:", err);
     } finally {
@@ -854,6 +868,7 @@ export default function App() {
         }
         setFileTrigger((t) => t + 1);
       }
+      refreshRegisterStatus(currentWorkspace().path);
     } catch (e) {
       console.error("Failed to import file:", e);
     } finally {
@@ -875,6 +890,7 @@ export default function App() {
             setSources(dbTables);
             setFileTrigger((t) => t + 1);
           }
+          refreshRegisterStatus(currentWorkspace().path);
         } catch (e) {
           console.error("Failed to register folder source:", e);
         } finally {
@@ -1077,6 +1093,7 @@ export default function App() {
           workspaces={workspaces()}
           tasks={visibleTasks()}
           activeTaskId={activeTaskId()}
+          registerStatus={registerStatus()}
           onSelectTask={selectTask}
           onDeleteTask={deleteTask}
           onSelectWorkspace={selectWorkspace}

@@ -44,6 +44,7 @@ pub fn run() {
             commands::select_directory,
             commands::read_directory,
             commands::register_workspace_sources,
+            commands::workspace_register_status,
             commands::load_workspaces,
             commands::add_workspace,
             commands::remove_workspace,

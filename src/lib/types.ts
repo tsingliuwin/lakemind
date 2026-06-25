@@ -3,6 +3,12 @@
 
 export type SourceKind = "parquet" | "csv" | "json" | "delta" | "excel" | "table" | "view";
 
+/** 项目名行状态点的颜色档位：
+ * - "all"     绿：应注册的数据文件已全部注册成表（或工作区无数据文件）
+ * - "partial" 橙：仅部分注册成功
+ * - "none"    红：有数据文件但全部未注册 */
+export type RegisterStatus = "all" | "partial" | "none";
+
 export interface ColumnInfo {
   name: string;
   type: string;

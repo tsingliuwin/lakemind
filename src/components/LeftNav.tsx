@@ -1,6 +1,6 @@
 import { For, Show, createMemo, createSignal, onMount, onCleanup, createEffect } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import type { SourceTable, QueryTask, Workspace, FileItem } from "../lib/types";
+import type { SourceTable, QueryTask, Workspace, FileItem, RegisterStatus } from "../lib/types";
 import { t, currentLanguage, setCurrentLanguage } from "../lib/i18n";
 import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom, logoSrc } from "../lib/theme";
 
@@ -20,6 +20,9 @@ export default function LeftNav(props: {
   workspaces?: Workspace[];
   tasks?: QueryTask[];
   activeTaskId?: string | null;
+  /** File-registration coverage of the active workspace → colored dot by the
+   * project name. Only rendered for the active workspace. */
+  registerStatus?: RegisterStatus;
   onSelectTask?: (id: string) => void;
   onDeleteTask?: (id: string) => void;
   onSelectWorkspace?: (ws: string) => void;
@@ -59,7 +62,6 @@ export default function LeftNav(props: {
   // File explorer states
   const [expandedPaths, setExpandedPaths] = createSignal<Record<string, boolean>>({});
   const [directoryContents, setDirectoryContents] = createSignal<Record<string, FileItem[]>>({});
-  const [activeActionWsPath, setActiveActionWsPath] = createSignal<string | null>(null);
   const [fileSearchQuery] = createSignal("");
 
   // File ↔ Data cross-highlighting (linkage). Clicking a table highlights its
@@ -96,10 +98,32 @@ export default function LeftNav(props: {
   const [filesSectionExpanded, setFilesSectionExpanded] = createSignal(true);
   const [dataSectionExpanded, setDataSectionExpanded] = createSignal(true);
 
-  // Automatically load root directory contents when workspace changes
+  // Workspace-level collapse: when false the whole subtree (任务/文件/数据) is
+  // hidden, regardless of the individual section states above. Reset to open on
+  // workspace switch so switching into a project never starts collapsed.
+  const [wsCollapsed, setWsCollapsed] = createSignal(false);
+
+  // True only when all three subsections are open. Drives the collapse/expand
+  // toggle button next to the workspace node (chevron direction + tooltip).
+  const allSectionsExpanded = createMemo(
+    () => tasksSectionExpanded() && filesSectionExpanded() && dataSectionExpanded(),
+  );
+
+  // Toggle all three subsections at once. When any is collapsed, expand all;
+  // otherwise collapse all. This is the single hover button on a workspace row.
+  const toggleAllSections = () => {
+    const open = allSectionsExpanded();
+    setTasksSectionExpanded(!open);
+    setFilesSectionExpanded(!open);
+    setDataSectionExpanded(!open);
+  };
+
+  // Automatically load root directory contents when workspace changes.
+  // Also reset the workspace-level collapse so a freshly-switched project is open.
   createEffect(async () => {
     const wsPath = props.workspacePath;
     if (wsPath) {
+      setWsCollapsed(false);
       setExpandedPaths((prev) => ({ ...prev, [wsPath]: true }));
       await loadDirContents(wsPath);
     }
@@ -143,9 +167,6 @@ export default function LeftNav(props: {
     ) {
       setUserMenuOpen(false);
       setActiveSubmenu(null);
-    }
-    if (!target.closest(".ws-action-icon-btn") && !target.closest(".ws-action-popover")) {
-      setActiveActionWsPath(null);
     }
   };
 
@@ -313,28 +334,13 @@ export default function LeftNav(props: {
 
       {/* Workspace header */}
       <div class="ln-section-header">
-        <span class="section-title">工作区 <span class="ws-indicator-dot" /></span>
+        <span class="section-title">工作区</span>
         <div class="section-actions">
-          <button class="sec-act-btn" title="筛选/排序">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="4" y1="21" x2="4" y2="14"></line>
-              <line x1="4" y1="10" x2="4" y2="3"></line>
-              <line x1="12" y1="21" x2="12" y2="12"></line>
-              <line x1="12" y1="8" x2="12" y2="3"></line>
-              <line x1="20" y1="21" x2="20" y2="16"></line>
-              <line x1="20" y1="12" x2="20" y2="3"></line>
-              <line x1="1" y1="14" x2="7" y2="14"></line>
-              <line x1="9" y1="8" x2="15" y2="8"></line>
-              <line x1="17" y1="16" x2="23" y2="16"></line>
-            </svg>
-          </button>
-          <button class="sec-act-btn" title="搜索表">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-          </button>
-          <button class="sec-act-btn" title="收起全部">
+          <button
+            class="sec-act-btn"
+            title={wsCollapsed() ? "展开项目" : "收起项目"}
+            onClick={() => setWsCollapsed(!wsCollapsed())}
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="4 14 10 14 10 20"></polyline>
               <polyline points="20 10 14 10 14 4"></polyline>
@@ -376,64 +382,80 @@ export default function LeftNav(props: {
                       <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                     </svg>
                   </span>
-                  <span style="flex: 1; text-align: left;">{ws.name}</span>
-                  
-                  {/* Action buttons shown on hover */}
+                  <span style="flex: 1; text-align: left; display: inline-flex; align-items: center; gap: 6px;">
+                    {ws.name}
+                    {/* File-registration coverage dot — green=all / orange=partial /
+                        red=none. Only on the active workspace; placed right after
+                        the name so it never collides with the hover actions that
+                        float on the far right. */}
+                    <Show when={isActive()}>
+                      <span
+                        class="ws-indicator-dot"
+                        classList={{
+                          all: props.registerStatus !== "partial" && props.registerStatus !== "none",
+                          partial: props.registerStatus === "partial",
+                          none: props.registerStatus === "none",
+                        }}
+                        title={
+                          props.registerStatus === "all" ? "全部文件已注册"
+                          : props.registerStatus === "partial" ? "部分文件未注册"
+                          : "文件均未注册"
+                        }
+                      />
+                    </Show>
+                  </span>
+
+                  {/* Toggle expand/collapse all subsections (任务/文件/数据) and
+                      remove this workspace. Project-level collapse is handled by
+                      the "收起全部" button in the workspace section header. */}
                   <div class="ws-hover-actions">
-                    <button class="ws-action-icon-btn" title="更多" onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveActionWsPath(activeActionWsPath() === ws.path ? null : ws.path);
-                    }}>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
-                        <circle cx="12" cy="12" r="1"></circle>
-                        <circle cx="19" cy="12" r="1"></circle>
-                        <circle cx="5" cy="12" r="1"></circle>
-                      </svg>
+                    <button
+                      class="ws-action-icon-btn"
+                      title={allSectionsExpanded() ? "全部折叠" : "全部展开"}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleAllSections();
+                      }}
+                    >
+                      <Show
+                        when={allSectionsExpanded()}
+                        fallback={
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                          </svg>
+                        }
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                          <polyline points="18 15 12 9 6 15"></polyline>
+                        </svg>
+                      </Show>
                     </button>
-                    <button class="ws-action-icon-btn" title="查看文件" onClick={(e) => {
-                      e.stopPropagation();
-                      props.onSelectWorkspace?.(ws.path);
-                      setFilesSectionExpanded(true);
-                    }}>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
-                        <line x1="3" y1="6" x2="18" y2="6"></line>
-                        <line x1="6" y1="12" x2="18" y2="12"></line>
-                        <line x1="6" y1="18" x2="18" y2="18"></line>
-                      </svg>
-                    </button>
-                    <button class="ws-action-icon-btn" title="新建任务" onClick={(e) => {
-                      e.stopPropagation();
-                      props.onSelectWorkspace?.(ws.path);
-                      props.onNewQuery?.();
-                    }}>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
-                        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
-                        <line x1="12" y1="9" x2="12" y2="15"></line>
-                        <line x1="9" y1="12" x2="15" y2="12"></line>
+                    <button
+                      class="ws-action-icon-btn remove-ws-btn"
+                      title="移除工作区"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        props.onRemoveWorkspace?.(ws.path);
+                      }}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        style="width: 12px; height: 12px;"
+                      >
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                       </svg>
                     </button>
                   </div>
-
-                  {/* Action popover menu */}
-                  <Show when={activeActionWsPath() === ws.path}>
-                    <div class="ws-action-popover" onClick={(e) => e.stopPropagation()}>
-                      <button class="ws-action-popover-item remove-item" onClick={() => {
-                        props.onRemoveWorkspace?.(ws.path);
-                        setActiveActionWsPath(null);
-                      }}>
-                        <span class="remove-icon">✕</span>
-                        <span>移除</span>
-                      </button>
-                    </div>
-                  </Show>
-
-                  <Show when={isActive() && activeActionWsPath() !== ws.path}>
-                    <span style="font-size: 8px; color: var(--accent-blue);">●</span>
-                  </Show>
                 </div>
 
-                {/* If active, render its tasks, files and data */}
-                <Show when={isActive()}>
+                {/* If active (and not collapsed), render its tasks, files and data */}
+                <Show when={isActive() && !wsCollapsed()}>
                   {/* Category 1: 任务 */}
                   <div
                     class="tree-section-header"
