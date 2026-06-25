@@ -1011,32 +1011,6 @@ select:hover:not(:disabled) {
   letter-spacing: 0.2px;
 }
 
-.ln-foot-icon-btn {
-  background: transparent;
-  border: none;
-  padding: 4px;
-  border-radius: 4px;
-  color: var(--text-dim);
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-.ln-foot-icon-btn svg {
-  width: 14px;
-  height: 14px;
-}
-.ln-foot-icon-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-secondary);
-}
-.ln-foot-icon-btn.active {
-  color: var(--accent-blue);
-  background: var(--bg-active);
-}
-
 /* --- Main Workbench Area --- */
 .main {
   grid-area: main;
