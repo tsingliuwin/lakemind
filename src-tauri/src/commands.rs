@@ -152,7 +152,7 @@ pub async fn import_file_to_workspace(
         Ok(v) => v,
         Err(e) => return Err(format!("scan task join error: {e}")),
     };
-    sync_entries(state.conn.clone(), state.sources.clone(), workspace, ws_dir, entries)
+    sync_entries(state.conn.clone(), state.sources.clone(), workspace, ws_dir, entries, false)
         .await
         .map_err(|e| e.to_string())
 }
@@ -184,7 +184,7 @@ pub async fn register_workspace_sources_inner(
         Err(e) => return Err(format!("scan task join error: {e}")),
     };
 
-    sync_entries(state.conn.clone(), state.sources.clone(), workspace_path, ws_dir, entries)
+    sync_entries(state.conn.clone(), state.sources.clone(), workspace_path, ws_dir, entries, true)
         .await
         .map_err(|e| e.to_string())
 }
@@ -192,14 +192,21 @@ pub async fn register_workspace_sources_inner(
 /// Synchronize a set of scan entries against the persisted mappings: pick a
 /// good ASCII table name for each (LLM → pinyin fallback), rename the lake
 /// object when the name changed (matched by `scan_path`, so a name change does
-/// NOT re-materialize), register brand-new sources, drop orphans, and refresh
-/// the in-memory cache. Shared by workspace sync and single-file import.
+/// NOT re-materialize), register brand-new sources, and refresh the in-memory
+/// cache. Shared by workspace sync and single-file import.
+///
+/// `prune_orphans`: only **full workspace sync** (`register_workspace_sources`)
+/// drops lake objects whose backing file is no longer on disk. A single-file
+/// import passes `entries` = [that one file], so orphan pruning there would wipe
+/// every *other* table in the workspace — that is exactly the "clicking one file
+/// makes only its table show up" bug, so it must be `false` for imports.
 async fn sync_entries(
     conn: Arc<Mutex<duckdb::Connection>>,
     sources_cache: Arc<Mutex<Vec<SourceTable>>>,
     ws_path: String,
     ws_dir: PathBuf,
     entries: Vec<scan::ScanEntry>,
+    prune_orphans: bool,
 ) -> AppResult<Vec<SourceTable>> {
     use std::collections::{HashMap, HashSet};
 
@@ -346,11 +353,15 @@ async fn sync_entries(
             }
         }
 
-        // Orphans: mapped but no longer on disk.
-        for rec in &existing {
-            if !entry_scan_paths.contains(&rec.scan_path) {
-                drop_lake_object(&guard, &rec.table_name);
-                let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
+        // Orphans: mapped but no longer on disk. Only on a full workspace sync —
+        // never on a single-file import, where `entries` is just the imported file
+        // and pruning would delete every other table in the workspace.
+        if prune_orphans {
+            for rec in &existing {
+                if !entry_scan_paths.contains(&rec.scan_path) {
+                    drop_lake_object(&guard, &rec.table_name);
+                    let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
+                }
             }
         }
 
