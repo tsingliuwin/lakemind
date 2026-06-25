@@ -9,7 +9,7 @@ const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("
 /**
  * Left navigation styled like ZCode 3.0:
  * - Top-bar with Z logo and navigation arrows (<- and ->).
- * - Quick actions: "新建查询", "快速检索", "扩展函数".
+ * - Quick actions: "新建对话", "新建查询".
  * - Workspace section header ("工作区" label with buttons).
  * - Tree list grouped by directory.
  * - Bottom footer with a logo ("研途教育"), a layout switcher, and settings gear.
@@ -308,27 +308,6 @@ export default function LeftNav(props: {
           </span>
           <span class="action-label">新建查询</span>
           <span class="action-shortcut">⌘ N</span>
-        </button>
-        <button class="ln-action-btn" title={`${t("search")} (Ctrl+K)`} disabled={props.busy}>
-          <span class="action-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-          </span>
-          <span class="action-label">搜索</span>
-          <span class="action-shortcut">⌘ K</span>
-        </button>
-        <button class="ln-action-btn" title={t("skills")} disabled={props.busy}>
-          <span class="action-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-              <polyline points="2 17 12 22 22 17"></polyline>
-              <polyline points="2 12 12 17 22 12"></polyline>
-            </svg>
-          </span>
-          <span class="action-label">技能</span>
-          <span class="action-shortcut"></span>
         </button>
       </div>
 
