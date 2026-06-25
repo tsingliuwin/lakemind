@@ -1108,7 +1108,6 @@ export default function App() {
           onOpenSettings={onSettings}
           onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
           onNewChat={() => createTask("", "chat")}
-          onDisconnect={() => { setSources([]); setSelectedTable(null); setTaskTabs({}); setTaskActiveTabId({}); setTasks([]); setActiveTaskId(null); }}
           leftOpen={leftOpen()}
           onToggleLeft={() => setLeftOpen(!leftOpen())}
         />

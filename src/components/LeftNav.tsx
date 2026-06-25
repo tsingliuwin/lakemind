@@ -1,8 +1,8 @@
-import { For, Show, createMemo, createSignal, onMount, onCleanup, createEffect } from "solid-js";
+import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import type { SourceTable, QueryTask, Workspace, FileItem, RegisterStatus } from "../lib/types";
-import { t, currentLanguage, setCurrentLanguage } from "../lib/i18n";
-import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom, logoSrc } from "../lib/theme";
+import { t } from "../lib/i18n";
+import { logoSrc } from "../lib/theme";
 
 const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
@@ -36,7 +36,6 @@ export default function LeftNav(props: {
   onOpenSettings: () => void;
   onNewQuery?: () => void;
   onNewChat?: () => void;
-  onDisconnect?: () => void;
   onImportFile?: (filePath: string) => void;
   leftOpen?: boolean;
   onToggleLeft?: () => void;
@@ -53,11 +52,6 @@ export default function LeftNav(props: {
     }
     return [...map.entries()];
   });
-
-  const [userMenuOpen, setUserMenuOpen] = createSignal(false);
-  const [activeSubmenu, setActiveSubmenu] = createSignal<"language" | "theme" | "zoom" | "quota" | null>(null);
-  let userMenuDropdownRef!: HTMLDivElement;
-  let userBadgeRef!: HTMLButtonElement;
 
   // File explorer states
   const [expandedPaths, setExpandedPaths] = createSignal<Record<string, boolean>>({});
@@ -157,19 +151,6 @@ export default function LeftNav(props: {
     }
   };
 
-  const handleClickOutside = (e: MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (
-      userMenuOpen() &&
-      userMenuDropdownRef &&
-      !userMenuDropdownRef.contains(target) &&
-      (!userBadgeRef || !userBadgeRef.contains(target))
-    ) {
-      setUserMenuOpen(false);
-      setActiveSubmenu(null);
-    }
-  };
-
   const renderFileTree = (dirPath: string, depth: number = 0) => {
     const contents = directoryContents()[dirPath] || [];
     const query = fileSearchQuery().trim().toLowerCase();
@@ -243,13 +224,6 @@ export default function LeftNav(props: {
       </div>
     );
   };
-
-  onMount(() => {
-    document.addEventListener("mousedown", handleClickOutside);
-    onCleanup(() => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    });
-  });
 
   return (
     <nav class="leftnav">
@@ -618,207 +592,14 @@ export default function LeftNav(props: {
       </div>
 
       <div class="ln-footer">
-        <button 
-          ref={userBadgeRef}
-          class="ln-user-badge"
-          classList={{ active: userMenuOpen() }}
-          onClick={() => {
-            const open = !userMenuOpen();
-            setUserMenuOpen(open);
-            if (!open) setActiveSubmenu(null);
-          }}
+        <button
+          class="ln-brand"
+          title={t("settings")}
+          onClick={() => props.onOpenSettings()}
         >
-          <span class="user-avatar">研</span>
-          <span class="user-name">研途教育</span>
+          <img src={logoSrc()} alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
+          <span class="ln-brand-name">LakeMind</span>
         </button>
-
-        {/* User Dropdown Menu */}
-        <Show when={userMenuOpen()}>
-          <div class="ln-user-dropdown" ref={userMenuDropdownRef}>
-            
-            {/* Language Submenu Trigger */}
-            <div class="user-menu-item-wrapper">
-              <button 
-                class="user-menu-item" 
-                classList={{ active: activeSubmenu() === "language" }}
-                onClick={(e) => { e.stopPropagation(); setActiveSubmenu(activeSubmenu() === "language" ? null : "language"); }}
-              >
-                <span class="user-menu-icon">🌐</span>
-                <span class="user-menu-label">{t("interfaceLanguage")}</span>
-                <span class="user-menu-chevron">›</span>
-              </button>
-              <Show when={activeSubmenu() === "language"}>
-                <div class="ln-user-submenu">
-                  <button 
-                    class="submenu-item" 
-                    classList={{ selected: currentLanguage() === "zh" }}
-                    onClick={() => { setCurrentLanguage("zh"); setActiveSubmenu(null); setUserMenuOpen(false); }}
-                  >
-                    {t("langZh")}
-                  </button>
-                  <button 
-                    class="submenu-item" 
-                    classList={{ selected: currentLanguage() === "en" }}
-                    onClick={() => { setCurrentLanguage("en"); setActiveSubmenu(null); setUserMenuOpen(false); }}
-                  >
-                    {t("langEn")}
-                  </button>
-                </div>
-              </Show>
-            </div>
-
-            {/* Theme Submenu Trigger */}
-            <div class="user-menu-item-wrapper">
-              <button 
-                class="user-menu-item" 
-                classList={{ active: activeSubmenu() === "theme" }}
-                onClick={(e) => { e.stopPropagation(); setActiveSubmenu(activeSubmenu() === "theme" ? null : "theme"); }}
-              >
-                <span class="user-menu-icon">🎨</span>
-                <span class="user-menu-label">{t("interfaceTheme")}</span>
-                <span class="user-menu-chevron">›</span>
-              </button>
-              <Show when={activeSubmenu() === "theme"}>
-                <div class="ln-user-submenu">
-                  <button 
-                    class="submenu-item" 
-                    classList={{ selected: currentTheme() === "geek-dark" }}
-                    onClick={() => { setCurrentTheme("geek-dark"); setActiveSubmenu(null); setUserMenuOpen(false); }}
-                  >
-                    {t("themeGeekDark")}
-                  </button>
-                  <button 
-                    class="submenu-item" 
-                    classList={{ selected: currentTheme() === "classic-dark" }}
-                    onClick={() => { setCurrentTheme("classic-dark"); setActiveSubmenu(null); setUserMenuOpen(false); }}
-                  >
-                    {t("themeClassicDark")}
-                  </button>
-                  <button 
-                    class="submenu-item" 
-                    classList={{ selected: currentTheme() === "light" }}
-                    onClick={() => { setCurrentTheme("light"); setActiveSubmenu(null); setUserMenuOpen(false); }}
-                  >
-                    {t("themeLight")}
-                  </button>
-                </div>
-              </Show>
-            </div>
-
-            {/* Zoom Submenu Trigger */}
-            <div class="user-menu-item-wrapper">
-              <button 
-                class="user-menu-item" 
-                classList={{ active: activeSubmenu() === "zoom" }}
-                onClick={(e) => { e.stopPropagation(); setActiveSubmenu(activeSubmenu() === "zoom" ? null : "zoom"); }}
-              >
-                <span class="user-menu-icon">🔎</span>
-                <span class="user-menu-label">{t("interfaceZoom")}</span>
-                <span class="user-menu-chevron">›</span>
-              </button>
-              <Show when={activeSubmenu() === "zoom"}>
-                <div class="ln-user-submenu">
-                  <button 
-                    class="submenu-item" 
-                    classList={{ selected: currentZoom() === 80 }}
-                    onClick={() => { setCurrentZoom(80); setActiveSubmenu(null); setUserMenuOpen(false); }}
-                  >
-                    80%
-                  </button>
-                  <button 
-                    class="submenu-item" 
-                    classList={{ selected: currentZoom() === 90 }}
-                    onClick={() => { setCurrentZoom(90); setActiveSubmenu(null); setUserMenuOpen(false); }}
-                  >
-                    90%
-                  </button>
-                  <button 
-                    class="submenu-item" 
-                    classList={{ selected: currentZoom() === 100 }}
-                    onClick={() => { setCurrentZoom(100); setActiveSubmenu(null); setUserMenuOpen(false); }}
-                  >
-                    100%
-                  </button>
-                  <button 
-                    class="submenu-item" 
-                    classList={{ selected: currentZoom() === 110 }}
-                    onClick={() => { setCurrentZoom(110); setActiveSubmenu(null); setUserMenuOpen(false); }}
-                  >
-                    110%
-                  </button>
-                  <button 
-                    class="submenu-item" 
-                    classList={{ selected: currentZoom() === 120 }}
-                    onClick={() => { setCurrentZoom(120); setActiveSubmenu(null); setUserMenuOpen(false); }}
-                  >
-                    120%
-                  </button>
-                </div>
-              </Show>
-            </div>
-
-            <div class="user-menu-divider" />
-
-            <button class="user-menu-item" onClick={() => { setUserMenuOpen(false); setActiveSubmenu(null); props.onOpenSettings(); }}>
-              <span class="user-menu-icon">⚙️</span>
-              <span class="user-menu-label">{t("settings")}</span>
-            </button>
-
-            {/* Quota Submenu Trigger */}
-            <div class="user-menu-item-wrapper">
-              <button 
-                class="user-menu-item" 
-                classList={{ active: activeSubmenu() === "quota" }}
-                onClick={(e) => { e.stopPropagation(); setActiveSubmenu(activeSubmenu() === "quota" ? null : "quota"); }}
-              >
-                <span class="user-menu-icon">⏳</span>
-                <span class="user-menu-label">{t("remainingQuota")}</span>
-                <span class="user-menu-chevron">›</span>
-              </button>
-              <Show when={activeSubmenu() === "quota"}>
-                <div class="ln-user-submenu">
-                  <button 
-                    class="submenu-item" 
-                    onClick={() => { alert(t("settingsM1Placeholder")); setActiveSubmenu(null); setUserMenuOpen(false); }}
-                  >
-                    {t("quotaLocal")}
-                  </button>
-                  <button 
-                    class="submenu-item" 
-                    onClick={() => { alert(t("settingsM1Placeholder")); setActiveSubmenu(null); setUserMenuOpen(false); }}
-                  >
-                    {t("quotaUnlimited")}
-                  </button>
-                </div>
-              </Show>
-            </div>
-
-            <button class="user-menu-item" onClick={() => { setUserMenuOpen(false); setActiveSubmenu(null); alert(t("settingsM1Placeholder")); }}>
-              <span class="user-menu-icon">💬</span>
-              <span class="user-menu-label">{t("feedback")}</span>
-            </button>
-            <button class="user-menu-item" onClick={() => { setUserMenuOpen(false); setActiveSubmenu(null); alert(t("settingsM1Placeholder")); }}>
-              <span class="user-menu-icon">👥</span>
-              <span class="user-menu-label">{t("community")}</span>
-            </button>
-
-            <div class="user-menu-divider" />
-
-            <button class="user-menu-item disconnect-item" onClick={() => { setUserMenuOpen(false); setActiveSubmenu(null); props.onDisconnect?.(); }}>
-              <span class="user-menu-icon">🚪</span>
-              <span class="user-menu-label">{t("disconnect")}</span>
-            </button>
-          </div>
-        </Show>
-
-        <div class="ln-footer-actions">
-          <button class="ln-foot-icon-btn" title={t("settings")} onClick={() => props.onOpenSettings()}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
-          </button>
-        </div>
       </div>
     </nav>
   );

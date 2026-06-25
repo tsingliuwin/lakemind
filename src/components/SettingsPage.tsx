@@ -22,6 +22,17 @@ type SettingsTab =
   | "stats"
   | "guide";
 
+/** 暂时隐藏的设置 tab：这些功能尚未实现，导航项先不展示。
+ *  未来逐步补充内容后，从此集合移除对应项即可恢复显示。 */
+const HIDDEN_TABS = new Set<SettingsTab>([
+  "skills",
+  "mcp",
+  "plugins",
+  "indexDb",
+  "stats",
+  "guide",
+]);
+
 export interface ModelItem {
   id: string;
   contextWindow: number;
@@ -52,7 +63,7 @@ export default function SettingsPage(props: {
   onOpenSettings?: () => void;
   titleBar?: any;
 }) {
-  const [activeTab, setActiveTab] = createSignal<SettingsTab>("modelSettings");
+  const [activeTab, setActiveTab] = createSignal<SettingsTab>("general");
 
   // Selection signals
   const [selectedProvider, setSelectedProvider] = createSignal<string>("");
@@ -334,10 +345,11 @@ export default function SettingsPage(props: {
             <span>{t("modelSettings")}</span>
           </button>
 
-          <button 
-            class="ss-nav-item" 
+          <button
+            class="ss-nav-item"
             classList={{ active: activeTab() === "skills" }}
             onClick={() => setActiveTab("skills")}
+            style={{ display: HIDDEN_TABS.has("skills") ? "none" : undefined }}
           >
             <span class="ss-nav-icon">
               <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -350,10 +362,11 @@ export default function SettingsPage(props: {
             <span>{t("settingsSkills")}</span>
           </button>
 
-          <button 
-            class="ss-nav-item" 
+          <button
+            class="ss-nav-item"
             classList={{ active: activeTab() === "mcp" }}
             onClick={() => setActiveTab("mcp")}
+            style={{ display: HIDDEN_TABS.has("mcp") ? "none" : undefined }}
           >
             <span class="ss-nav-icon">
               <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -363,10 +376,11 @@ export default function SettingsPage(props: {
             <span>{t("settingsMcp")}</span>
           </button>
 
-          <button 
-            class="ss-nav-item" 
+          <button
+            class="ss-nav-item"
             classList={{ active: activeTab() === "plugins" }}
             onClick={() => setActiveTab("plugins")}
+            style={{ display: HIDDEN_TABS.has("plugins") ? "none" : undefined }}
           >
             <span class="ss-nav-icon">
               <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -389,10 +403,11 @@ export default function SettingsPage(props: {
             <span>{t("settingsCommands")}</span>
           </button>
 
-          <button 
-            class="ss-nav-item" 
+          <button
+            class="ss-nav-item"
             classList={{ active: activeTab() === "indexDb" }}
             onClick={() => setActiveTab("indexDb")}
+            style={{ display: HIDDEN_TABS.has("indexDb") ? "none" : undefined }}
           >
             <span class="ss-nav-icon">
               <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -403,10 +418,11 @@ export default function SettingsPage(props: {
             <span>{t("settingsIndexDb")}</span>
           </button>
 
-          <button 
-            class="ss-nav-item" 
+          <button
+            class="ss-nav-item"
             classList={{ active: activeTab() === "stats" }}
             onClick={() => setActiveTab("stats")}
+            style={{ display: HIDDEN_TABS.has("stats") ? "none" : undefined }}
           >
             <span class="ss-nav-icon">
               <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -417,10 +433,11 @@ export default function SettingsPage(props: {
           </button>
 
           <div class="ss-guide-container">
-            <button 
-              class="ss-nav-item" 
+            <button
+              class="ss-nav-item"
               classList={{ active: activeTab() === "guide" }}
               onClick={() => setActiveTab("guide")}
+              style={{ display: HIDDEN_TABS.has("guide") ? "none" : undefined }}
             >
               <span class="ss-nav-icon">
                 <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -433,16 +450,10 @@ export default function SettingsPage(props: {
         </nav>
 
         <div class="ss-footer">
-          <div class="ss-user-badge" onClick={() => alert("研途教育")}>
-            <span class="ss-avatar">研</span>
-            <span class="ss-username">研途教育</span>
+          <div class="ss-brand">
+            <img src={logoSrc()} alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
+            <span class="ss-brand-name">LakeMind</span>
           </div>
-          <button class="ln-foot-icon-btn active" title="Settings" onClick={() => props.onClose()}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
-          </button>
         </div>
       </aside>
 
