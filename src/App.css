@@ -4270,13 +4270,6 @@ button.lm-select-trigger:hover:not(:disabled) {
   gap: 8px;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.chat-composer__box:focus-within {
-  border-color: var(--text-primary);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12);
-}
-:root.light .chat-composer__box:focus-within {
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.08);
-}
 .chat-composer__input {
   width: 100%;
   background: transparent;
