@@ -223,6 +223,22 @@ export default function App() {
               table: s.table,
               elapsedMs: s.elapsedMs,
             });
+            // A DDL tool just finished (created/dropped a table or view) —
+            // refresh the data tree immediately so the change is visible. Only
+            // on terminal states (ok/error), not the intermediate "awaiting".
+            if (s.status === "ok" || s.status === "error") {
+              const seg = segments.find((x) => x.type === "tool" && x.id === s.id);
+              const toolName = seg && seg.type === "tool" ? seg.tool : "";
+              if (
+                toolName === "create_table" ||
+                toolName === "create_view" ||
+                toolName === "drop_object"
+              ) {
+                invoke<SourceTable[]>("list_duckdb_tables")
+                  .then(setSources)
+                  .catch((err) => console.error("Failed to refresh sources after DDL:", err));
+              }
+            }
           } else if (kind === "error") {
             segments = [
               ...segments,
