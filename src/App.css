@@ -2252,7 +2252,7 @@ body.is-resizing-column * {
   background: var(--border-strong);
   position: relative;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: all 0.15s ease;
   flex-shrink: 0;
 }
 .ss-toggle::after {
@@ -2264,13 +2264,23 @@ body.is-resizing-column * {
   height: 16px;
   border-radius: 50%;
   background: var(--text-primary);
-  transition: transform 0.15s ease;
+  transition: all 0.15s ease;
 }
 .ss-toggle.on {
-  background: var(--accent-green);
+  background: var(--text-primary);
 }
 .ss-toggle.on::after {
   transform: translateX(16px);
+  background: var(--bg-surface);
+}
+button.ss-toggle:hover:not(:disabled) {
+  background: var(--text-dim);
+  border: none;
+}
+button.ss-toggle.on:hover:not(:disabled) {
+  background: var(--text-primary);
+  opacity: 0.9;
+  border: none;
 }
 
 .settings-row-control {
@@ -2317,7 +2327,7 @@ body.is-resizing-column * {
 .lm-select-trigger {
   width: 100%;
   height: 32px;
-  padding: 6px 32px 6px 12px;
+  padding: 6px 10px;
   font-size: 12px;
   background: var(--bg-hover);
   border: 1px solid var(--border-strong);
@@ -2330,9 +2340,9 @@ body.is-resizing-column * {
   align-items: center;
   justify-content: space-between;
 }
-.lm-select-trigger:hover {
+button.lm-select-trigger:hover:not(:disabled) {
   background: var(--bg-active);
-  border-color: var(--text-secondary);
+  border-color: var(--border-strong);
 }
 .lm-select-trigger.disabled {
   opacity: 0.5;

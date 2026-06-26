@@ -504,7 +504,7 @@ export default function SettingsPage(props: {
               <Select
                 value={currentTheme()}
                 onChange={(v) => setCurrentTheme(v as any)}
-                width="140px"
+                width="fit-content"
                 options={[
                   { value: "geek-dark", label: "极客暗黑", icon: <MoonIcon /> },
                   { value: "classic-dark", label: "经典深色", icon: <MoonIcon /> },
@@ -521,7 +521,7 @@ export default function SettingsPage(props: {
               <Select
                 value={currentLanguage()}
                 onChange={(v) => setCurrentLanguage(v as any)}
-                width="140px"
+                width="fit-content"
                 options={[
                   { value: "zh", label: "简体中文" },
                   { value: "en", label: "English" },
@@ -636,7 +636,7 @@ export default function SettingsPage(props: {
               <Select
                 value={String(codeFontSize())}
                 onChange={(v) => setCodeFontSizeP(parseInt(v))}
-                width="110px"
+                width="80px"
                 options={[
                   { value: "12", label: "12" },
                   { value: "13", label: "13" },

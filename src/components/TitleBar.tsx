@@ -19,7 +19,7 @@ export default function TitleBar(props: {
 }) {
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [aboutOpen, setAboutOpen] = createSignal(false);
-  const appWindow = getCurrentWindow();
+  const appWindow = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ ? getCurrentWindow() : null;
 
   let menuRef!: HTMLDivElement;
 
