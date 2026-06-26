@@ -171,7 +171,7 @@ export default function TitleBar(props: {
 
             <button
               class="menu-item close-item"
-              onClick={() => { setMenuOpen(false); void appWindow.close(); }}
+              onClick={() => { setMenuOpen(false); void appWindow?.close(); }}
             >
               <span class="menu-label">{t("closeWindow")}</span>
               <span class="menu-shortcut"></span>
@@ -184,7 +184,7 @@ export default function TitleBar(props: {
           <button 
             class="tb-win-btn" 
             title={t("minimize")}
-            onClick={() => void appWindow.minimize()}
+            onClick={() => void appWindow?.minimize()}
           >
             <svg viewBox="0 0 10.2 1" style="width: 10px; height: 1px;">
               <rect x="0" y="0" width="10.2" height="1" fill="currentColor" />
@@ -193,7 +193,7 @@ export default function TitleBar(props: {
           <button 
             class="tb-win-btn" 
             title={t("maximize")}
-            onClick={() => void appWindow.toggleMaximize()}
+            onClick={() => void appWindow?.toggleMaximize()}
           >
             <svg viewBox="0 0 10 10" style="width: 10px; height: 10px;">
               <path d="M0,0v10h10V0H0z M9,9H1V1h8V9z" fill="currentColor" />
@@ -202,7 +202,7 @@ export default function TitleBar(props: {
           <button 
             class="tb-win-btn close-btn" 
             title={t("close")}
-            onClick={() => void appWindow.close()}
+            onClick={() => void appWindow?.close()}
           >
             <svg viewBox="0 0 10 10" style="width: 10px; height: 10px;">
               <polygon points="10,0.7 9.3,0 5,4.3 0.7,0 0,0.7 4.3,5 0,9.3 0.7,10 5,5.7 9.3,10 10,9.3 5.7,5" fill="currentColor" />

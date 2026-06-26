@@ -247,19 +247,6 @@ export default function LeftNav(props: {
               <line x1="9" y1="3" x2="9" y2="21"></line>
             </svg>
           </button>
-
-          <button class="ln-arrow-btn" title="后退" disabled={props.busy}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="19" y1="12" x2="5" y2="12"></line>
-              <polyline points="12 19 5 12 12 5"></polyline>
-            </svg>
-          </button>
-          <button class="ln-arrow-btn" title="前进" disabled={props.busy}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-              <polyline points="12 5 19 12 12 19"></polyline>
-            </svg>
-          </button>
         </div>
       </div>
 
