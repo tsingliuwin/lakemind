@@ -67,19 +67,25 @@ pub struct SourceRecord {
     /// `"fallback"` (pinyin, LLM unavailable/failed), or `"llm"` (LLM-generated
     /// and cached). Only `legacy`/`fallback` trigger a re-evaluation on sync.
     pub name_source: String,
+    /// Source file mtime (ms since epoch). When it changes vs. the on-disk file,
+    /// `sync_entries` rebuilds the source so downstream objects see fresh data.
+    pub file_mtime: i64,
+    /// Source file size in bytes (sum for multi-file globs). Companion to mtime.
+    pub file_size: i64,
 }
 
 /// Insert or update a source mapping (keyed by `(workspace_path, table_name)`).
 pub fn upsert_source(conn: &Connection, ws_path: &str, r: &SourceRecord) -> Result<(), String> {
     let keys = serde_json::to_string(&r.partition_keys).unwrap_or_else(|_| "[]".into());
     conn.execute(
-        "INSERT INTO sources (workspace_path, table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO sources (workspace_path, table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(workspace_path, table_name) DO UPDATE SET
             label=excluded.label, kind=excluded.kind, storage=excluded.storage,
             file_path=excluded.file_path, scan_path=excluded.scan_path,
-            partition_keys=excluded.partition_keys, name_source=excluded.name_source",
-        rusqlite::params![ws_path, r.table_name, r.label, r.kind, r.storage, r.file_path, r.scan_path, keys, r.created_at, r.name_source],
+            partition_keys=excluded.partition_keys, name_source=excluded.name_source,
+            file_mtime=excluded.file_mtime, file_size=excluded.file_size",
+        rusqlite::params![ws_path, r.table_name, r.label, r.kind, r.storage, r.file_path, r.scan_path, keys, r.created_at, r.name_source, r.file_mtime, r.file_size],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -89,7 +95,7 @@ pub fn upsert_source(conn: &Connection, ws_path: &str, r: &SourceRecord) -> Resu
 pub fn list_sources(conn: &Connection, ws_path: &str) -> Result<Vec<SourceRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source
+            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size
              FROM sources WHERE workspace_path = ? ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -108,6 +114,8 @@ pub fn list_sources(conn: &Connection, ws_path: &str) -> Result<Vec<SourceRecord
                 partition_keys,
                 created_at: row.get(7)?,
                 name_source: row.get(8).unwrap_or_else(|_| "legacy".to_string()),
+                file_mtime: row.get(9).unwrap_or(0),
+                file_size: row.get(10).unwrap_or(0),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -129,7 +137,7 @@ pub fn get_source_by_table(
 ) -> Result<Option<SourceRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source
+            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size
              FROM sources WHERE workspace_path = ? AND table_name = ?",
         )
         .map_err(|e| e.to_string())?;
@@ -148,6 +156,8 @@ pub fn get_source_by_table(
                 partition_keys,
                 created_at: row.get(7)?,
                 name_source: row.get(8).unwrap_or_else(|_| "legacy".to_string()),
+                file_mtime: row.get(9).unwrap_or(0),
+                file_size: row.get(10).unwrap_or(0),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -166,6 +176,82 @@ pub fn delete_source_by_table(
 ) -> Result<(), String> {
     conn.execute(
         "DELETE FROM sources WHERE workspace_path = ? AND table_name = ?",
+        rusqlite::params![ws_path, table_name],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// object_defs: persistent definition + input fingerprint for agent objects
+// ---------------------------------------------------------------------------
+
+/// One row of `object_defs` — the persisted SELECT that built an agent-created
+/// table/view, plus a hash over all its upstream inputs' fingerprints. When the
+/// upstream fingerprint is unchanged and the lake object still exists, the
+/// CREATE can be skipped (incremental build). When the lake is rebuilt after a
+/// crash, this record lets the object be recreated from `select_sql`.
+#[derive(Debug, Clone)]
+pub struct ObjectDef {
+    pub table_name: String,
+    /// "table" or "view" — matches StorageKind::to_db_str semantics.
+    pub kind: String,
+    pub select_sql: String,
+    pub input_hash: String,
+    pub created_at: i64,
+}
+
+/// Insert or update an object definition (keyed by `(workspace_path, table_name)`).
+pub fn upsert_object_def(conn: &Connection, ws_path: &str, d: &ObjectDef) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO object_defs (workspace_path, table_name, kind, select_sql, input_hash, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(workspace_path, table_name) DO UPDATE SET
+            kind=excluded.kind, select_sql=excluded.select_sql,
+            input_hash=excluded.input_hash, created_at=excluded.created_at",
+        rusqlite::params![ws_path, d.table_name, d.kind, d.select_sql, d.input_hash, d.created_at],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Look up an object definition by table name within a workspace.
+pub fn get_object_def(
+    conn: &Connection,
+    ws_path: &str,
+    table_name: &str,
+) -> Result<Option<ObjectDef>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT table_name, kind, select_sql, input_hash, created_at
+             FROM object_defs WHERE workspace_path = ? AND table_name = ?",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut rows = stmt
+        .query_map(rusqlite::params![ws_path, table_name], |row| {
+            Ok(ObjectDef {
+                table_name: row.get(0)?,
+                kind: row.get(1)?,
+                select_sql: row.get(2)?,
+                input_hash: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    match rows.next() {
+        Some(Ok(d)) => Ok(Some(d)),
+        _ => Ok(None),
+    }
+}
+
+/// Remove one object definition. Safe if the row is absent.
+pub fn delete_object_def(
+    conn: &Connection,
+    ws_path: &str,
+    table_name: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM object_defs WHERE workspace_path = ? AND table_name = ?",
         rusqlite::params![ws_path, table_name],
     )
     .map_err(|e| e.to_string())?;
@@ -276,6 +362,10 @@ pub fn init_global_db() -> Result<(), String> {
     // the column already exists, which we ignore).
     let _ = conn.execute("ALTER TABLE sources ADD COLUMN name_source TEXT NOT NULL DEFAULT 'legacy';", []);
 
+    // Migrate sources to add file fingerprint columns (idempotent).
+    let _ = conn.execute("ALTER TABLE sources ADD COLUMN file_mtime INTEGER NOT NULL DEFAULT 0;", []);
+    let _ = conn.execute("ALTER TABLE sources ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0;", []);
+
     // config: key/value user settings (NEW)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS config (
@@ -285,6 +375,25 @@ pub fn init_global_db() -> Result<(), String> {
         [],
     )
     .map_err(|e| format!("Failed to create config table: {e}"))?;
+
+    // object_defs: persistent definition + input fingerprint for agent-created
+    // tables/views (t_/v_/tmp_/tmp_v_). Lets incremental builds skip re-running
+    // CREATE TABLE AS when upstream inputs are unchanged, and rebuilds the
+    // object after a lake crash-recovery that would otherwise lose it.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS object_defs (
+            workspace_path  TEXT NOT NULL,
+            table_name      TEXT NOT NULL,
+            kind            TEXT NOT NULL,
+            select_sql      TEXT NOT NULL,
+            input_hash      TEXT NOT NULL,
+            created_at      INTEGER NOT NULL,
+            PRIMARY KEY (workspace_path, table_name),
+            FOREIGN KEY(workspace_path) REFERENCES workspaces(path) ON DELETE CASCADE
+        )",
+        [],
+    )
+    .map_err(|e| format!("Failed to create object_defs table: {e}"))?;
 
     // Seed the default workspace on first run.
     let count: i64 = conn

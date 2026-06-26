@@ -13,6 +13,7 @@ mod error;
 mod model;
 mod state;
 mod agent;
+mod fingerprint;
 
 use state::AppState;
 

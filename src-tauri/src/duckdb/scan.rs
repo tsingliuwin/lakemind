@@ -41,21 +41,23 @@ pub struct ScanEntry {
     pub scan_path: String,
     pub partition_keys: Vec<String>,
     /// Total size in bytes of the backing file(s). Single file = its size; a
-    /// grouped/glob entry = the sum of matched files. Currently unused (all
-    /// imports materialize); reserved for the future zero-copy VIEW decision.
-    #[allow(dead_code)]
+    /// grouped/glob entry = the sum of matched files. Fed into the `sources`
+    /// fingerprint so `sync_entries` can detect content changes.
     pub file_size: u64,
+    /// Max mtime (ms since epoch) of the backing file(s). Companion to
+    /// `file_size`: either changing triggers a source rebuild.
+    pub mtime: i64,
 }
 
 /// Walk `root` and produce a deduplicated list of SOURCE scan entries.
 ///
 /// Order: Delta dirs first, then Parquet globs, then CSV, then JSON.
 pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
-    // First pass: collect raw files (with sizes) & detect Delta roots.
-    let mut parquet_files: Vec<(PathBuf, u64)> = Vec::new();
-    let mut csv_files: Vec<(PathBuf, u64)> = Vec::new();
-    let mut json_files: Vec<(PathBuf, u64)> = Vec::new();
-    let mut excel_files: Vec<(PathBuf, u64)> = Vec::new();
+    // First pass: collect raw files (with size + mtime) & detect Delta roots.
+    let mut parquet_files: Vec<(PathBuf, u64, i64)> = Vec::new();
+    let mut csv_files: Vec<(PathBuf, u64, i64)> = Vec::new();
+    let mut json_files: Vec<(PathBuf, u64, i64)> = Vec::new();
+    let mut excel_files: Vec<(PathBuf, u64, i64)> = Vec::new();
     let mut delta_roots: Vec<PathBuf> = Vec::new();
     let mut root_str = root.to_path_buf();
 
@@ -100,12 +102,12 @@ pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
         }
 
         let path = entry.path().to_path_buf();
-        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        let (size, mtime) = file_fingerprint(entry.metadata().ok());
         match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
-            Some("parquet") | Some("parq") => parquet_files.push((path, size)),
-            Some("csv") | Some("tsv") => csv_files.push((path, size)),
-            Some("json") | Some("ndjson") => json_files.push((path, size)),
-            Some("xlsx") | Some("xls") => excel_files.push((path, size)),
+            Some("parquet") | Some("parq") => parquet_files.push((path, size, mtime)),
+            Some("csv") | Some("tsv") => csv_files.push((path, size, mtime)),
+            Some("json") | Some("ndjson") => json_files.push((path, size, mtime)),
+            Some("xlsx") | Some("xls") => excel_files.push((path, size, mtime)),
             _ => {}
         }
     }
@@ -119,47 +121,49 @@ pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
 
     if is_workspace || is_file {
         // Individual files mapping strategy
-        for (f, s) in &csv_files {
-            out.push(build_individual_entry(f, *s, SourceKind::Csv, &root_str));
+        for (f, s, mt) in &csv_files {
+            out.push(build_individual_entry(f, *s, *mt, SourceKind::Csv, &root_str));
         }
-        for (f, s) in &json_files {
-            out.push(build_individual_entry(f, *s, SourceKind::Json, &root_str));
+        for (f, s, mt) in &json_files {
+            out.push(build_individual_entry(f, *s, *mt, SourceKind::Json, &root_str));
         }
-        for (f, s) in &excel_files {
-            out.push(build_individual_entry(f, *s, SourceKind::Excel, &root_str));
+        for (f, s, mt) in &excel_files {
+            out.push(build_individual_entry(f, *s, *mt, SourceKind::Excel, &root_str));
         }
 
         // Group parquet files by parent directory to detect subdirectories (shards)
-        let mut parquet_groups: std::collections::BTreeMap<PathBuf, Vec<(PathBuf, u64)>> =
+        let mut parquet_groups: std::collections::BTreeMap<PathBuf, Vec<(PathBuf, u64, i64)>> =
             std::collections::BTreeMap::new();
-        for (f, s) in &parquet_files {
+        for (f, s, mt) in &parquet_files {
             let dir = f.parent().unwrap_or(Path::new("")).to_path_buf();
-            parquet_groups.entry(dir).or_default().push((f.clone(), *s));
+            parquet_groups.entry(dir).or_default().push((f.clone(), *s, *mt));
         }
         for (dir, files) in parquet_groups {
-            let group_size: u64 = files.iter().map(|(_, s)| *s).sum();
+            let group_size: u64 = files.iter().map(|(_, s, _)| *s).sum();
+            let group_mtime: i64 = files.iter().map(|(_, _, mt)| *mt).max().unwrap_or(0);
             if dir == root_str {
                 // Direct files under workspace root -> map individually!
-                for (f, s) in files {
-                    out.push(build_individual_entry(&f, s, SourceKind::Parquet, &root_str));
+                for (f, s, mt) in files {
+                    out.push(build_individual_entry(&f, s, mt, SourceKind::Parquet, &root_str));
                 }
             } else {
                 // Nested directory -> group them as a single view glob!
                 let label = dir.file_name().and_then(|s| s.to_str()).unwrap_or("parquet").to_string();
                 let keys = hive_keys_of(&dir, &root_str);
                 let exts = present_parquet_exts(&files);
-                out.push(build_entry(&label, &dir, SourceKind::Parquet, &root_str, keys, &exts, group_size));
+                out.push(build_entry(&label, &dir, SourceKind::Parquet, &root_str, keys, &exts, group_size, group_mtime));
             }
         }
     } else {
         // Legacy grouping strategy (for folder drag-and-drop / import)
         if !parquet_files.is_empty() {
-            let total: u64 = parquet_files.iter().map(|(_, s)| *s).sum();
+            let total: u64 = parquet_files.iter().map(|(_, s, _)| *s).sum();
+            let max_mtime: i64 = parquet_files.iter().map(|(_, _, mt)| *mt).max().unwrap_or(0);
             // Detect the actual extension present (`.parquet` vs `.parq`); DuckDB's
             // read_parquet does NOT support shell brace expansion like {a,b}, so we
             // must emit a glob matching the extension(s) actually on disk.
             let exts = present_parquet_exts(&parquet_files);
-            let paths: Vec<&PathBuf> = parquet_files.iter().map(|(p, _)| p).collect();
+            let paths: Vec<&PathBuf> = parquet_files.iter().map(|(p, _, _)| p).collect();
             // Common case: a single directory of shards → one view named after it.
             let parents: std::collections::BTreeSet<PathBuf> =
                 paths.iter().map(|p| p.parent().unwrap_or(Path::new("")).to_path_buf()).collect();
@@ -174,25 +178,25 @@ pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
                         keys = hive_keys_of(&grand.join("**"), &root_str);
                     }
                 }
-                out.push(build_entry("parquet_root", &dir, SourceKind::Parquet, &root_str, keys, &exts, total));
+                out.push(build_entry("parquet_root", &dir, SourceKind::Parquet, &root_str, keys, &exts, total, max_mtime));
             } else {
                 // Multiple directories (likely partitioned): glob the whole root.
                 let keys = hive_keys_glob(&root_str);
-                out.push(build_entry("parquet_glob", &root_str, SourceKind::Parquet, &root_str, keys, &exts, total));
+                out.push(build_entry("parquet_glob", &root_str, SourceKind::Parquet, &root_str, keys, &exts, total, max_mtime));
             }
         }
 
         // CSV: group by directory.
-        for (label, dir, total) in group_by_dir(&csv_files) {
-            out.push(build_entry(&label, &dir, SourceKind::Csv, &root_str, Vec::new(), &[], total));
+        for (label, dir, total, mtime) in group_by_dir(&csv_files) {
+            out.push(build_entry(&label, &dir, SourceKind::Csv, &root_str, Vec::new(), &[], total, mtime));
         }
         // JSON: group by directory.
-        for (label, dir, total) in group_by_dir(&json_files) {
-            out.push(build_entry(&label, &dir, SourceKind::Json, &root_str, Vec::new(), &[], total));
+        for (label, dir, total, mtime) in group_by_dir(&json_files) {
+            out.push(build_entry(&label, &dir, SourceKind::Json, &root_str, Vec::new(), &[], total, mtime));
         }
         // Excel: register individually since read_xlsx doesn't support globbing.
-        for (f, s) in &excel_files {
-            out.push(build_individual_entry(f, *s, SourceKind::Excel, &root_str));
+        for (f, s, mt) in &excel_files {
+            out.push(build_individual_entry(f, *s, *mt, SourceKind::Excel, &root_str));
         }
     }
 
@@ -201,7 +205,7 @@ pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
     out
 }
 
-fn build_individual_entry(file: &Path, file_size: u64, kind: SourceKind, root: &Path) -> ScanEntry {
+fn build_individual_entry(file: &Path, file_size: u64, mtime: i64, kind: SourceKind, root: &Path) -> ScanEntry {
     // Keep the original (possibly Chinese) stem as the human-friendly label; the
     // ASCII SQL identifier is derived from it via the naming module (and may be
     // further refined by the registration layer).
@@ -220,19 +224,22 @@ fn build_individual_entry(file: &Path, file_size: u64, kind: SourceKind, root: &
         scan_path: forward_slashes(file),
         partition_keys: Vec::new(),
         file_size,
+        mtime,
     }
 }
 
-fn group_by_dir(files: &[(PathBuf, u64)]) -> Vec<(String, PathBuf, u64)> {
-    let mut map: std::collections::BTreeMap<PathBuf, u64> = std::collections::BTreeMap::new();
-    for (f, s) in files {
+fn group_by_dir(files: &[(PathBuf, u64, i64)]) -> Vec<(String, PathBuf, u64, i64)> {
+    let mut map: std::collections::BTreeMap<PathBuf, (u64, i64)> = std::collections::BTreeMap::new();
+    for (f, s, mt) in files {
         let dir = f.parent().unwrap_or(Path::new("")).to_path_buf();
-        *map.entry(dir).or_default() += *s;
+        let entry = map.entry(dir).or_default();
+        entry.0 += *s;
+        entry.1 = entry.1.max(*mt);
     }
     map.into_iter()
-        .map(|(dir, total)| {
+        .map(|(dir, (total, mtime))| {
             let label = dir.file_name().and_then(|s| s.to_str()).unwrap_or("data").to_string();
-            (label, dir, total)
+            (label, dir, total, mtime)
         })
         .collect()
 }
@@ -251,6 +258,7 @@ fn build_entry(
     // parquet files by the scan). Ignored for non-parquet kinds.
     parquet_exts: &[&str],
     total_size: u64,
+    mtime: i64,
 ) -> ScanEntry {
     let label = dir
         .file_name()
@@ -288,18 +296,19 @@ fn build_entry(
         scan_path: glob,
         partition_keys,
         file_size: total_size,
+        mtime,
     }
 }
 
 fn entry_for(dir: &Path, kind: SourceKind, root: &Path) -> ScanEntry {
-    build_entry("", dir, kind, root, Vec::new(), &[], 0)
+    build_entry("", dir, kind, root, Vec::new(), &[], 0, 0)
 }
 
 /// Distinct Parquet extensions present among `files`, in sorted order.
 /// E.g. returns `["parq"]` or `["parquet","parq"]`.
-fn present_parquet_exts(files: &[(PathBuf, u64)]) -> Vec<&'static str> {
-    let has_parquet = files.iter().any(|(p, _)| ext_eq(p, "parquet"));
-    let has_parq = files.iter().any(|(p, _)| ext_eq(p, "parq"));
+fn present_parquet_exts(files: &[(PathBuf, u64, i64)]) -> Vec<&'static str> {
+    let has_parquet = files.iter().any(|(p, _, _)| ext_eq(p, "parquet"));
+    let has_parq = files.iter().any(|(p, _, _)| ext_eq(p, "parq"));
     let mut out: Vec<&'static str> = Vec::new();
     if has_parquet {
         out.push("parquet");
@@ -315,6 +324,21 @@ fn ext_eq(p: &Path, ext: &str) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case(ext))
         .unwrap_or(false)
+}
+
+/// Extract (size_bytes, mtime_ms) from a file's metadata, defaulting to (0, 0)
+/// when metadata is unavailable. The pair feeds the source fingerprint used by
+/// `sync_entries` to detect content changes without hashing file bodies.
+fn file_fingerprint(meta: Option<std::fs::Metadata>) -> (u64, i64) {
+    let Some(m) = meta else { return (0, 0) };
+    let size = m.len();
+    let mtime = m
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    (size, mtime)
 }
 
 /// Hive partition keys present in `dir`'s path relative to `root`.

@@ -329,7 +329,13 @@ async fn sync_entries(
             if let Some(rec) = matched {
                 let storage = StorageKind::from_db_str(&rec.storage);
                 let needs_rename = rec.table_name != *target;
-                if table_exists_in_lake(&guard, &rec.table_name) {
+                // A source is reused as-is only when its lake object still exists
+                // AND its file fingerprint (mtime+size) is unchanged. A changed
+                // file falls through to the rebuild branch so downstream objects
+                // see fresh data (previously the change was silently ignored).
+                let fingerprint_unchanged =
+                    rec.file_mtime == e.mtime && rec.file_size == e.file_size as i64;
+                if table_exists_in_lake(&guard, &rec.table_name) && fingerprint_unchanged {
                     if needs_rename {
                         // Rename preserves the data; no re-materialization.
                         if let Err(err) = rename_lake_object(&guard, &rec.table_name, target, storage) {
@@ -355,7 +361,7 @@ async fn sync_entries(
                         result.push(t);
                     }
                 } else {
-                    // Lake object vanished — rebuild under the target name.
+                    // Lake object vanished OR file changed — rebuild under the target name.
                     let mut work = if storage == StorageKind::Table {
                         materialize_into_workspace(e, &ws_dir)?
                     } else {
@@ -365,7 +371,7 @@ async fn sync_entries(
                     drop_lake_object(&guard, &rec.table_name);
                     match register::register(&guard, &work, storage) {
                         Ok(t) => {
-                            let new_rec = source_record_from(&t, rec.created_at, src);
+                            let new_rec = source_record_from(&t, e, rec.created_at, src);
                             let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
                             let _ = db::upsert_source(&sqlite, &ws_path, &new_rec);
                             result.push(t);
@@ -384,7 +390,7 @@ async fn sync_entries(
                 work.view_name = target.clone();
                 match register::register(&guard, &work, storage) {
                     Ok(t) => {
-                        let rec = source_record_from(&t, now, src);
+                        let rec = source_record_from(&t, e, now, src);
                         let _ = db::upsert_source(&sqlite, &ws_path, &rec);
                         result.push(t);
                     }
@@ -891,7 +897,7 @@ fn rename_lake_object(
 /// views are queried separately so a flaky `duckdb_views()` (seen under DuckLake)
 /// cannot make an existing table look absent (which would trigger needless
 /// rebuilds on every sync).
-fn table_exists_in_lake(conn: &duckdb::Connection, name: &str) -> bool {
+pub(crate) fn table_exists_in_lake(conn: &duckdb::Connection, name: &str) -> bool {
     let n = name.replace('"', "\"\"");
     let table_sql = format!(
         "SELECT count(*) FROM duckdb_tables() WHERE database_name='lake' AND schema_name='main' AND table_name=\"{n}\""
@@ -942,8 +948,10 @@ fn build_source_table_from_record(conn: &duckdb::Connection, rec: &SourceRecord)
     })
 }
 
-/// Build a mapping record from a freshly-registered source.
-fn source_record_from(t: &SourceTable, created_at: i64, name_source: &str) -> SourceRecord {
+/// Build a mapping record from a freshly-registered source. The file
+/// fingerprint (mtime/size) is taken from the originating `ScanEntry` so the
+/// next sync can detect content changes and trigger a rebuild.
+fn source_record_from(t: &SourceTable, e: &scan::ScanEntry, created_at: i64, name_source: &str) -> SourceRecord {
     SourceRecord {
         table_name: t.name.clone(),
         label: t.label.clone(),
@@ -954,6 +962,8 @@ fn source_record_from(t: &SourceTable, created_at: i64, name_source: &str) -> So
         partition_keys: t.partition_keys.clone(),
         created_at,
         name_source: name_source.to_string(),
+        file_mtime: e.mtime,
+        file_size: e.file_size as i64,
     }
 }
 

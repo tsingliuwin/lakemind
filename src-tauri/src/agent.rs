@@ -704,6 +704,8 @@ impl DdlToolShared {
     /// `args` is forwarded to the UI via the tool_call segment.
     /// `summary_pending` describes the not-yet-run action for the awaiting UI.
     /// `build_ddl` returns the final statement(s) to execute.
+    /// `object_meta` = `Some((name, select_sql, kind))` for create_table/create_view
+    /// (enables incremental caching + persists the definition); `None` for drop.
     /// Returns the string fed back to the LLM.
     async fn run<F>(
         &self,
@@ -711,6 +713,7 @@ impl DdlToolShared {
         tool_prefix: &str,
         args: serde_json::Value,
         summary_pending: String,
+        object_meta: Option<(String, String, String)>,
         build_ddl: F,
     ) -> Result<String, ToolError>
     where
@@ -720,6 +723,20 @@ impl DdlToolShared {
         emit_tool_call(&self.window, &self.task_id, &call_id, tool_name, args);
 
         let ddl = build_ddl();
+
+        // Incremental cache: for create_table/create_view, if the upstream
+        // fingerprint is unchanged AND the lake object still exists, skip the
+        // expensive DROP+CREATE and reuse the existing object.
+        if let Some((name, select_sql, _kind)) = &object_meta {
+            if self.can_reuse_object(name, select_sql).await {
+                let summary = format!("复用已有的{}（输入未变化）", summary_pending);
+                emit_tool_result(
+                    &self.window, &self.task_id, &call_id, "ok",
+                    summary.clone(), Some(ddl), None, None,
+                );
+                return Ok(summary);
+            }
+        }
 
         // "变更前确认": park until the user decides. "自动执行" (or any other
         // value) falls through to immediate execution.
@@ -764,6 +781,18 @@ impl DdlToolShared {
         let elapsed = start.elapsed().as_millis() as u64;
         match exec_res {
             Ok(Ok(())) => {
+                // Persist the definition + fingerprint so future builds can skip
+                // re-materialization, and so the object can be rebuilt after a
+                // lake crash-recovery.
+                if let Some((name, select_sql, kind)) = object_meta {
+                    self.persist_object_def(&name, &select_sql, &kind).await;
+                }
+                // drop_object: remove any persisted definition for this name.
+                if tool_name == "drop_object" {
+                    if let Some(name) = ddl_extract_name(&ddl) {
+                        self.delete_object_def(&name).await;
+                    }
+                }
                 let summary = format!("{}成功", summary_pending);
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "ok",
@@ -788,6 +817,84 @@ impl DdlToolShared {
             }
         }
     }
+
+    /// True iff an `object_defs` record exists for `name`, its current upstream
+    /// fingerprint matches the stored one, and the lake object still exists.
+    async fn can_reuse_object(&self, name: &str, select_sql: &str) -> bool {
+        let ws_path = self.app_state.workspace_path.lock().await.clone();
+        let name = name.to_string();
+        let select_sql = select_sql.to_string();
+        let conn_clone = self.app_state.conn.clone();
+        tokio::task::spawn_blocking(move || -> bool {
+            let Ok(sqlite) = crate::db::get_db_conn() else { return false };
+            let Ok(Some(def)) = crate::db::get_object_def(&sqlite, &ws_path, &name) else {
+                return false;
+            };
+            let upstreams = crate::fingerprint::extract_upstreams(&select_sql);
+            let current_hash =
+                crate::fingerprint::compute_input_hash(&sqlite, &ws_path, &upstreams);
+            if current_hash != def.input_hash {
+                return false;
+            }
+            // Object still materialized in the lake?
+            let guard = conn_clone.blocking_lock();
+            crate::commands::table_exists_in_lake(&guard, &name)
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    /// Persist (or refresh) the `object_defs` row for a freshly-built object.
+    async fn persist_object_def(&self, name: &str, select_sql: &str, kind: &str) {
+        let ws_path = self.app_state.workspace_path.lock().await.clone();
+        let name = name.to_string();
+        let select_sql = select_sql.to_string();
+        let kind = kind.to_string();
+        let created_at = now_ms();
+        let _ = tokio::task::spawn_blocking(move || -> Result<(), String> {
+            let sqlite = crate::db::get_db_conn()?;
+            let upstreams = crate::fingerprint::extract_upstreams(&select_sql);
+            let input_hash =
+                crate::fingerprint::compute_input_hash(&sqlite, &ws_path, &upstreams);
+            crate::db::upsert_object_def(
+                &sqlite,
+                &ws_path,
+                &crate::db::ObjectDef {
+                    table_name: name,
+                    kind,
+                    select_sql,
+                    input_hash,
+                    created_at,
+                },
+            )
+        })
+        .await;
+    }
+
+    /// Remove the `object_defs` row for `name` (called after a successful drop).
+    async fn delete_object_def(&self, name: &str) {
+        let ws_path = self.app_state.workspace_path.lock().await.clone();
+        let name = name.to_string();
+        let _ = tokio::task::spawn_blocking(move || -> Result<(), String> {
+            let sqlite = crate::db::get_db_conn()?;
+            crate::db::delete_object_def(&sqlite, &ws_path, &name)
+        })
+        .await;
+    }
+}
+
+/// Best-effort extraction of the target object name from a DROP DDL string, for
+/// cleaning up the persisted definition after `drop_object`.
+fn ddl_extract_name(ddl: &str) -> Option<String> {
+    // Matches: DROP (VIEW|TABLE) IF EXISTS "name";  → returns name
+    let upper = ddl.to_uppercase();
+    let idx = upper.find("DROP ")?;
+    let after = &ddl[idx..];
+    // Find the first quoted identifier.
+    let q = after.find('"')?;
+    let rest = &after[q + 1..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
 }
 
 // --- create_table ---------------------------------------------------------
@@ -834,6 +941,7 @@ impl Tool for CreateTableTool {
             "create_table", "ct",
             json!({ "name": name, "select_sql": select_sql }),
             summary_pending,
+            Some((name.clone(), select_sql.clone(), "table".to_string())),
             move || format!(
                 "DROP TABLE IF EXISTS \"{name}\";\nCREATE TABLE \"{name}\" AS {select_sql};",
                 name = name,
@@ -888,6 +996,7 @@ impl Tool for CreateViewTool {
             "create_view", "cv",
             json!({ "name": name, "select_sql": select_sql }),
             summary_pending,
+            Some((name.clone(), select_sql.clone(), "view".to_string())),
             move || format!(
                 "DROP VIEW IF EXISTS \"{name}\";\nDROP TABLE IF EXISTS \"{name}\";\nCREATE VIEW \"{name}\" AS {select_sql};",
                 name = name,
@@ -936,6 +1045,7 @@ impl Tool for DropObjectTool {
             "drop_object", "drop",
             json!({ "name": name }),
             summary_pending,
+            None,
             move || format!(
                 "DROP VIEW IF EXISTS \"{name}\";\nDROP TABLE IF EXISTS \"{name}\";",
                 name = name
