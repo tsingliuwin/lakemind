@@ -924,9 +924,36 @@ select:hover:not(:disabled) {
   border: 1px solid rgba(16, 185, 129, 0.2);
 }
 .kind-badge[data-kind="excel"] {
-  color: #10b981;
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  color: #15803f;
+  background: rgba(21, 128, 63, 0.1);
+  border: 1px solid rgba(21, 128, 63, 0.2);
+}
+/* Category badge for agent-created tables/views (by naming prefix).
+ * The agent-object family shares a cool blue palette (distinct from the
+ * source-file badges), differentiated by depth so TABLE/VIEW/TMP/TMPV
+ * are told apart at a glance without colliding with file-format colors. */
+.kind-badge--category {
+  min-width: auto;
+}
+.kind-badge--category[title="最终清洗加工后的物理表"] {
+  color: #3b82f6;     /* blue */
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+.kind-badge--category[title="中间过渡物理表"] {
+  color: #6366f1;     /* indigo */
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+.kind-badge--category[title="最终清洗加工后的虚拟视图"] {
+  color: #0ea5e9;     /* sky */
+  background: rgba(14, 165, 233, 0.1);
+  border: 1px solid rgba(14, 165, 233, 0.2);
+}
+.kind-badge--category[title="中间过渡虚拟视图"] {
+  color: #64748b;     /* slate */
+  background: rgba(100, 116, 139, 0.1);
+  border: 1px solid rgba(100, 116, 139, 0.2);
 }
 .leaf-label {
   flex: 1;

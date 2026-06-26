@@ -41,16 +41,34 @@ export default function LeftNav(props: {
   onToggleLeft?: () => void;
 }) {
   // Group tables by their parent directory for a tree-like feel.
+  // Two kinds of objects are collected into the flat (empty-path) group that
+  // renders without a header:
+  //  - agent-created tables/views (path is empty), and
+  //  - source files sitting directly in the workspace root, so the workspace
+  //    name (e.g. "DefaultProject") isn't shown as a redundant group header.
+  //    We detect this by comparing the group's directory name to the workspace
+  //    name, because `workspacePath` is a relative key (e.g. "DefaultProject")
+  //    while source `path`s are absolute (e.g. ~/.lakemind/DefaultProject/x.csv).
   const groups = createMemo(() => {
+    const wsName = props.workspace;
     const map = new Map<string, SourceTable[]>();
     for (const t of props.sources) {
       const slash = Math.max(t.path.lastIndexOf("/"), t.path.lastIndexOf("\\"));
-      const group = slash >= 0 ? t.path.slice(0, slash) : t.path;
+      let group = slash >= 0 ? t.path.slice(0, slash) : t.path;
+      // Files directly under the workspace root collapse into the flat group.
+      if (group && wsName && shortDir(group) === wsName) group = "";
       const arr = map.get(group) ?? [];
       arr.push(t);
       map.set(group, arr);
     }
-    return [...map.entries()];
+    // Keep directory groups first (stable insertion order), empty-path group last.
+    const entries = [...map.entries()];
+    entries.sort((a, b) => {
+      const aEmpty = !a[0], bEmpty = !b[0];
+      if (aEmpty !== bEmpty) return aEmpty ? 1 : -1;
+      return 0;
+    });
+    return entries;
   });
 
   // File explorer states
@@ -514,9 +532,11 @@ export default function LeftNav(props: {
                   <Show when={dataSectionExpanded()}>
                     <div class="tree-section-content" style="display: flex; flex-direction: column; gap: 1px;">
                       <For each={groups()}>
-                        {(group) => (
-                          <div class="tree-subgroup" style={{ "margin-left": groups().length > 1 ? "12px" : "0" }}>
-                            <Show when={groups().length > 1}>
+                        {(group) => {
+                          const hasDir = !!group[0]; // directory group vs flat (agent-created)
+                          return (
+                          <div class="tree-subgroup" style={{ "margin-left": hasDir ? "12px" : "0" }}>
+                            <Show when={hasDir}>
                               <div class="tree-group-label" title={group[0]} style="display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 0;">
                                 <span style="display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim);">
                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
@@ -542,13 +562,16 @@ export default function LeftNav(props: {
                                         : undefined,
                                   }}
                                 >
-                                  <span class="kind-badge" data-kind={t.kind}>{t.kind}</span>
+                                  <Show when={categoryOf(t.name)} fallback={
+                                    <span class="kind-badge" data-kind={t.kind}>{t.kind}</span>
+                                  }>
+                                    {(cat) => (
+                                      <span class="kind-badge kind-badge--category" title={cat().title}>{cat().label}</span>
+                                    )}
+                                  </Show>
                                   <span class="leaf-label">{t.name}</span>
                                   <Show when={t.storage === "view"}>
                                     <span class="leaf-storage" title="零拷贝视图(直接读源文件,不复制)">👁</span>
-                                  </Show>
-                                  <Show when={t.storage === "custom"}>
-                                    <span class="leaf-storage" title="用户自建表/视图">✦</span>
                                   </Show>
                                   <Show when={t.rowCountEstimate != null}>
                                     <span class="leaf-count">{formatCount(t.rowCountEstimate!)}</span>
@@ -562,7 +585,8 @@ export default function LeftNav(props: {
                               )}
                             </For>
                           </div>
-                        )}
+                          );
+                        }}
                       </For>
                       <Show when={props.sources.length === 0}>
                         <div class="empty-section-item" style="padding: 4px 8px 4px 8px; color: var(--text-dim); font-size: 11px; font-style: italic; text-align: left;">
@@ -593,9 +617,20 @@ export default function LeftNav(props: {
 }
 
 function shortDir(path: string): string {
-  if (!path) return "会话与过程表";
+  if (!path) return ""; // agent-created objects (empty path) are not grouped
   const segs = path.split(/[\\/]/).filter(Boolean);
   return segs.slice(-1)[0] || path; // Show only the directory name for cleaner ZCode layout
+}
+
+/** Classify an agent-created table/view by its naming prefix.
+ * Returns null for source objects (`s_`) and anything unrecognized — those
+ * keep their existing kind badge instead of a category badge. */
+function categoryOf(name: string): { label: string; title: string } | null {
+  if (name.startsWith("tmp_v_")) return { label: "TMPV", title: "中间过渡虚拟视图" };
+  if (name.startsWith("tmp_")) return { label: "TMP", title: "中间过渡物理表" };
+  if (name.startsWith("v_")) return { label: "VIEW", title: "最终清洗加工后的虚拟视图" };
+  if (name.startsWith("t_")) return { label: "TABLE", title: "最终清洗加工后的物理表" };
+  return null;
 }
 
 /** Map a filename's extension to the same `kind` label/badge used in the Data tree,
