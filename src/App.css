@@ -1061,7 +1061,7 @@ select:hover:not(:disabled) {
 .editor-toolbar {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border-faint);
   background: var(--bg-elevated);
 }
@@ -1108,7 +1108,7 @@ select:hover:not(:disabled) {
   color: var(--text-secondary);
   border: none;
   border-radius: 6px;
-  height: 28px;
+  height: 24px;
   padding: 0 8px;
   cursor: pointer;
   outline: none;
@@ -1173,8 +1173,8 @@ select:hover:not(:disabled) {
 }
 
 .editor-toolbar .icon-btn {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border: none;
   background: var(--bg-surface);
   color: var(--text-secondary);
@@ -1189,10 +1189,14 @@ select:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
+.editor-toolbar .icon-btn svg {
+  width: 12px !important;
+  height: 12px !important;
+}
 
 .editor-toolbar .header-close-btn {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border: none;
   background: var(--bg-surface);
   color: var(--text-secondary);
@@ -1788,11 +1792,6 @@ body.is-resizing-column * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.col-null-mark {
-  font-size: 10px;
-  color: var(--text-dim);
-  font-family: var(--font-mono);
 }
 .type-badge {
   font-family: var(--font-mono);

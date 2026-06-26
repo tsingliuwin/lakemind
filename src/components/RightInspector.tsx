@@ -86,9 +86,6 @@ export default function RightInspector(props: {
                     onClick={() => props.onInjectSql(`SELECT "${c.name}" FROM "${tVal().name}" LIMIT 1000;`)}
                   >
                     <span class="col-name">{c.name}</span>
-                    <Show when={c.null}>
-                      <span class="col-null-mark">∅</span>
-                    </Show>
                     <span class="type-badge" data-family={typeFamily(c.type)}>
                       {c.type}
                     </span>
