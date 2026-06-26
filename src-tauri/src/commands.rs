@@ -10,7 +10,7 @@
 //! * **FS** — native directory picker, read a workspace folder.
 //! * **Workspace / Task** — registry + per-workspace SQL/chat task persistence.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -58,6 +58,76 @@ const CUSTOM_TABLE_SQLS: [&str; 2] = [
     "SELECT view_name as table_name FROM duckdb_views() WHERE database_name = 'lake' AND schema_name = 'main' AND NOT internal",
 ];
 
+/// Fast table listing for instant UI render on startup / workspace switch.
+///
+/// Unlike `register_workspace_sources` (which scans the filesystem + syncs) and
+/// `list_duckdb_tables` (which counts rows), this only:
+///   * ensures the workspace's lake is attached (skipping re-attach when already
+///     on this workspace), and
+///   * reads table names + column structure (describe_view is a LIMIT-0 plan).
+///
+/// Row counts are left as `None` — they're filled in later by the async
+/// `list_duckdb_tables`. File scanning + sync still run in the background via
+/// `register_workspace_sources`. This lets the table list appear in ~instantly
+/// instead of blocking on a full directory walk + row counts.
+#[tauri::command]
+pub async fn list_tables_fast(
+    workspace_path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SourceTable>, String> {
+    // Attach this workspace's lake if we're not already on it. On a fresh launch
+    // the default workspace is already attached (AppState::new), so this is a
+    // no-op then; it only re-attaches on an explicit workspace switch.
+    {
+        let current = state.workspace_path.lock().await.clone();
+        if current != workspace_path {
+            let ws_dir = resolve_workspace_dir(&workspace_path)?;
+            switch_workspace_lake(&state, workspace_path.clone(), ws_dir).await?;
+        }
+    }
+
+    let ws_path = workspace_path;
+    run_blocking(state, move |conn| {
+        let sqlite = db::get_db_conn()?;
+        let records = db::list_sources(&sqlite, &ws_path)?;
+
+        let mut result = Vec::new();
+        let mut known: HashSet<String> = HashSet::new();
+        for rec in &records {
+            known.insert(rec.table_name.clone());
+            // describe_view only; no count_rows.
+            match build_source_table_from_record(conn, rec) {
+                Ok(t) => result.push(t),
+                Err(e) => eprintln!("fast list: skip source {} (metadata failed): {}", rec.table_name, e),
+            }
+        }
+
+        // Custom tables/views from the lake catalog (no row count).
+        for sql in CUSTOM_TABLE_SQLS {
+            let Ok(mut stmt) = conn.prepare(sql) else { continue };
+            let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else { continue };
+            for name in rows.flatten() {
+                if known.contains(&name) { continue; }
+                known.insert(name.clone());
+                let cols = schema::describe_view(conn, &name).unwrap_or_default();
+                result.push(SourceTable {
+                    name: name.clone(),
+                    label: name,
+                    kind: SourceKind::View,
+                    storage: StorageKind::Custom,
+                    path: String::new(),
+                    scan_path: String::new(),
+                    partition_keys: Vec::new(),
+                    row_count_estimate: None,
+                    columns: cols,
+                });
+            }
+        }
+        Ok(result)
+    })
+    .await
+}
+
 /// All tables/views for the current workspace: registered sources (from the
 /// SQLite `sources` mapping, enriched with live column metadata) plus any custom
 /// tables the user created via SQL (`storage = custom`). Best-effort throughout
@@ -66,20 +136,38 @@ const CUSTOM_TABLE_SQLS: [&str; 2] = [
 #[tauri::command]
 pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
     let ws_path = state.workspace_path.lock().await.clone();
+    // The source cache (hydrated by `register_workspace_sources`) already carries
+    // every source's columns/metadata without row counts. We reuse it to avoid
+    // re-running describe_view, and only fill in the (slow) row counts here.
+    let cached: Vec<SourceTable> = state.sources.lock().await.clone();
     run_blocking(state, move |conn| {
         let sqlite = db::get_db_conn()?;
         let records = db::list_sources(&sqlite, &ws_path)?;
 
-        // 1. Registered sources (authoritative). A record whose lake object has
-        //    gone missing is skipped here; it is rebuilt on the next sync.
+        // Index the cache by table name for O(1) lookup.
+        let cache_by_name: HashMap<String, &SourceTable> =
+            cached.iter().map(|t| (t.name.clone(), t)).collect();
+
+        // 1. Registered sources (authoritative). Reuse the cached metadata
+        //    (columns etc.) and only compute the row count — the part the fast
+        //    initial render skipped.
         let mut result = Vec::new();
         let mut known: HashSet<String> = HashSet::new();
         for rec in &records {
             known.insert(rec.table_name.clone());
-            match build_source_table_from_record(conn, rec) {
-                Ok(t) => result.push(t),
-                Err(e) => eprintln!("list: skip source {} (metadata failed): {}", rec.table_name, e),
-            }
+            let mut t = if let Some(c) = cache_by_name.get(&rec.table_name) {
+                (*c).clone()
+            } else {
+                match build_source_table_from_record(conn, rec) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        eprintln!("list: skip source {} (metadata failed): {}", rec.table_name, e);
+                        continue;
+                    }
+                }
+            };
+            t.row_count_estimate = count_rows(conn, &t.name);
+            result.push(t);
         }
 
         // 2. Custom tables/views not tracked in `sources`. Best-effort: each SQL
@@ -97,6 +185,7 @@ pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<Source
                     continue;
                 }
                 known.insert(name.clone());
+                // Custom objects aren't in the source cache, so hydrate here.
                 let cols = schema::describe_view(conn, &name).unwrap_or_default();
                 let count = count_rows(conn, &name);
                 result.push(SourceTable {
@@ -932,9 +1021,13 @@ fn load_extensions_if_needed(conn: &duckdb::Connection, entries: &[scan::ScanEnt
 }
 
 /// Hydrate a [`SourceTable`] from a mapping record + live DuckLake metadata.
+///
+/// Intentionally does NOT count rows — `SELECT count(*)` on materialized
+/// DuckLake tables scans parquet, which is slow for large lakes. Row counts are
+/// filled in lazily by `list_duckdb_tables` (called async after the fast
+/// initial render) so the table list appears instantly with `row_count = None`.
 fn build_source_table_from_record(conn: &duckdb::Connection, rec: &SourceRecord) -> AppResult<SourceTable> {
     let columns = schema::describe_view(conn, &rec.table_name).unwrap_or_default();
-    let count = count_rows(conn, &rec.table_name);
     Ok(SourceTable {
         name: rec.table_name.clone(),
         label: rec.label.clone(),
@@ -943,7 +1036,7 @@ fn build_source_table_from_record(conn: &duckdb::Connection, rec: &SourceRecord)
         path: rec.file_path.clone(),
         scan_path: rec.scan_path.clone(),
         partition_keys: rec.partition_keys.clone(),
-        row_count_estimate: count,
+        row_count_estimate: None,
         columns,
     })
 }

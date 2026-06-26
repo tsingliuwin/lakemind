@@ -338,12 +338,25 @@ export default function App() {
         setSql("SELECT 1 AS n;");
       }
 
-      // 2. Scan and register files in workspace, then load all DuckDB tables
-      await invoke<SourceTable[]>("register_workspace_sources", { workspacePath: ws.path });
-      const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
-      setSources(dbTables);
+      // 2. Show tables instantly (names + columns, no row counts, no file scan),
+      //    then run the expensive scan/sync + row-count pass in the background.
+      const fastTables = await invoke<SourceTable[]>("list_tables_fast", { workspacePath: ws.path });
+      setSources(fastTables);
       setSelectedTable(null);
       refreshRegisterStatus(ws.path);
+
+      // Background A: scan files + sync sources (may rebuild changed tables).
+      void invoke<SourceTable[]>("register_workspace_sources", { workspacePath: ws.path })
+        .then((synced) => {
+          if (currentWorkspace()?.path === ws.path) setSources(synced);
+        })
+        .catch((err) => console.error("Failed to sync workspace sources:", err));
+      // Background B: fill in row counts once computed.
+      void invoke<SourceTable[]>("list_duckdb_tables")
+        .then((withCounts) => {
+          if (currentWorkspace()?.path === ws.path) setSources(withCounts);
+        })
+        .catch((err) => console.error("Failed to load row counts:", err));
     } catch (err) {
       console.error("Failed to load workspace tasks & sources:", err);
     } finally {
