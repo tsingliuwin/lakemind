@@ -3287,13 +3287,13 @@ button.lm-select-trigger:hover:not(:disabled) {
 }
 
 .send-btn.active {
-  background: var(--accent-blue);
-  color: #fff;
+  background: var(--text-primary);
+  color: var(--bg-surface);
   cursor: pointer;
 }
 
 .send-btn.active:hover {
-  background: var(--accent-blue-hover);
+  opacity: 0.85;
 }
 
 .send-btn svg {
@@ -4271,8 +4271,11 @@ button.lm-select-trigger:hover:not(:disabled) {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .chat-composer__box:focus-within {
-  border-color: var(--accent-blue);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12);
+}
+:root.light .chat-composer__box:focus-within {
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.08);
 }
 .chat-composer__input {
   width: 100%;
@@ -4341,9 +4344,9 @@ button.lm-select-trigger:hover:not(:disabled) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--accent-blue);
+  background: var(--text-primary);
   border: none;
-  color: #fff;
+  color: var(--bg-surface);
   border-radius: 8px;
   cursor: pointer;
   transition: opacity 0.12s, background-color 0.12s;
@@ -4355,7 +4358,7 @@ button.lm-select-trigger:hover:not(:disabled) {
   flex-shrink: 0;
 }
 .chat-composer__send-square:hover:not(:disabled) {
-  background: var(--accent-blue-hover);
+  opacity: 0.85;
 }
 .chat-composer__send-square:disabled {
   background: rgba(255, 255, 255, 0.08);
