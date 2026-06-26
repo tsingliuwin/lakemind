@@ -4608,7 +4608,7 @@ button.lm-select-trigger:hover:not(:disabled) {
   border-radius: 4px;
   background: var(--bg-elevated);
   border: none;
-  color: var(--accent-blue);
+  color: var(--text-secondary);
   cursor: pointer;
   opacity: 0.75;
   display: inline-flex;
@@ -4620,7 +4620,7 @@ button.lm-select-trigger:hover:not(:disabled) {
 .tool-seg__open:hover {
   opacity: 1;
   background: var(--bg-active);
-  color: var(--accent-blue-hover);
+  color: var(--text-primary);
 }
 
 /* ===========================================================================
