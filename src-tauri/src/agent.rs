@@ -9,6 +9,7 @@ use rig_core::{
     agent::{MultiTurnStreamItem, StreamingError},
 };
 use tauri::Emitter;
+use tokio::sync::oneshot;
 use crate::state::AppState;
 use crate::duckdb::execute;
 use crate::model::SqlResult;
@@ -307,6 +308,38 @@ fn emit_tool_result(
         table,
         elapsed_ms,
     }));
+}
+
+/// Emit a `tool_result` carrying `status: "awaiting"` — marks the tool segment
+/// as parked pending the user's confirm/cancel decision in "变更前确认" mode.
+/// `ddl` is the statement the tool intends to run, shown in the inline confirm UI.
+fn emit_tool_awaiting(
+    window: &tauri::Window,
+    task_id: &str,
+    id: &str,
+    summary: String,
+    ddl: String,
+) {
+    emit_event(window, task_id, "tool_result", None, Some(Segment::Tool {
+        id: id.to_string(),
+        tool: String::new(),
+        args: None,
+        status: "awaiting".to_string(),
+        summary: Some(summary),
+        sql: Some(ddl),
+        table: None,
+        elapsed_ms: None,
+    }));
+}
+
+/// Validate a user-supplied identifier for use in a quoted DuckDB DDL statement.
+/// Mirrors `commands::sanitize_ident`: rejects empty names and characters that
+/// could break out of a double-quoted identifier.
+fn sanitize_ddl_ident(name: &str) -> Result<String, ToolError> {
+    if name.is_empty() || name.contains('"') || name.contains('\0') {
+        return Err(ToolError("非法的表/视图名（不能为空，不能包含双引号）".to_string()));
+    }
+    Ok(name.to_string())
 }
 
 // ===========================================================================
@@ -646,6 +679,272 @@ impl Tool for SampleDataTool {
     }
 }
 
+// ===========================================================================
+// DDL Tools — create_table / create_view / drop_object
+//
+// These carry the "变更能力" (write capability). In "变更前确认" mode their
+// `call()` parks on a oneshot channel until the user approves/cancels from the
+// UI (resolve_tool_confirmation). In "自动执行" mode they run immediately.
+// The read-only `execute_query` tool is unchanged and still rejects all DDL.
+// ===========================================================================
+
+/// Shared state for the three DDL tools.
+#[derive(Clone)]
+struct DdlToolShared {
+    app_state: AppState,
+    task_id: String,
+    window: tauri::Window,
+    confirm_mode: String,
+}
+
+impl DdlToolShared {
+    /// Drive one DDL operation end-to-end respecting the confirm mode.
+    ///
+    /// `tool_name`/`tool_prefix` identify the tool in the transcript.
+    /// `args` is forwarded to the UI via the tool_call segment.
+    /// `summary_pending` describes the not-yet-run action for the awaiting UI.
+    /// `build_ddl` returns the final statement(s) to execute.
+    /// Returns the string fed back to the LLM.
+    async fn run<F>(
+        &self,
+        tool_name: &str,
+        tool_prefix: &str,
+        args: serde_json::Value,
+        summary_pending: String,
+        build_ddl: F,
+    ) -> Result<String, ToolError>
+    where
+        F: FnOnce() -> String + Send + 'static,
+    {
+        let call_id = next_tool_id(tool_prefix);
+        emit_tool_call(&self.window, &self.task_id, &call_id, tool_name, args);
+
+        let ddl = build_ddl();
+
+        // "变更前确认": park until the user decides. "自动执行" (or any other
+        // value) falls through to immediate execution.
+        if self.confirm_mode == "变更前确认" {
+            let (tx, rx) = oneshot::channel::<crate::state::ConfirmDecision>();
+            {
+                let key = format!("{}:{}", self.task_id, call_id);
+                let mut pending = self.app_state.pending_confirmations.lock().await;
+                pending.insert(key.clone(), crate::state::PendingConfirmation { tx });
+            }
+            // Notify the UI this step is awaiting the user.
+            emit_tool_awaiting(&self.window, &self.task_id, &call_id, summary_pending.clone(), ddl.clone());
+
+            let decision = rx.await;
+            match decision {
+                Ok(d) if d.approved => {
+                    // fall through to execute below
+                }
+                _ => {
+                    let msg = "用户已取消此操作".to_string();
+                    emit_tool_result(
+                        &self.window, &self.task_id, &call_id, "error",
+                        msg.clone(), Some(ddl), None, None,
+                    );
+                    return Err(ToolError(msg));
+                }
+            }
+        }
+
+        let start = std::time::Instant::now();
+        let conn = self.app_state.conn.clone();
+        let ddl_for_exec = ddl.clone();
+        let exec_res = tokio::task::spawn_blocking(move || {
+            let guard = conn.blocking_lock();
+            // DuckDB `execute` runs a single statement; our DDL strings already
+            // contain semicolons separating DROP + CREATE, so use execute_batch.
+            guard.execute_batch(&ddl_for_exec)
+        })
+        .await
+        .map_err(|e| ToolError(format!("线程生成失败: {e}")));
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        match exec_res {
+            Ok(Ok(())) => {
+                let summary = format!("{}成功", summary_pending);
+                emit_tool_result(
+                    &self.window, &self.task_id, &call_id, "ok",
+                    summary.clone(), Some(ddl), None, Some(elapsed),
+                );
+                Ok(summary)
+            }
+            Ok(Err(e)) => {
+                let msg = format!("执行失败: {e}");
+                emit_tool_result(
+                    &self.window, &self.task_id, &call_id, "error",
+                    msg.clone(), Some(ddl), None, Some(elapsed),
+                );
+                Err(ToolError(msg))
+            }
+            Err(e) => {
+                emit_tool_result(
+                    &self.window, &self.task_id, &call_id, "error",
+                    e.0.clone(), Some(ddl), None, Some(elapsed),
+                );
+                Err(e)
+            }
+        }
+    }
+}
+
+// --- create_table ---------------------------------------------------------
+
+#[derive(Deserialize, Serialize)]
+struct CreateTableArgs {
+    name: String,
+    select_sql: String,
+}
+
+struct CreateTableTool {
+    shared: DdlToolShared,
+}
+
+impl Tool for CreateTableTool {
+    const NAME: &'static str = "create_table";
+    type Error = ToolError;
+    type Args = CreateTableArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "create_table".to_string(),
+            description: "创建一张物理表（物化存储）来持久化加工后的数据。传入新表名与一条 SELECT 语句，结果会被物化写入。若同名表已存在会先删除再创建。命名建议用 t_ 前缀（最终表）或 tmp_ 前缀（中间表）。".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "新表名（遵循命名规范，如 t_sales、tmp_joined）" },
+                    "select_sql": { "type": "string", "description": "用于生成该表的 SELECT 查询语句" }
+                },
+                "required": ["name", "select_sql"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let name = sanitize_ddl_ident(args.name.trim())?;
+        let select_sql = args.select_sql.trim().to_string();
+        if select_sql.is_empty() {
+            return Err(ToolError("select_sql 不能为空".to_string()));
+        }
+        let summary_pending = format!("创建物理表 {}", name);
+        self.shared.run(
+            "create_table", "ct",
+            json!({ "name": name, "select_sql": select_sql }),
+            summary_pending,
+            move || format!(
+                "DROP TABLE IF EXISTS \"{name}\";\nCREATE TABLE \"{name}\" AS {select_sql};",
+                name = name,
+                select_sql = select_sql
+            ),
+        )
+        .await
+    }
+}
+
+// --- create_view ----------------------------------------------------------
+
+#[derive(Deserialize, Serialize)]
+struct CreateViewArgs {
+    name: String,
+    select_sql: String,
+}
+
+struct CreateViewTool {
+    shared: DdlToolShared,
+}
+
+impl Tool for CreateViewTool {
+    const NAME: &'static str = "create_view";
+    type Error = ToolError;
+    type Args = CreateViewArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "create_view".to_string(),
+            description: "创建一个虚拟视图（零拷贝，不物化数据）来封装加工逻辑。传入新视图名与一条 SELECT 语句。若同名对象已存在会先删除再创建。命名建议用 v_ 前缀（最终视图）或 tmp_v_ 前缀（中间视图）。".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "新视图名（遵循命名规范，如 v_sales、tmp_v_filtered）" },
+                    "select_sql": { "type": "string", "description": "定义该视图的 SELECT 查询语句" }
+                },
+                "required": ["name", "select_sql"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let name = sanitize_ddl_ident(args.name.trim())?;
+        let select_sql = args.select_sql.trim().to_string();
+        if select_sql.is_empty() {
+            return Err(ToolError("select_sql 不能为空".to_string()));
+        }
+        let summary_pending = format!("创建视图 {}", name);
+        self.shared.run(
+            "create_view", "cv",
+            json!({ "name": name, "select_sql": select_sql }),
+            summary_pending,
+            move || format!(
+                "DROP VIEW IF EXISTS \"{name}\";\nDROP TABLE IF EXISTS \"{name}\";\nCREATE VIEW \"{name}\" AS {select_sql};",
+                name = name,
+                select_sql = select_sql
+            ),
+        )
+        .await
+    }
+}
+
+// --- drop_object ----------------------------------------------------------
+
+#[derive(Deserialize, Serialize)]
+struct DropObjectArgs {
+    name: String,
+}
+
+struct DropObjectTool {
+    shared: DdlToolShared,
+}
+
+impl Tool for DropObjectTool {
+    const NAME: &'static str = "drop_object";
+    type Error = ToolError;
+    type Args = DropObjectArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "drop_object".to_string(),
+            description: "删除指定的表或视图（同时清理同名视图与表两种形态）。删除后数据不可恢复，请确认后再使用。".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "要删除的表或视图名" }
+                },
+                "required": ["name"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let name = sanitize_ddl_ident(args.name.trim())?;
+        let summary_pending = format!("删除对象 {}", name);
+        self.shared.run(
+            "drop_object", "drop",
+            json!({ "name": name }),
+            summary_pending,
+            move || format!(
+                "DROP VIEW IF EXISTS \"{name}\";\nDROP TABLE IF EXISTS \"{name}\";",
+                name = name
+            ),
+        )
+        .await
+    }
+}
+
 pub(crate) fn sanitize_endpoint(endpoint: &str) -> String {
     let mut clean = endpoint.trim().to_string();
     while clean.ends_with('/') {
@@ -712,7 +1011,13 @@ const PREAMBLE: &str = r#"# 角色
 你的思考过程（reasoning）也必须用中文进行。不要用英文思考，即使问题用英文提出。思考内容应保持与中文回复一致的语言风格。
 
 # 安全约束
-禁止执行任何写操作（DELETE, DROP, UPDATE 等）。所有数据都必须从本地 SQL 查询获取。若需要可自行关联表查询。"#;
+- `execute_query` 工具仅用于只读查询（SELECT），禁止通过它执行任何写操作（DELETE, DROP, UPDATE, INSERT, ALTER 等）。
+- 需要创建或删除表/视图时，必须使用专用工具：
+  - `create_table`：创建物化物理表（`t_`/`tmp_` 前缀）。
+  - `create_view`：创建零拷贝虚拟视图（`v_`/`tmp_v_` 前缀）。
+  - `drop_object`：删除表或视图。
+- 当用户要求清洗、加工、落表、建中间结果或整理最终数据集时，主动使用上述工具完成任务，而不是只给出 SQL 文本。
+- 删除操作不可恢复，仅当用户明确要求时才调用 `drop_object`。"#;
 
 /// Rebuild the LLM chat history from persisted messages.
 ///
@@ -783,6 +1088,7 @@ pub async fn run_agent_chat_stream(
     prompt: String,
     history_json: String,
     priority: String,
+    confirm_mode: String,
     app_state: AppState,
 ) -> Result<(), String> {
     // 1. Get model provider config
@@ -824,6 +1130,15 @@ pub async fn run_agent_chat_stream(
     let desc_tool = DescribeTableTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
     let exec_tool = ExecuteQueryTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
     let sample_tool = SampleDataTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    let ddl_shared = DdlToolShared {
+        app_state: app_state.clone(),
+        task_id: task_id.clone(),
+        window: window.clone(),
+        confirm_mode: confirm_mode.clone(),
+    };
+    let create_table_tool = CreateTableTool { shared: ddl_shared.clone() };
+    let create_view_tool = CreateViewTool { shared: ddl_shared.clone() };
+    let drop_object_tool = DropObjectTool { shared: ddl_shared };
 
     let format = provider.api_format.to_lowercase();
     if format == "openai" {
@@ -842,7 +1157,10 @@ pub async fn run_agent_chat_stream(
             .tool(list_tool)
             .tool(desc_tool)
             .tool(exec_tool)
-            .tool(sample_tool);
+            .tool(sample_tool)
+            .tool(create_table_tool)
+            .tool(create_view_tool)
+            .tool(drop_object_tool);
 
         if model_id.starts_with("o1") || model_id.starts_with("o3") {
             agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
@@ -868,7 +1186,10 @@ pub async fn run_agent_chat_stream(
             .tool(list_tool)
             .tool(desc_tool)
             .tool(exec_tool)
-            .tool(sample_tool);
+            .tool(sample_tool)
+            .tool(create_table_tool)
+            .tool(create_view_tool)
+            .tool(drop_object_tool);
 
         if model_id.starts_with("o1") || model_id.starts_with("o3") {
             agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
@@ -895,6 +1216,9 @@ pub async fn run_agent_chat_stream(
             .tool(desc_tool)
             .tool(exec_tool)
             .tool(sample_tool)
+            .tool(create_table_tool)
+            .tool(create_view_tool)
+            .tool(drop_object_tool)
             .build();
 
         let stream = agent.stream_chat(prompt.clone(), rig_history)

@@ -7,6 +7,9 @@ const TOOL_LABELS: Record<string, string> = {
   describe_table: "分析表结构",
   execute_query: "执行 SQL",
   sample_data: "采样数据",
+  create_table: "创建表",
+  create_view: "创建视图",
+  drop_object: "删除对象",
   step: "步骤",
 };
 
@@ -24,6 +27,8 @@ export default function ToolSegment(props: {
   expanded: boolean;
   onToggle: (id: string) => void;
   onOpenInSqlPanel: (sql: string) => void;
+  /** awaiting 状态下用户点击「确认执行」(true) 或「取消」(false)。 */
+  onConfirm?: (approved: boolean) => void;
 }) {
   // ToolSegment is only ever rendered for `type === "tool"` segments (filtered
   // by the parent). Narrow once into a local typed variable so the tool-shape
@@ -59,12 +64,21 @@ export default function ToolSegment(props: {
     const s = t();
     if (!s) return false;
     return !!(
+      s.status === "awaiting" || // awaiting: always show DDL + confirm buttons
       (sqlFromArgs() && s.tool === "execute_query") ||
       (tableFromArgs() && s.tool !== "execute_query") ||
       s.sql ||
       s.table ||
       (s.tool === "list_tables" && tablesList().length > 0)
     );
+  };
+
+  // awaiting 状态点击确认/取消后，本地置灰，等待后端 tool_result 覆盖状态。
+  const [confirmResolved, setConfirmResolved] = createSignal(false);
+  const handleConfirm = (approved: boolean) => {
+    if (confirmResolved()) return;
+    setConfirmResolved(true);
+    props.onConfirm?.(approved);
   };
 
   return (
@@ -74,9 +88,9 @@ export default function ToolSegment(props: {
     >
       <div
         class="tool-seg__summary"
-        classList={{ "tool-seg__summary--clickable": hasBody() && t()?.status !== "running" }}
+        classList={{ "tool-seg__summary--clickable": hasBody() && t()?.status !== "running" && t()?.status !== "awaiting" }}
         onClick={() => {
-          if (hasBody() && t()?.status !== "running") {
+          if (hasBody() && t()?.status !== "running" && t()?.status !== "awaiting") {
             props.onToggle(t()!.id);
           }
         }}
@@ -84,6 +98,12 @@ export default function ToolSegment(props: {
         <span class="tool-seg__status">
           {t()?.status === "running" ? (
             <span class="tool-seg__spinner" />
+          ) : t()?.status === "awaiting" ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; color: var(--accent-orange, #f59e0b);">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="10" y1="9" x2="10" y2="15"></line>
+              <line x1="14" y1="9" x2="14" y2="15"></line>
+            </svg>
           ) : t()?.status !== "ok" ? (
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; color: var(--accent-red);">
               <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
@@ -121,7 +141,7 @@ export default function ToolSegment(props: {
         <Show when={t()?.summary}>
           <span class="tool-seg__summary-text">· {t()!.summary}</span>
         </Show>
-        <Show when={t()?.status !== "running" && hasBody()}>
+        <Show when={t()?.status !== "running" && t()?.status !== "awaiting" && hasBody()}>
           <span class="tool-seg__chevron" classList={{ "tool-seg__chevron--open": props.expanded }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 10px; height: 10px; transition: transform 0.15s ease;">
               <polyline points="9 18 15 12 9 6"></polyline>
@@ -132,6 +152,28 @@ export default function ToolSegment(props: {
 
       <Show when={props.expanded && hasBody()}>
         <div class="tool-seg__body">
+          {/* Awaiting confirmation: show the DDL to be run + confirm/cancel. */}
+          <Show when={t()?.status === "awaiting"}>
+            <div class="tool-seg__confirm">
+              <div class="tool-seg__confirm-hint">即将执行以下变更，请确认：</div>
+              <Show when={t()?.sql}>
+                <SqlBlock sql={t()!.sql!} onCopy onOpenInSqlPanel={props.onOpenInSqlPanel} />
+              </Show>
+              <div class="tool-seg__confirm-actions">
+                <button
+                  class="tool-seg__confirm-btn tool-seg__confirm-btn--ok"
+                  disabled={confirmResolved()}
+                  onClick={(e) => { e.stopPropagation(); handleConfirm(true); }}
+                >确认执行</button>
+                <button
+                  class="tool-seg__confirm-btn tool-seg__confirm-btn--cancel"
+                  disabled={confirmResolved()}
+                  onClick={(e) => { e.stopPropagation(); handleConfirm(false); }}
+                >取消</button>
+              </div>
+            </div>
+          </Show>
+
           {/* Tables list from list_tables */}
           <Show when={t()?.tool === "list_tables" && tablesList().length > 0}>
             <div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0;">
@@ -153,8 +195,8 @@ export default function ToolSegment(props: {
           <Show when={tableFromArgs() && t()?.tool !== "execute_query"}>
             <div class="tool-seg__arg">表: <code>{tableFromArgs()}</code></div>
           </Show>
-          {/* SQL from the result (execute_query success carries it) */}
-          <Show when={t()?.sql && !sqlFromArgs()}>
+          {/* SQL from the result (execute_query success carries it). awaiting DDL is shown in the confirm block above. */}
+          <Show when={t()?.sql && !sqlFromArgs() && t()?.status !== "awaiting"}>
             <SqlBlock sql={t()!.sql!} onCopy onOpenInSqlPanel={props.onOpenInSqlPanel} />
           </Show>
 

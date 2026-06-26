@@ -75,14 +75,16 @@ export function pushToolCall(
 }
 
 /**
- * Merge a `tool_result` into the matching tool segment by id (status → ok|error,
- * attach summary/sql/table/elapsedMs). No-op if the id is unknown.
+ * Merge a `tool_result` into the matching tool segment by id (status →
+ * ok|error|awaiting, attach summary/sql/table/elapsedMs). No-op if the id is
+ * unknown. `awaiting` is the intermediate state in 变更前确认 mode before the
+ * user confirms or cancels.
  */
 export function mergeToolResult(
   segments: Segment[],
   result: {
     id: string;
-    status: "ok" | "error";
+    status: "ok" | "error" | "awaiting";
     summary?: string;
     sql?: string;
     table?: SqlResult;

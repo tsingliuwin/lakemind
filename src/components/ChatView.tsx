@@ -30,13 +30,19 @@ export default function ChatView(props: {
   onSelectModel: (model: string) => void;
   selectedPriority: string;
   onSelectPriority: (priority: string) => void;
+  selectedConfirm: string;
+  onSelectConfirm: (mode: string) => void;
+  /** 用户对 awaiting 状态的 DDL 工具做出确认/取消决定。 */
+  onConfirmTool: (toolCallId: string, approved: boolean) => void;
   /** 该对话是否正在流式输出（由父级 streamingTaskId 派生）。 */
   streaming: boolean;
 }) {
   const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
   const [priorityDropdownOpen, setPriorityDropdownOpen] = createSignal(false);
+  const [confirmDropdownOpen, setConfirmDropdownOpen] = createSignal(false);
   let modelRef: HTMLDivElement | undefined;
   let priorityRef: HTMLDivElement | undefined;
+  let confirmRef: HTMLDivElement | undefined;
 
   const handleClickOutside = (e: MouseEvent) => {
     if (modelRef && !modelRef.contains(e.target as Node)) {
@@ -44,6 +50,9 @@ export default function ChatView(props: {
     }
     if (priorityRef && !priorityRef.contains(e.target as Node)) {
       setPriorityDropdownOpen(false);
+    }
+    if (confirmRef && !confirmRef.contains(e.target as Node)) {
+      setConfirmDropdownOpen(false);
     }
   };
 
@@ -330,7 +339,8 @@ export default function ChatView(props: {
   // running (so genuinely slow tools show their progress). If it finishes within
   // the delay, the pending expand is cancelled, avoiding the expand→collapse
   // flicker for fast tools. Completed tools collapse to one line (unless the
-  // user has manually toggled them).
+  // user has manually toggled them). An `awaiting` tool (pending user confirm
+  // in 变更前确认 mode) expands immediately and never auto-collapses.
   createEffect(() => {
     const id = lastAssistantId();
     if (!id) return;
@@ -340,6 +350,12 @@ export default function ChatView(props: {
       msg.segments
         .filter((s): s is Extract<Segment, { type: "tool" }> => s.type === "tool")
         .filter((s) => s.status === "running")
+        .map((s) => s.id),
+    );
+    const awaiting = new Set(
+      msg.segments
+        .filter((s): s is Extract<Segment, { type: "tool" }> => s.type === "tool")
+        .filter((s) => s.status === "awaiting")
         .map((s) => s.id),
     );
 
@@ -362,13 +378,27 @@ export default function ChatView(props: {
       );
     }
 
-    // 已完成（不再运行）的工具：取消其等待中的展开（快速执行 → 不展开），
+    // awaiting 工具立即展开（展示待确认 DDL + 确认按钮），不延时、不收起。
+    if (awaiting.size > 0) {
+      const expanded0 = untrack(expandedToolIds);
+      let changed = false;
+      const next = new Set(expanded0);
+      for (const a of awaiting) {
+        if (!next.has(a)) {
+          next.add(a);
+          changed = true;
+        }
+      }
+      if (changed) setExpandedToolIds(next);
+    }
+
+    // 已完成（不再 running/awaiting）的工具：取消其等待中的展开（快速执行 → 不展开），
     // 并按原策略从展开集中移除（用户手动操作过的除外）。
     const manual = manualToolIds();
     const expanded = untrack(expandedToolIds);
     const toCollapse: string[] = [];
     for (const s of msg.segments) {
-      if (s.type !== "tool" || running.has(s.id)) continue;
+      if (s.type !== "tool" || running.has(s.id) || awaiting.has(s.id)) continue;
       const handle = pendingToolExpand.get(s.id);
       if (handle != null) {
         clearTimeout(handle);
@@ -528,6 +558,7 @@ export default function ChatView(props: {
                                   expanded={expandedToolIds().has(s().id)}
                                   onToggle={toggleTool}
                                   onOpenInSqlPanel={props.onOpenInSqlPanel}
+                                  onConfirm={(approved) => props.onConfirmTool(s().id, approved)}
                                 />
                               )}
                             </Show>
@@ -690,6 +721,40 @@ export default function ChatView(props: {
                     <button class="dropdown-item" onClick={() => { props.onSelectPriority("最高"); setPriorityDropdownOpen(false); }}>最高</button>
                     <button class="dropdown-item" onClick={() => { props.onSelectPriority("均衡"); setPriorityDropdownOpen(false); }}>均衡</button>
                     <button class="dropdown-item" onClick={() => { props.onSelectPriority("最快"); setPriorityDropdownOpen(false); }}>最快</button>
+                  </div>
+                </Show>
+              </div>
+
+              {/* Confirmation Mode Selector Dropdown */}
+              <div class="dropdown-wrapper" ref={confirmRef} style="position: relative;">
+                <button
+                  class="chat-composer__pill-btn select-btn"
+                  onClick={() => setConfirmDropdownOpen(!confirmDropdownOpen())}
+                >
+                  <span class="btn-prefix">
+                    {props.selectedConfirm === "自动执行" ? (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                        <path d="M9 11V6a2 2 0 0 1 4 0v5"></path>
+                        <path d="M13 6a2 2 0 0 1 4 0v5"></path>
+                        <path d="M17 6a2 2 0 0 1 4 0v8a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path>
+                      </svg>
+                    )}
+                  </span>
+                  <span>{props.selectedConfirm}</span>
+                  <span class="btn-caret">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </span>
+                </button>
+                <Show when={confirmDropdownOpen()}>
+                  <div class="custom-dropdown-list" style="bottom: calc(100% + 6px); right: 0; left: auto;">
+                    <button class="dropdown-item" onClick={() => { props.onSelectConfirm("变更前确认"); setConfirmDropdownOpen(false); }}>变更前确认</button>
+                    <button class="dropdown-item" onClick={() => { props.onSelectConfirm("自动执行"); setConfirmDropdownOpen(false); }}>自动执行</button>
                   </div>
                 </Show>
               </div>

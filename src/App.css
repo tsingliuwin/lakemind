@@ -4475,6 +4475,46 @@ button.lm-select-trigger:hover:not(:disabled) {
 .tool-seg--running .tool-seg__status {
   color: var(--accent-blue);
 }
+.tool-seg--awaiting .tool-seg__summary {
+  background: var(--accent-orange-bg, rgba(245, 158, 11, 0.12));
+  border-radius: 6px;
+}
+.tool-seg__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tool-seg__confirm-hint {
+  font-size: 11.5px;
+  color: var(--accent-orange, #f59e0b);
+  font-weight: 500;
+}
+.tool-seg__confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+.tool-seg__confirm-btn {
+  padding: 4px 14px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: opacity 0.15s ease;
+}
+.tool-seg__confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.tool-seg__confirm-btn--ok {
+  background: var(--accent-green, #10b981);
+  color: #fff;
+}
+.tool-seg__confirm-btn--cancel {
+  background: transparent;
+  color: var(--text-dim);
+  border-color: var(--border-faint);
+}
 .tool-seg__name {
   color: var(--text-dim);
   font-weight: 500;

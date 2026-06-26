@@ -15,15 +15,30 @@
 //! in-memory `sources` cache here is just a read-through mirror for the
 //! *current* workspace.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
+use tokio::sync::oneshot;
 
 use crate::db::get_home_dir;
 use crate::duckdb::lake;
 use crate::error::AppResult;
 use crate::model::SourceTable;
+
+/// User's decision on whether a pending DDL operation should proceed.
+#[derive(Debug, Clone)]
+pub struct ConfirmDecision {
+    pub approved: bool,
+}
+
+/// A DDL tool invocation parked in "变更前确认" mode, waiting for the user to
+/// approve or cancel it from the UI. The `oneshot::Sender` is used to resume the
+/// blocked tool `call()`.
+pub struct PendingConfirmation {
+    pub tx: oneshot::Sender<ConfirmDecision>,
+}
 
 /// One DuckDB session connection + a cache of the current workspace's sources.
 #[derive(Clone)]
@@ -40,6 +55,10 @@ pub struct AppState {
     /// The workspace key (`workspaces.path`) currently attached, e.g. "DefaultProject".
     /// Used to key into the SQLite `sources` mapping table.
     pub workspace_path: Arc<Mutex<String>>,
+    /// DDL tool calls parked in "变更前确认" mode, keyed by `{task_id}:{tool_call_id}`.
+    /// Each entry holds a oneshot sender that resumes the blocked tool once the
+    /// user approves or cancels from the UI (via `resolve_tool_confirmation`).
+    pub pending_confirmations: Arc<Mutex<HashMap<String, PendingConfirmation>>>,
 }
 
 impl AppState {
@@ -70,6 +89,7 @@ impl AppState {
             sources: Arc::new(Mutex::new(Vec::new())),
             workspace_dir: Arc::new(Mutex::new(ws)),
             workspace_path: Arc::new(Mutex::new("DefaultProject".to_string())),
+            pending_confirmations: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 }

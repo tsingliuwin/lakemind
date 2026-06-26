@@ -96,12 +96,12 @@ export type Segment =
   | {
       type: "tool";
       id: string;
-      tool: string; // "list_tables" | "describe_table" | "execute_query" | "sample_data"
+      tool: string; // "list_tables" | "describe_table" | "execute_query" | "sample_data" | "create_table" | "create_view" | "drop_object"
       args?: unknown;
-      status: "running" | "ok" | "error";
+      status: "running" | "ok" | "error" | "awaiting";
       /** 人类可读摘要（折叠时显示）。 */
       summary?: string;
-      /** execute_query 等：SQL 文本，可「在 SQL 面板打开」。 */
+      /** execute_query 等：SQL 文本，可「在 SQL 面板打开」。awaiting 时为待确认 DDL。 */
       sql?: string;
       /** 行返回类工具：完整结构化结果，内联渲染为表格。 */
       table?: SqlResult;

@@ -95,6 +95,7 @@ export default function App() {
   const [availableModels, setAvailableModels] = createSignal<string[]>([]);
   const [selectedModel, setSelectedModel] = createSignal<string>("");
   const [selectedPriority, setSelectedPriority] = createSignal<string>("最高");
+  const [selectedConfirm, setSelectedConfirm] = createSignal<string>("变更前确认");
   // 当前正在流式输出的对话任务 id。start_agent_chat 是 fire-and-forget
   // （tokio::spawn 后立即返回），真正的流式通过 agent-event 异步回来，
   // 所以用一个独立信号准确跟踪执行状态，供 ChatView 派生 streaming。
@@ -476,6 +477,7 @@ export default function App() {
         prompt,
         historyJson,
         priority: selectedPriority(),
+        confirmMode: selectedConfirm(),
       });
     } catch (err) {
       console.error("Failed to start agent chat:", err);
@@ -541,6 +543,7 @@ export default function App() {
         prompt,
         historyJson,
         priority: selectedPriority(),
+        confirmMode: selectedConfirm(),
       });
     } catch (err) {
       console.error("Failed to start agent chat:", err);
@@ -603,6 +606,7 @@ export default function App() {
         prompt,
         historyJson,
         priority: selectedPriority(),
+        confirmMode: selectedConfirm(),
       });
     } catch (err) {
       console.error("Failed to start agent chat:", err);
@@ -629,6 +633,19 @@ export default function App() {
   function openInSqlPanel(sql: string) {
     createTask(tryFormatDuckdbSql(sql), "sql");
     void run();
+  }
+
+  /** ToolSegment「确认执行/取消」：把用户的决定回传给正在阻塞等待的 DDL 工具。 */
+  async function resolveToolConfirmation(taskId: string, toolCallId: string, approved: boolean) {
+    try {
+      await invoke("resolve_tool_confirmation", {
+        taskId,
+        toolCallId,
+        approved,
+      });
+    } catch (err) {
+      console.error("Failed to resolve tool confirmation:", err);
+    }
   }
 
   async function deleteTask(id: string) {
@@ -1179,6 +1196,8 @@ export default function App() {
                     }}
                     selectedPriority={selectedPriority()}
                     onSelectPriority={setSelectedPriority}
+                    selectedConfirm={selectedConfirm()}
+                    onSelectConfirm={setSelectedConfirm}
                   />
                 }
               >
@@ -1217,6 +1236,11 @@ export default function App() {
                           }}
                           selectedPriority={selectedPriority()}
                           onSelectPriority={setSelectedPriority}
+                          selectedConfirm={selectedConfirm()}
+                          onSelectConfirm={setSelectedConfirm}
+                          onConfirmTool={(toolCallId, approved) =>
+                            resolveToolConfirmation(id(), toolCallId, approved)
+                          }
                         />
                       )}
                     </Show>

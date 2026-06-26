@@ -13,6 +13,8 @@ interface HomePanelProps {
   onSelectModel: (model: string) => void;
   selectedPriority: string;
   onSelectPriority: (priority: string) => void;
+  selectedConfirm: string;
+  onSelectConfirm: (mode: string) => void;
 }
 
 export default function HomePanel(props: HomePanelProps) {
@@ -22,8 +24,7 @@ export default function HomePanel(props: HomePanelProps) {
   
   // Custom dropdown states for model, confirmation, priority
   const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
-  
-  const [selectedConfirm, setSelectedConfirm] = createSignal("变更前确认");
+
   const [confirmDropdownOpen, setConfirmDropdownOpen] = createSignal(false);
 
   const [priorityDropdownOpen, setPriorityDropdownOpen] = createSignal(false);
@@ -204,7 +205,7 @@ export default function HomePanel(props: HomePanelProps) {
                 <div class="dropdown-wrapper" ref={confirmRef}>
                   <button class="pill-btn select-btn" onClick={() => setConfirmDropdownOpen(!confirmDropdownOpen())}>
                     <span class="btn-prefix">
-                      {selectedConfirm() === "自动执行" ? (
+                      {props.selectedConfirm === "自动执行" ? (
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
                           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
                         </svg>
@@ -216,7 +217,7 @@ export default function HomePanel(props: HomePanelProps) {
                         </svg>
                       )}
                     </span>
-                    <span>{selectedConfirm()}</span>
+                    <span>{props.selectedConfirm}</span>
                     <span class="btn-caret">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                         <polyline points="6 9 12 15 18 9"></polyline>
@@ -225,7 +226,7 @@ export default function HomePanel(props: HomePanelProps) {
                   </button>
                   <Show when={confirmDropdownOpen()}>
                     <div class="custom-dropdown-list fit-trigger">
-                      <button class="dropdown-item" onClick={() => { setSelectedConfirm("变更前确认"); setConfirmDropdownOpen(false); }}>
+                      <button class="dropdown-item" onClick={() => { props.onSelectConfirm("变更前确认"); setConfirmDropdownOpen(false); }}>
                         <span class="btn-prefix">
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
                             <path d="M9 11V6a2 2 0 0 1 4 0v5"></path>
@@ -234,7 +235,7 @@ export default function HomePanel(props: HomePanelProps) {
                           </svg>
                         </span> 变更前确认
                       </button>
-                      <button class="dropdown-item" onClick={() => { setSelectedConfirm("自动执行"); setConfirmDropdownOpen(false); }}>
+                      <button class="dropdown-item" onClick={() => { props.onSelectConfirm("自动执行"); setConfirmDropdownOpen(false); }}>
                         <span class="btn-prefix">
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
                             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>

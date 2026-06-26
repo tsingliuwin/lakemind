@@ -708,10 +708,12 @@ pub async fn start_agent_chat(
     prompt: String,
     history_json: String,
     priority: Option<String>,
+    confirm_mode: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let app_state = state.inner().clone();
     let priority = priority.unwrap_or_else(|| "均衡".to_string());
+    let confirm_mode = confirm_mode.unwrap_or_else(|| "变更前确认".to_string());
     tokio::spawn(async move {
         if let Err(e) = crate::agent::run_agent_chat_stream(
             window.clone(),
@@ -720,6 +722,7 @@ pub async fn start_agent_chat(
             prompt,
             history_json,
             priority,
+            confirm_mode,
             app_state,
         )
         .await
@@ -737,6 +740,30 @@ pub async fn start_agent_chat(
         }
     });
     Ok(())
+}
+
+/// Resolve a DDL tool call parked in "变更前确认" mode. Called from the UI when
+/// the user clicks 确认执行 (`approved = true`) or 取消 (`approved = false`).
+/// The matching tool `call()` resumes via the oneshot channel.
+#[tauri::command]
+pub async fn resolve_tool_confirmation(
+    task_id: String,
+    tool_call_id: String,
+    approved: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    let key = format!("{}:{}", task_id, tool_call_id);
+    let pending = {
+        let mut map = state.pending_confirmations.lock().await;
+        map.remove(&key)
+    };
+    match pending {
+        Some(p) => {
+            let _ = p.tx.send(crate::state::ConfirmDecision { approved });
+            Ok(approved)
+        }
+        None => Err("未找到待确认的操作（可能已超时或已处理）".to_string()),
+    }
 }
 
 // ===========================================================================
