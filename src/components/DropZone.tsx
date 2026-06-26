@@ -46,7 +46,14 @@ export default function DropZone(props: {
 
   return (
     <div class="dropzone-overlay" classList={{ active: dragging() }} aria-hidden="true">
-      <div class="dropzone-hint">拖入文件夹或文件以注册为 SOURCE</div>
+      <div class="dropzone-hint">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 32px; height: 32px;">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+        <span>拖入文件夹或文件以注册为数据源</span>
+      </div>
     </div>
   );
 }

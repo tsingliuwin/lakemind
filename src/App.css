@@ -1856,14 +1856,14 @@ body.is-resizing-column * {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(59, 130, 246, 0.08);
-  border: 2px dashed var(--accent-blue);
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px dashed var(--text-primary);
   backdrop-filter: blur(4px);
 }
 .dropzone-hint {
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
-  color: var(--accent-blue);
+  color: var(--text-primary);
   padding: 16px 28px;
   border-radius: var(--radius-card);
   font-weight: 600;
@@ -1875,8 +1875,7 @@ body.is-resizing-column * {
   gap: 8px;
 }
 .dropzone-hint::before {
-  content: "📥";
-  font-size: 32px;
+  content: none;
 }
 
 /* Resizer splitters */
