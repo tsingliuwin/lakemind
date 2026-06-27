@@ -1,4 +1,4 @@
-import { onCleanup, onMount, createSignal, For } from "solid-js";
+import { onCleanup, onMount, createSignal, For, Show } from "solid-js";
 import * as echarts from "echarts";
 import type { Segment, SqlResult } from "../lib/types";
 
@@ -12,6 +12,11 @@ import type { Segment, SqlResult } from "../lib/types";
  */
 
 type ChartType = "bar" | "line" | "pie" | "scatter";
+
+/** Chart types that can be freely switched between via the tab bar. Types
+ * outside this set (e.g. future specialized charts like heatmap/map) render
+ * without a tab bar — the agent's chosen type is shown as-is. */
+const SWITCHABLE_TYPES: ChartType[] = ["bar", "line", "pie", "scatter"];
 
 /** High-contrast palette tuned for the app's dark theme. Each color has strong
  * separation from the dark background and from each other, ensuring multi-series
@@ -155,23 +160,27 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
     render();
   }
 
+  const switchable = SWITCHABLE_TYPES.includes(props.seg.chartType);
+
   return (
     <div class="chart-seg">
-      <div class="chart-seg__toolbar">
-        <For each={CHART_TYPES}>
-          {(ct) => (
-            <button
-              class="chart-seg__type-btn"
-              classList={{ active: chartType() === ct.type }}
-              title={ct.label}
-              onClick={() => switchType(ct.type)}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: inline-block; vertical-align: middle;" innerHTML={ct.svg} />
-              <span>{ct.label}</span>
-            </button>
-          )}
-        </For>
-      </div>
+      <Show when={switchable}>
+        <div class="chart-seg__toolbar">
+          <For each={CHART_TYPES}>
+            {(ct) => (
+              <button
+                class="chart-seg__type-btn"
+                classList={{ active: chartType() === ct.type }}
+                title={ct.label}
+                onClick={() => switchType(ct.type)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: inline-block; vertical-align: middle;" innerHTML={ct.svg} />
+                <span>{ct.label}</span>
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
       <div ref={container} class="chart-seg__canvas" />
     </div>
   );
