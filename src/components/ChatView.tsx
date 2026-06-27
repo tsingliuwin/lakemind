@@ -117,14 +117,7 @@ export default function ChatView(props: {
   // toggled are never auto-collapsed, so expanded results stay open mid-stream.
   const [expandedToolIds, setExpandedToolIds] = createSignal<Set<string>>(new Set());
   const [manualToolIds, setManualToolIds] = createSignal<Set<string>>(new Set());
-  // 工具段延时展开：运行中的工具不立即展开，等 TOOL_EXPAND_DELAY_MS 后仍运行才展开；
-  // 若在此期间已完成则取消展开，避免快速执行时「展开又收起」的闪烁。
-  const TOOL_EXPAND_DELAY_MS = 200;
-  const pendingToolExpand = new Map<string, ReturnType<typeof setTimeout>>();
-  onCleanup(() => {
-    pendingToolExpand.forEach((h) => clearTimeout(h));
-    pendingToolExpand.clear();
-  });
+  // (Removed delayed tool expand — tools now expand immediately when running.)
 
   function toggleReasoning(segId: string) {
     setManualReasoningIds((prev) => {
@@ -282,8 +275,6 @@ export default function ChatView(props: {
     prevTaskId = currentId;
     setOpenReasoningIds(new Set<string>());
     setExpandedToolIds(new Set<string>());
-    pendingToolExpand.forEach((h) => clearTimeout(h));
-    pendingToolExpand.clear();
     setManualReasoningIds(new Set<string>());
     setManualToolIds(new Set<string>());
     setStickToBottom(true);
@@ -334,13 +325,10 @@ export default function ChatView(props: {
     });
   });
 
-  // Drive tool-segment auto-expand/collapse. A running tool is NOT expanded
-  // immediately — we wait TOOL_EXPAND_DELAY_MS and only expand if it's still
-  // running (so genuinely slow tools show their progress). If it finishes within
-  // the delay, the pending expand is cancelled, avoiding the expand→collapse
-  // flicker for fast tools. Completed tools collapse to one line (unless the
-  // user has manually toggled them). An `awaiting` tool (pending user confirm
-  // in 变更前确认 mode) expands immediately and never auto-collapses.
+  // Drive tool-segment auto-expand/collapse. A running tool expands immediately.
+  // Completed tools collapse to one line (unless the user has manually toggled
+  // them). An `awaiting` tool (pending user confirm) also expands immediately
+  // and never auto-collapses.
   createEffect(() => {
     const id = lastAssistantId();
     if (!id) return;
@@ -359,51 +347,24 @@ export default function ChatView(props: {
         .map((s) => s.id),
     );
 
-    // 为仍在运行、尚未展开且未在等待中的工具启动延时展开计时器。
-    // 读 expandedToolIds 用 untrack，避免本 effect 因自身写入而反复重跑。
+    // running + awaiting 工具立即展开（读 expandedToolIds 用 untrack 避免循环）。
+    const expanded0 = untrack(expandedToolIds);
+    let changed = false;
+    const next = new Set(expanded0);
     for (const r of running) {
-      if (pendingToolExpand.has(r)) continue;
-      if (untrack(() => expandedToolIds().has(r))) continue; // 已展开（手动或计时器已触发）
-      pendingToolExpand.set(
-        r,
-        setTimeout(() => {
-          pendingToolExpand.delete(r);
-          setExpandedToolIds((prev) => {
-            if (prev.has(r)) return prev;
-            const next = new Set(prev);
-            next.add(r);
-            return next;
-          });
-        }, TOOL_EXPAND_DELAY_MS),
-      );
+      if (!next.has(r)) { next.add(r); changed = true; }
     }
-
-    // awaiting 工具立即展开（展示待确认 DDL + 确认按钮），不延时、不收起。
-    if (awaiting.size > 0) {
-      const expanded0 = untrack(expandedToolIds);
-      let changed = false;
-      const next = new Set(expanded0);
-      for (const a of awaiting) {
-        if (!next.has(a)) {
-          next.add(a);
-          changed = true;
-        }
-      }
-      if (changed) setExpandedToolIds(next);
+    for (const a of awaiting) {
+      if (!next.has(a)) { next.add(a); changed = true; }
     }
+    if (changed) setExpandedToolIds(next);
 
-    // 已完成（不再 running/awaiting）的工具：取消其等待中的展开（快速执行 → 不展开），
-    // 并按原策略从展开集中移除（用户手动操作过的除外）。
+    // 已完成（不再 running/awaiting）的工具：从展开集中移除（用户手动操作过的除外）。
     const manual = manualToolIds();
     const expanded = untrack(expandedToolIds);
     const toCollapse: string[] = [];
     for (const s of msg.segments) {
       if (s.type !== "tool" || running.has(s.id) || awaiting.has(s.id)) continue;
-      const handle = pendingToolExpand.get(s.id);
-      if (handle != null) {
-        clearTimeout(handle);
-        pendingToolExpand.delete(s.id);
-      }
       if (!manual.has(s.id) && expanded.has(s.id)) toCollapse.push(s.id);
     }
     if (toCollapse.length > 0) {

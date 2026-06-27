@@ -401,6 +401,64 @@ pub async fn drop_table_safe(
     })
 }
 
+/// Delete a workspace file and cascade-clean its s_ table + downstream views.
+///
+/// 1. Find the source record whose `file_path` matches (the s_ table mapping).
+/// 2. Cascade-delete that s_ table and all its downstream t_/v_ (same logic as
+///    `drop_table_safe` — leaves first, target last).
+/// 3. Remove the file from disk.
+/// 4. Returns a summary of what was deleted.
+#[tauri::command]
+pub async fn delete_file(
+    file_path: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let ws_path = state.workspace_path.lock().await.clone();
+
+    // 1. Find the s_ table mapped to this file.
+    let sqlite = db::get_db_conn()?;
+    let sources = db::list_sources(&sqlite, &ws_path)?;
+    let table_name = sources
+        .iter()
+        .find(|s| s.file_path == file_path || s.scan_path == file_path)
+        .map(|s| s.table_name.clone());
+
+    // 2. Cascade-delete the s_ table (+ downstreams) if it exists.
+    let mut deleted_count = 0usize;
+    if let Some(tn) = table_name {
+        let cascade = fingerprint::cascade_delete_order(&sqlite, &ws_path, &tn);
+        deleted_count = cascade.len();
+        let conn = state.conn.clone();
+        let ws_path2 = ws_path.clone();
+        let cascade2 = cascade.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+            let guard = conn.blocking_lock();
+            for name in &cascade2 {
+                drop_lake_object(&guard, name);
+                let sqlite = db::get_db_conn()?;
+                let _ = db::delete_object_def(&sqlite, &ws_path2, name);
+                let _ = db::delete_source_by_table(&sqlite, &ws_path2, name);
+            }
+            let _ = guard.execute("CHECKPOINT;", []);
+            Ok(())
+        })
+        .await
+        .map_err(|e| format!("删除任务失败: {e}"))?;
+    }
+
+    // 3. Remove the file from disk.
+    let p = std::path::Path::new(&file_path);
+    if p.exists() {
+        std::fs::remove_file(p).map_err(|e| format!("删除文件失败: {e}"))?;
+    }
+
+    Ok(if deleted_count > 0 {
+        format!("已删除文件及 {} 个数据对象", deleted_count)
+    } else {
+        "已删除文件".to_string()
+    })
+}
+
 // ===========================================================================
 // Lake import + sync
 // ===========================================================================

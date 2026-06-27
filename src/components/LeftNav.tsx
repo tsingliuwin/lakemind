@@ -101,6 +101,8 @@ export default function LeftNav(props: {
   importStatus?: ImportProgress | null;
   /** Delete a table/view (with dependency check on the backend). */
   onDeleteTable?: (name: string) => void;
+  /** Delete a workspace file (cascades to its s_ table + downstreams). */
+  onDeleteFile?: (path: string) => void;
 }) {
   // Group tables by their parent directory for a tree-like feel.
   // Two kinds of objects are collected into the flat (empty-path) group that
@@ -147,6 +149,8 @@ export default function LeftNav(props: {
   const [selectedFile, setSelectedFile] = createSignal<string | null>(null);
   // Right-click context menu for data tree leaves.
   const [ctxMenu, setCtxMenu] = createSignal<{ name: string; x: number; y: number } | null>(null);
+  // Right-click context menu for file tree leaves.
+  const [fileCtxMenu, setFileCtxMenu] = createSignal<{ path: string; name: string; x: number; y: number } | null>(null);
 
   const fileToTable = createMemo(() => {
     const m = new Map<string, string>();
@@ -274,6 +278,12 @@ export default function LeftNav(props: {
                       handleFileClick(item);
                     }
                   }}
+                  onContextMenu={(e) => {
+                    if (!item.is_dir) {
+                      e.preventDefault();
+                      setFileCtxMenu({ path: item.path, name: item.name, x: e.clientX, y: e.clientY });
+                    }
+                  }}
                 >
                   <Show
                     when={item.is_dir}
@@ -327,6 +337,29 @@ export default function LeftNav(props: {
                 }}
               >
                 删除
+              </button>
+            </div>
+          </>
+        )}
+      </Show>
+      {/* Right-click context menu for file tree leaves. */}
+      <Show when={fileCtxMenu()}>
+        {(m) => (
+          <>
+            <div class="ctx-overlay" onClick={() => setFileCtxMenu(null)} />
+            <div
+              class="ctx-menu"
+              style={{ left: `${m().x}px`, top: `${m().y}px` }}
+            >
+              <button
+                class="ctx-item ctx-item--danger"
+                onClick={() => {
+                  const path = m().path;
+                  setFileCtxMenu(null);
+                  props.onDeleteFile?.(path);
+                }}
+              >
+                删除文件
               </button>
             </div>
           </>

@@ -1144,6 +1144,35 @@ export default function App() {
     }
   }
 
+  /** Delete a workspace file (cascades to its s_ table + downstreams). */
+  async function deleteFile(path: string) {
+    const fileName = path.split("/").pop() ?? path;
+    try {
+      await invoke<string>("delete_file", { filePath: path });
+      // Refresh data tree + file tree.
+      const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
+      setSources(dbTables);
+      setFileTrigger((t) => t + 1);
+      if (selectedTable()?.path === path) setSelectedTable(null);
+      setDeps(null);
+      setLogs((prev) => [{
+        id: ++logSeq,
+        ts: Date.now(),
+        sql: `删除文件 ${fileName}`,
+        status: "ok" as const,
+      }, ...prev].slice(0, 100));
+    } catch (e) {
+      const msg = typeof e === "string" ? e : "删除失败";
+      setLogs((prev) => [{
+        id: ++logSeq,
+        ts: Date.now(),
+        sql: `删除文件 ${fileName}`,
+        status: "error" as const,
+        error: msg,
+      }, ...prev].slice(0, 100));
+    }
+  }
+
   /** 检查器 → 编辑器：注入一段 SQL（格式化后）并自动执行。 */
   function injectSql(s: string) {
     const formatted = tryFormatDuckdbSql(s);
@@ -1256,6 +1285,7 @@ export default function App() {
           leftOpen={leftOpen()}
           importStatus={importStatus()}
           onDeleteTable={deleteTable}
+          onDeleteFile={deleteFile}
           onToggleLeft={() => setLeftOpen(!leftOpen())}
         />
 

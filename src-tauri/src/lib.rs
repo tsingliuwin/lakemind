@@ -58,6 +58,7 @@ pub fn run() {
             commands::warmup_sources,
             commands::get_dependencies,
             commands::drop_table_safe,
+            commands::delete_file,
             commands::get_app_config,
             commands::set_app_config,
             commands::load_settings_json,
