@@ -893,6 +893,15 @@ select:hover:not(:disabled) {
   box-sizing: border-box;
   text-align: center;
 }
+/* SVG icon variant: just the icon, no badge chrome. */
+.kind-badge--icon {
+  min-width: auto;
+  width: auto;
+  height: auto;
+  padding: 0;
+  background: transparent !important;
+  border: none !important;
+}
 .kind-badge[data-kind="parquet"] {
   color: var(--type-str);
   background: rgba(16, 185, 129, 0.1);
