@@ -11,7 +11,7 @@ import type { Segment, SqlResult } from "../lib/types";
  * The user can switch chart types via the toolbar.
  */
 
-type ChartType = "bar" | "line" | "pie" | "scatter";
+type ChartType = "bar" | "line" | "pie" | "scatter" | "funnel" | "gauge";
 
 /** Chart types that can be freely switched between via the tab bar. Types
  * outside this set (e.g. future specialized charts like heatmap/map) render
@@ -108,6 +108,61 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
       };
     }
 
+    if (type === "funnel") {
+      const yIdx = yCols.length > 0 ? cols.indexOf(yCols[0]) : -1;
+      const data = table.rows
+        .filter((r) => r[xIdx] != null && r[yIdx] != null)
+        .map((r) => ({ name: String(r[xIdx]), value: num(r[yIdx]) }));
+      return {
+        color: PALETTE,
+        title: title ? { ...TITLE_STYLE(title), top: 8 } : undefined,
+        tooltip: { trigger: "item", formatter: "{b}: {c}", ...TOOLTIP_STYLE },
+        legend: { bottom: 2, type: "scroll", textStyle: { color: "#9aa0a6", fontSize: 11 }, itemWidth: 10, itemHeight: 10 },
+        series: [{
+          type: "funnel",
+          data,
+          sort: "descending",
+          gap: 2,
+          label: { color: "#e6e7eb", fontSize: 11, formatter: "{b}: {c}" },
+          itemStyle: { borderColor: "#18181b", borderWidth: 1 },
+        }],
+      };
+    }
+
+    if (type === "gauge") {
+      // Gauge shows a single value — use the first row, first numeric column.
+      const yIdx = yCols.length > 0 ? cols.indexOf(yCols[0]) : findFirstNumeric(table.columnTypes, xIdx);
+      const label = yIdx >= 0 ? cols[yIdx] : (xField ?? "值");
+      const value = yIdx >= 0 && table.rows.length > 0 ? num(table.rows[0][yIdx]) : 0;
+      return {
+        color: PALETTE,
+        title: title ? { ...TITLE_STYLE(title), top: 8 } : undefined,
+        tooltip: { ...TOOLTIP_STYLE },
+        series: [{
+          type: "gauge",
+          center: ["50%", "58%"],
+          radius: "80%",
+          min: 0,
+          max: (() => {
+            // Auto-scale max: round up to a nice number (×1, ×2, ×5 × 10^n).
+            if (value <= 0) return 100;
+            const mag = Math.pow(10, Math.floor(Math.log10(value)));
+            const norm = value / mag;
+            const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+            return nice * mag;
+          })(),
+          progress: { show: true, width: 14, itemStyle: { color: PALETTE[0] } },
+          axisLine: { lineStyle: { width: 14, color: [[1, "#2a2a2e"]] } },
+          pointer: { width: 4, itemStyle: { color: "#9aa0a6" } },
+          axisTick: { show: false },
+          splitLine: { length: 10, lineStyle: { color: "#3a3a3e", width: 2 } },
+          axisLabel: { color: "#5c6066", fontSize: 10, distance: 16 },
+          detail: { valueAnimation: true, color: "#e6e7eb", fontSize: 18, fontWeight: 600, offsetCenter: [0, "65%"], formatter: `{value}` },
+          data: [{ value, name: label }],
+        }],
+      };
+    }
+
     // bar / line
     const categoryData = table.rows.map((r) => String(r[xIdx >= 0 ? xIdx : 0] ?? ""));
     const rotated = categoryData.length > 8;
@@ -196,6 +251,16 @@ function num(v: unknown): number {
   }
   if (typeof v === "boolean") return v ? 1 : 0;
   return 0;
+}
+
+/** Find the first numeric column index (for gauge's single value). */
+function findFirstNumeric(types: string[], excludeIdx: number): number {
+  for (let i = 0; i < types.length; i++) {
+    if (i === excludeIdx) continue;
+    const t = types[i].toUpperCase();
+    if (t.includes("INT") || t.includes("FLOAT") || t.includes("DOUBLE") || t.includes("DECIMAL")) return i;
+  }
+  return -1;
 }
 
 /** Find the first non-numeric column (dimension: string/time/category). */

@@ -127,7 +127,7 @@ export type Segment =
   | {
       type: "chart";
       id: string;
-      chartType: "bar" | "line" | "pie" | "scatter";
+      chartType: "bar" | "line" | "pie" | "scatter" | "funnel" | "gauge";
       title?: string;
       /** X 轴 / 分类列名。 */
       xField?: string;

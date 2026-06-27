@@ -1206,7 +1206,7 @@ impl Tool for RenderChartTool {
                 "type": "object",
                 "properties": {
                     "sql": { "type": "string", "description": "用于获取图表数据的 SELECT 查询语句" },
-                    "chart_type": { "type": "string", "enum": ["bar", "line", "pie", "scatter"], "description": "图表类型" },
+                    "chart_type": { "type": "string", "enum": ["bar", "line", "pie", "scatter", "funnel", "gauge"], "description": "图表类型：bar(柱状对比)、line(趋势)、pie(占比)、scatter(相关性)、funnel(转化漏斗)、gauge(单值指标)" },
                     "x_field": { "type": "string", "description": "X 轴/分类列名（饼图时为名称列）" },
                     "y_fields": { "type": "array", "items": { "type": "string" }, "description": "Y 轴/数值列名，支持多列（多系列）。饼图时取第一个" },
                     "title": { "type": "string", "description": "图表标题（可选）" }
@@ -1226,10 +1226,10 @@ impl Tool for RenderChartTool {
             }
         }
 
-        let valid_types = ["bar", "line", "pie", "scatter"];
+        let valid_types = ["bar", "line", "pie", "scatter", "funnel", "gauge"];
         if !valid_types.contains(&args.chart_type.as_str()) {
             return Err(ToolError(format!(
-                "不支持的图表类型「{}」，可选：bar / line / pie / scatter", args.chart_type
+                "不支持的图表类型「{}」，可选：bar / line / pie / scatter / funnel / gauge", args.chart_type
             )));
         }
 
@@ -1290,6 +1290,8 @@ fn chart_type_cn(t: &str) -> &str {
         "line" => "折线",
         "pie" => "饼",
         "scatter" => "散点",
+        "funnel" => "漏斗",
+        "gauge" => "仪表盘",
         _ => "图表",
     }
 }
@@ -1358,7 +1360,9 @@ const PREAMBLE: &str = r#"# 角色
 - **分类对比**（如各部门业绩排名）→ 柱状图 bar
 - **占比构成**（如各渠道占比）→ 饼图 pie
 - **相关性分析**（如价格与销量关系）→ 散点图 scatter
-调用时传入 SELECT 语句 + 图表类型 + X 轴/Y 轴列名。图表会展示在对话中，用户可切换类型。
+- **转化漏斗**（如各环节转化率）→ 漏斗图 funnel
+- **单值指标**（如达成率、KPI）→ 仪表盘 gauge
+调用时传入 SELECT 语句 + 图表类型 + X 轴/Y 轴列名。图表会展示在对话中，用户可切换基础类型（柱/线/饼/散点）。
 
 ## 第四步：总结
 基于查询或加工的结果，用中文给出清晰的结论。结论必须引用具体数据。若创建了表/视图，说明它叫什么、用途是什么。
