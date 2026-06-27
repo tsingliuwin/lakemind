@@ -4684,15 +4684,18 @@ button.lm-select-trigger:hover:not(:disabled) {
   margin-right: 4px;
 }
 .chart-seg__type-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   padding: 2px 8px;
-  border: 1px solid transparent;
+  border: none;
   border-radius: 4px;
   background: transparent;
   color: var(--text-dim);
   font-size: 10.5px;
   cursor: pointer;
   outline: none;
-  transition: all 0.15s ease;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 .chart-seg__type-btn:hover {
   color: var(--text-primary);
@@ -4701,7 +4704,6 @@ button.lm-select-trigger:hover:not(:disabled) {
 .chart-seg__type-btn.active {
   color: var(--text-primary);
   background: var(--bg-active);
-  border-color: var(--border-strong);
 }
 .chart-seg__canvas {
   width: 100%;

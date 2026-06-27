@@ -13,11 +13,11 @@ import type { Segment, SqlResult } from "../lib/types";
 
 type ChartType = "bar" | "line" | "pie" | "scatter";
 
-const CHART_TYPES: { type: ChartType; label: string; icon: string }[] = [
-  { type: "bar", label: "柱状图", icon: "📊" },
-  { type: "line", label: "折线图", icon: "📈" },
-  { type: "pie", label: "饼图", icon: "🥧" },
-  { type: "scatter", label: "散点图", icon: "🔵" },
+const CHART_TYPES: { type: ChartType; label: string; svg: string }[] = [
+  { type: "bar", label: "柱状图", svg: '<rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="4" width="4" height="17"/>' },
+  { type: "line", label: "折线图", svg: '<polyline points="3 17 8 11 13 14 21 5" fill="none"/><circle cx="3" cy="17" r="1.5"/><circle cx="8" cy="11" r="1.5"/><circle cx="13" cy="14" r="1.5"/><circle cx="21" cy="5" r="1.5"/>' },
+  { type: "pie", label: "饼图", svg: '<circle cx="12" cy="12" r="9"/><path d="M12 3 A9 9 0 0 1 21 12 L12 12 Z" fill="currentColor" stroke="none"/>' },
+  { type: "scatter", label: "散点图", svg: '<circle cx="5" cy="18" r="1.8"/><circle cx="10" cy="8" r="1.8"/><circle cx="15" cy="14" r="1.8"/><circle cx="19" cy="5" r="1.8"/><circle cx="8" cy="16" r="1.8"/>' },
 ];
 
 export default function ChartSegment(props: { seg: Extract<Segment, { type: "chart" }> }) {
@@ -114,7 +114,6 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
   return (
     <div class="chart-seg">
       <div class="chart-seg__toolbar">
-        <span class="chart-seg__label">📊 图表</span>
         <For each={CHART_TYPES}>
           {(ct) => (
             <button
@@ -123,7 +122,8 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
               title={ct.label}
               onClick={() => switchType(ct.type)}
             >
-              {ct.icon} {ct.label}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: inline-block; vertical-align: middle;" innerHTML={ct.svg} />
+              <span>{ct.label}</span>
             </button>
           )}
         </For>
