@@ -254,42 +254,48 @@ fn load_xlsx_as_table(conn: &Connection, table_name: &str, file_path: &str, prog
 
     let mut candidates = Vec::new();
 
+    // Helper: evaluate a strategy and report the result via progress.
+    macro_rules! try_strategy {
+        ($idx:expr, $label:expr, $source:expr) => {{
+            if let Some(p) = progress { p(&format!("评估策略 {}/8: {}", $idx, $label)); }
+            let src = $source;
+            match evaluate_candidate(conn, table_name, &src)? {
+                Some(c) => {
+                    if let Some(p) = progress {
+                        p(&format!("策略 {}/8 {}: {}列 评分{}", $idx, $label, c.col_count, c.header_score));
+                    }
+                    candidates.push(c);
+                }
+                None => {
+                    if let Some(p) = progress {
+                        p(&format!("策略 {}/8 {}: 失败或列数≤1", $idx, $label));
+                    }
+                }
+            }
+        }};
+    }
+
     // Strategy 1: Default load
-    if let Some(p) = progress { p("评估读取策略 1/8"); }
-    let default_source = format!("read_xlsx('{escaped_path}')");
-    if let Some(c) = evaluate_candidate(conn, table_name, &default_source)? {
-        candidates.push(c);
-    }
+    try_strategy!(1, "默认读取", format!("read_xlsx('{escaped_path}')"));
 
-    // Strategy 2: Try different header offsets (common in exported reports) with ignore_errors
+    // Strategy 2-6: Try different header offsets (common in exported reports)
     let offsets = ["A1:ZZ100000", "A2:ZZ100000", "A3:ZZ100000", "A4:ZZ100000", "A5:ZZ100000"];
-    for (idx, r) in offsets.iter().enumerate() {
-        if let Some(p) = progress { p(&format!("评估读取策略 {}/8", idx + 2)); }
-        let source = format!(
+    for (i, r) in offsets.iter().enumerate() {
+        let label = format!("表头偏移{}", r.split(':').next().unwrap_or(r));
+        try_strategy!(i + 2, label, format!(
             "read_xlsx('{escaped_path}', header=true, range='{r}', stop_at_empty=false, ignore_errors=true)"
-        );
-        if let Some(c) = evaluate_candidate(conn, table_name, &source)? {
-            candidates.push(c);
-        }
+        ));
     }
 
-    // Strategy 3: stop_at_empty=false + header + ignore_errors
-    if let Some(p) = progress { p("评估读取策略 7/8"); }
-    let robust_source = format!(
+    // Strategy 7: stop_at_empty=false + header + ignore_errors
+    try_strategy!(7, "忽略错误全扫描", format!(
         "read_xlsx('{escaped_path}', header=true, stop_at_empty=false, ignore_errors=true)"
-    );
-    if let Some(c) = evaluate_candidate(conn, table_name, &robust_source)? {
-        candidates.push(c);
-    }
+    ));
 
-    // Strategy 4: all_varchar + stop_at_empty=false + ignore_errors
-    if let Some(p) = progress { p("评估读取策略 8/8"); }
-    let varchar_source = format!(
+    // Strategy 8: all_varchar + stop_at_empty=false + ignore_errors
+    try_strategy!(8, "全文本类型", format!(
         "read_xlsx('{escaped_path}', header=true, stop_at_empty=false, all_varchar=true, ignore_errors=true)"
-    );
-    if let Some(c) = evaluate_candidate(conn, table_name, &varchar_source)? {
-        candidates.push(c);
-    }
+    ));
 
     if !candidates.is_empty() {
         // Pick the candidate with the highest header_score.
@@ -304,9 +310,12 @@ fn load_xlsx_as_table(conn: &Connection, table_name: &str, file_path: &str, prog
         return create_xlsx_table_pruned(conn, table_name, &best.source_fn);
     }
 
-    // Fallback: accept best-effort result using Strategy 4 source
+    // Fallback: accept best-effort result using Strategy 8 source (all_varchar)
     let _ = conn.execute(&drop_sql, []);
-    create_xlsx_table_pruned(conn, table_name, &varchar_source)?;
+    let fallback_source = format!(
+        "read_xlsx('{escaped_path}', header=true, stop_at_empty=false, all_varchar=true, ignore_errors=true)"
+    );
+    create_xlsx_table_pruned(conn, table_name, &fallback_source)?;
     Ok(())
 }
 
