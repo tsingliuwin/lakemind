@@ -610,7 +610,11 @@ export default function SettingsPage(props: {
                 </tr>
                 <tr>
                   <td class="cmd-key"><span class="cmd-label">删除对象</span><span class="cmd-name">drop_object</span></td>
-                  <td class="cmd-desc">删除指定的表或视图（同时清理同名视图与表两种形态）。</td>
+                  <td class="cmd-desc">删除指定的表或视图，有下游依赖时自动级联删除。</td>
+                </tr>
+                <tr>
+                  <td class="cmd-key"><span class="cmd-label">生成图表</span><span class="cmd-name">render_chart</span></td>
+                  <td class="cmd-desc">用图表可视化查询结果（柱状/折线/饼图/散点），用户可切换类型。</td>
                 </tr>
               </tbody>
             </table>
