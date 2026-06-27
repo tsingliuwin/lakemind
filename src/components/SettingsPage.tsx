@@ -578,18 +578,40 @@ export default function SettingsPage(props: {
             </table>
           </div>
 
-          {/* 分类二：AI 数据工具（对话模式下 Agent 可调用的工具） */}
+          {/* 分类二：AI 数据工具（对话模式下 Agent 可调用的工具）。
+              第一列同时展示对话中看到的中文标签和后端工具名，让用户能对应起来。 */}
           <div class="settings-section-card">
             <div class="settings-card-title">AI 数据工具</div>
             <table class="cmd-table">
               <tbody>
-                <tr><td class="cmd-key">list_tables</td><td class="cmd-desc">列出当前数据库中的所有数据表和视图名。</td></tr>
-                <tr><td class="cmd-key">describe_table</td><td class="cmd-desc">获取指定表或视图的结构（列名、数据类型等）。</td></tr>
-                <tr><td class="cmd-key">execute_query</td><td class="cmd-desc">执行只读的 SQL 查询，并返回结果。</td></tr>
-                <tr><td class="cmd-key">sample_data</td><td class="cmd-desc">获取指定表或视图的前 5 行样例数据。</td></tr>
-                <tr><td class="cmd-key">create_table</td><td class="cmd-desc">创建物化物理表持久化加工后的数据（t_/tmp_ 前缀）。</td></tr>
-                <tr><td class="cmd-key">create_view</td><td class="cmd-desc">创建零拷贝虚拟视图封装查询逻辑（v_/tmp_v_ 前缀）。</td></tr>
-                <tr><td class="cmd-key">drop_object</td><td class="cmd-desc">删除指定的表或视图（同时清理同名视图与表两种形态）。</td></tr>
+                <tr>
+                  <td class="cmd-key"><span class="cmd-label">探索数据库</span><span class="cmd-name">list_tables</span></td>
+                  <td class="cmd-desc">列出当前数据库中的所有数据表和视图名。</td>
+                </tr>
+                <tr>
+                  <td class="cmd-key"><span class="cmd-label">分析表结构</span><span class="cmd-name">describe_table</span></td>
+                  <td class="cmd-desc">获取指定表或视图的结构（列名、数据类型等）。</td>
+                </tr>
+                <tr>
+                  <td class="cmd-key"><span class="cmd-label">采样数据</span><span class="cmd-name">sample_data</span></td>
+                  <td class="cmd-desc">获取指定表或视图的前 5 行样例数据。</td>
+                </tr>
+                <tr>
+                  <td class="cmd-key"><span class="cmd-label">执行 SQL</span><span class="cmd-name">execute_query</span></td>
+                  <td class="cmd-desc">执行只读的 SQL 查询，并返回结果。</td>
+                </tr>
+                <tr>
+                  <td class="cmd-key"><span class="cmd-label">创建表</span><span class="cmd-name">create_table</span></td>
+                  <td class="cmd-desc">创建物化物理表持久化加工后的数据（t_/tmp_ 前缀）。</td>
+                </tr>
+                <tr>
+                  <td class="cmd-key"><span class="cmd-label">创建视图</span><span class="cmd-name">create_view</span></td>
+                  <td class="cmd-desc">创建零拷贝虚拟视图封装查询逻辑（v_/tmp_v_ 前缀）。</td>
+                </tr>
+                <tr>
+                  <td class="cmd-key"><span class="cmd-label">删除对象</span><span class="cmd-name">drop_object</span></td>
+                  <td class="cmd-desc">删除指定的表或视图（同时清理同名视图与表两种形态）。</td>
+                </tr>
               </tbody>
             </table>
           </div>

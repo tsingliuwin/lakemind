@@ -2254,13 +2254,22 @@ body.is-resizing-column * {
 }
 
 .cmd-key {
-  font-family: var(--font-mono, "SF Mono", Menlo, Consolas, monospace);
-  color: var(--text-primary);
-  background: var(--bg-hover);
-  border-radius: 4px;
-  padding: 3px 8px !important;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 11px 20px !important;
   white-space: nowrap;
   width: 1%;
+}
+.cmd-key .cmd-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.cmd-key .cmd-name {
+  font-family: var(--font-mono, "SF Mono", Menlo, Consolas, monospace);
+  font-size: 10.5px;
+  color: var(--text-dim);
 }
 
 .cmd-desc {
