@@ -614,7 +614,7 @@ export default function SettingsPage(props: {
                 </tr>
                 <tr>
                   <td class="cmd-key"><span class="cmd-label">生成图表</span><span class="cmd-name">render_chart</span></td>
-                  <td class="cmd-desc">用图表可视化查询结果（柱状/折线/饼图/散点），用户可切换类型。</td>
+                  <td class="cmd-desc">用图表可视化查询结果（柱状/折线/饼图/散点/漏斗/仪表盘），基础类型可切换。</td>
                 </tr>
               </tbody>
             </table>
