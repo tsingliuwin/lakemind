@@ -1126,8 +1126,13 @@ export default function App() {
       setSources(dbTables);
       if (selectedTable()?.name === name) setSelectedTable(null);
       setDeps(null);
+      setLogs((prev) => [{
+        id: ++logSeq,
+        ts: Date.now(),
+        sql: `删除 ${name}`,
+        status: "ok" as const,
+      }, ...prev].slice(0, 100));
     } catch (e) {
-      // Dependency check failed — show the reason in the console.
       const msg = typeof e === "string" ? e : "删除失败";
       setLogs((prev) => [{
         id: ++logSeq,

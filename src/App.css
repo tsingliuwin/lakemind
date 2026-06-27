@@ -1902,17 +1902,16 @@ body.is-resizing-column * {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 2px 0;
   font-size: 11px;
   font-family: var(--font-mono, "SF Mono", Menlo, Consolas, monospace);
-  background: var(--bg-hover);
+  background: transparent;
   color: var(--text-primary);
-  border: 1px solid var(--border-faint);
+  border: none;
   cursor: pointer;
   outline: none;
   overflow: hidden;
-  transition: background 0.15s ease;
+  transition: color 0.15s ease;
 }
 .ri-dep-chip-name {
   overflow: hidden;
@@ -1945,8 +1944,7 @@ body.is-resizing-column * {
   background: var(--bg-hover);
 }
 .ri-dep-chip:hover {
-  background: var(--bg-elevated);
-  border-color: var(--border-faint) !important;
+  color: var(--text-primary);
 }
 .ri-dep-chip--down {
   color: var(--text-primary);
@@ -1955,7 +1953,7 @@ body.is-resizing-column * {
   cursor: default;
 }
 .ri-dep-chip--static:hover {
-  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 /* Right-click context menu for data tree leaves. */
