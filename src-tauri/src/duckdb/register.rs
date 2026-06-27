@@ -19,10 +19,19 @@ use crate::model::{SourceKind, SourceTable, StorageKind};
 
 /// Create the table/view for one scan entry and return a fully-populated
 /// `SourceTable` (with columns + row-count already filled in).
-pub fn register(conn: &Connection, e: &ScanEntry, storage: StorageKind) -> AppResult<SourceTable> {
+///
+/// `progress` is an optional callback for UI progress reporting (file import
+/// path). Called with human-readable stage messages. Pass `None` for
+/// agent/internal paths.
+pub fn register(
+    conn: &Connection,
+    e: &ScanEntry,
+    storage: StorageKind,
+    progress: Option<&dyn Fn(&str)>,
+) -> AppResult<SourceTable> {
     match storage {
         StorageKind::View => create_view(conn, e)?,
-        StorageKind::Table => create_table(conn, e)?,
+        StorageKind::Table => create_table(conn, e, progress)?,
         StorageKind::Custom => unreachable!("custom sources are not registered from scan entries"),
     }
 
@@ -54,10 +63,10 @@ fn create_view(conn: &Connection, e: &ScanEntry) -> AppResult<()> {
 
 /// Materialized: `CREATE TABLE s_xxx AS SELECT ...`, with multi-strategy
 /// loaders for CSV/Excel.
-fn create_table(conn: &Connection, e: &ScanEntry) -> AppResult<()> {
+fn create_table(conn: &Connection, e: &ScanEntry, progress: Option<&dyn Fn(&str)>) -> AppResult<()> {
     match e.kind {
-        SourceKind::Csv => load_csv_as_table(conn, &e.view_name, &e.scan_path)?,
-        SourceKind::Excel => load_xlsx_as_table(conn, &e.view_name, &e.scan_path)?,
+        SourceKind::Csv => load_csv_as_table(conn, &e.view_name, &e.scan_path, progress)?,
+        SourceKind::Excel => load_xlsx_as_table(conn, &e.view_name, &e.scan_path, progress)?,
         _ => {
             conn.execute(&format!("DROP TABLE IF EXISTS \"{}\";", e.view_name), [])?;
             let sql = format!("CREATE TABLE \"{}\" AS {};", e.view_name, build_select_sql(e));
@@ -112,7 +121,7 @@ fn try_create_and_validate(conn: &Connection, table_name: &str, source_fn: &str)
 }
 
 /// Multi-strategy CSV loader
-fn load_csv_as_table(conn: &Connection, table_name: &str, file_path: &str) -> AppResult<()> {
+fn load_csv_as_table(conn: &Connection, table_name: &str, file_path: &str, _progress: Option<&dyn Fn(&str)>) -> AppResult<()> {
     let drop_sql = format!("DROP TABLE IF EXISTS \"{}\";", table_name);
     let escaped_path = file_path.replace('\'', "''");
 
@@ -239,13 +248,14 @@ fn evaluate_candidate(conn: &Connection, table_name: &str, source_fn: &str) -> A
 }
 
 /// Multi-strategy Excel loader
-fn load_xlsx_as_table(conn: &Connection, table_name: &str, file_path: &str) -> AppResult<()> {
+fn load_xlsx_as_table(conn: &Connection, table_name: &str, file_path: &str, progress: Option<&dyn Fn(&str)>) -> AppResult<()> {
     let drop_sql = format!("DROP TABLE IF EXISTS \"{}\";", table_name);
     let escaped_path = file_path.replace('\'', "''");
 
     let mut candidates = Vec::new();
 
     // Strategy 1: Default load
+    if let Some(p) = progress { p("评估读取策略 1/8"); }
     let default_source = format!("read_xlsx('{escaped_path}')");
     if let Some(c) = evaluate_candidate(conn, table_name, &default_source)? {
         candidates.push(c);
@@ -253,7 +263,8 @@ fn load_xlsx_as_table(conn: &Connection, table_name: &str, file_path: &str) -> A
 
     // Strategy 2: Try different header offsets (common in exported reports) with ignore_errors
     let offsets = ["A1:ZZ100000", "A2:ZZ100000", "A3:ZZ100000", "A4:ZZ100000", "A5:ZZ100000"];
-    for r in offsets {
+    for (idx, r) in offsets.iter().enumerate() {
+        if let Some(p) = progress { p(&format!("评估读取策略 {}/8", idx + 2)); }
         let source = format!(
             "read_xlsx('{escaped_path}', header=true, range='{r}', stop_at_empty=false, ignore_errors=true)"
         );
@@ -263,6 +274,7 @@ fn load_xlsx_as_table(conn: &Connection, table_name: &str, file_path: &str) -> A
     }
 
     // Strategy 3: stop_at_empty=false + header + ignore_errors
+    if let Some(p) = progress { p("评估读取策略 7/8"); }
     let robust_source = format!(
         "read_xlsx('{escaped_path}', header=true, stop_at_empty=false, ignore_errors=true)"
     );
@@ -271,6 +283,7 @@ fn load_xlsx_as_table(conn: &Connection, table_name: &str, file_path: &str) -> A
     }
 
     // Strategy 4: all_varchar + stop_at_empty=false + ignore_errors
+    if let Some(p) = progress { p("评估读取策略 8/8"); }
     let varchar_source = format!(
         "read_xlsx('{escaped_path}', header=true, stop_at_empty=false, all_varchar=true, ignore_errors=true)"
     );
@@ -287,14 +300,125 @@ fn load_xlsx_as_table(conn: &Connection, table_name: &str, file_path: &str) -> A
 
         let best = &candidates[0];
         println!("Selected best Excel ingestion strategy: {} (score: {}, cols: {})", best.source_fn, best.header_score, best.col_count);
-        let create_sql = format!("CREATE TABLE \"{table_name}\" AS SELECT * FROM {};", best.source_fn);
-        conn.execute(&create_sql, [])?;
-        return Ok(());
+        if let Some(p) = progress { p("过滤空列空行"); }
+        return create_xlsx_table_pruned(conn, table_name, &best.source_fn);
     }
 
     // Fallback: accept best-effort result using Strategy 4 source
     let _ = conn.execute(&drop_sql, []);
-    let create_sql = format!("CREATE TABLE \"{table_name}\" AS SELECT * FROM {varchar_source};");
-    conn.execute(&create_sql, [])?;
+    create_xlsx_table_pruned(conn, table_name, &varchar_source)?;
+    Ok(())
+}
+
+/// Create the final table from an Excel `read_xlsx` source, pruning columns
+/// that are entirely NULL and rows that are entirely empty.
+///
+/// Excel files often have a large "used range" (e.g. A1:ZZ100000) that includes
+/// many empty columns and trailing empty rows. Materializing them as-is bloats
+/// the DuckLake table and clutters analysis. Here we load into a temp table,
+/// scan once to find which columns have any non-NULL value, then build the real
+/// table selecting only those columns and only rows where at least one of them
+/// is non-NULL.
+fn create_xlsx_table_pruned(conn: &Connection, table_name: &str, source_fn: &str) -> AppResult<()> {
+    let drop_sql = format!("DROP TABLE IF EXISTS \"{}\";", table_name);
+    let _ = conn.execute(&drop_sql, []);
+
+    // 1. Load the raw Excel data into a temp table.
+    let tmp_name = format!("_tmp_{}", table_name);
+    let _ = conn.execute(&format!("DROP TABLE IF EXISTS \"{}\";", tmp_name), []);
+    let tmp_create = format!("CREATE TABLE \"{}\" AS SELECT * FROM {};", tmp_name, source_fn);
+    conn.execute(&tmp_create, [])?;
+
+    // Helper: always clean up the temp table before returning.
+    let cleanup_tmp = || {
+        let _ = conn.execute(&format!("DROP TABLE IF EXISTS \"{}\";", tmp_name), []);
+    };
+
+    // 2. Get the column list of the temp table.
+    let columns = schema::describe_view(conn, &tmp_name).unwrap_or_default();
+    if columns.is_empty() {
+        cleanup_tmp();
+        let create_sql = format!("CREATE TABLE \"{table_name}\" AS SELECT * FROM {source_fn};");
+        conn.execute(&create_sql, [])?;
+        return Ok(());
+    }
+
+    // 3. One single scan to get the non-NULL count for every column. We use
+    //    DuckDB's positional column references (#1, #2, …) instead of column
+    //    NAMES, because Excel often produces empty or odd column names that
+    //    break SQL quoting (e.g. "" or names with embedded quotes). Positional
+    //    refs sidestep all of that.
+    let count_exprs: Vec<String> = (0..columns.len())
+        .map(|i| format!("#{}", i + 1))
+        .map(|r| format!("count({})", r))
+        .collect();
+    let count_sql = format!(
+        "SELECT {} FROM \"{}\"",
+        count_exprs.join(", "),
+        tmp_name.replace('"', "\"\"")
+    );
+    let non_null_counts: Vec<i64> = match conn.query_row(&count_sql, [], |row| {
+        let mut v = Vec::with_capacity(columns.len());
+        for i in 0..columns.len() {
+            v.push(row.get::<_, i64>(i).unwrap_or(0));
+        }
+        Ok(v)
+    }) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[xlsx] non-null count query failed: {e}, skipping prune");
+            cleanup_tmp();
+            let create_sql = format!("CREATE TABLE \"{table_name}\" AS SELECT * FROM {source_fn};");
+            conn.execute(&create_sql, [])?;
+            return Ok(());
+        }
+    };
+
+    // 4. Keep only columns with at least one non-NULL value. Use positional
+    //    refs again for the SELECT list to avoid name-quoting issues.
+    let kept_positions: Vec<usize> = non_null_counts
+        .iter()
+        .enumerate()
+        .filter(|(_, &cnt)| cnt > 0)
+        .map(|(i, _)| i)
+        .collect();
+
+    println!(
+        "[xlsx] {}: {} total cols, {} non-empty cols → keeping {}",
+        table_name, columns.len(), kept_positions.len(), kept_positions.len()
+    );
+
+    if kept_positions.is_empty() {
+        cleanup_tmp();
+        let create_sql = format!("CREATE TABLE \"{table_name}\" AS SELECT * FROM {source_fn};");
+        conn.execute(&create_sql, [])?;
+        return Ok(());
+    }
+
+    // 5. Build the final table: select kept columns (by position) + rows where
+    //    at least one kept column is non-NULL. We use `#1 IS NOT NULL OR #2 IS
+    //    NOT NULL OR …` instead of COALESCE because COALESCE requires all
+    //    arguments to share a type — Excel columns are often mixed VARCHAR/DOUBLE,
+    //    which makes COALESCE fail with a binder error.
+    let select_cols: Vec<String> = kept_positions.iter().map(|&i| format!("#{}", i + 1)).collect();
+    let row_filter: Vec<String> = kept_positions.iter().map(|&i| format!("#{} IS NOT NULL", i + 1)).collect();
+    let create_sql = format!(
+        "CREATE TABLE \"{table}\" AS SELECT {cols} FROM \"{tmp}\" WHERE {filter};",
+        table = table_name.replace('"', "\"\""),
+        cols = select_cols.join(", "),
+        tmp = tmp_name.replace('"', "\"\""),
+        filter = row_filter.join(" OR ")
+    );
+    println!("Executing creation query: {}", create_sql);
+    if let Err(e) = conn.execute(&create_sql, []) {
+        eprintln!("[xlsx] pruned create failed: {e}, falling back to raw");
+        cleanup_tmp();
+        let fallback = format!("CREATE TABLE \"{table_name}\" AS SELECT * FROM {source_fn};");
+        conn.execute(&fallback, [])?;
+        return Ok(());
+    }
+
+    // 6. Clean up the temp table.
+    cleanup_tmp();
     Ok(())
 }

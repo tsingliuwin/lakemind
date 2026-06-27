@@ -15,6 +15,25 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tauri::{State, Emitter};
+
+/// Progress event for file import, emitted at each stage so the UI can show
+/// what's happening instead of a silent busy spinner.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportProgress {
+    /// Source file name being imported.
+    file: String,
+    /// Current stage: "copying" | "scanning" | "registering" | "done" | "error".
+    stage: String,
+    /// Target table name (when known).
+    table: Option<String>,
+    /// Column count of the resulting table (on "done").
+    columns: Option<i64>,
+    /// Row count of the resulting table (on "done").
+    rows: Option<i64>,
+    /// Error message (on "error").
+    error: Option<String>,
+}
 use tokio::sync::Mutex;
 
 use crate::db::{self, SourceRecord};
@@ -218,7 +237,7 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
             };
             let storage = StorageKind::from_db_str(&rec_clone.storage);
             drop_lake_object(&guard, &rec_clone.table_name);
-            match register::register(&guard, &entry, storage) {
+            match register::register(&guard, &entry, storage, None) {
                 Ok(t) => {
                     let new_rec = source_record_from(&t, &entry, rec_clone.created_at, &rec_clone.name_source);
                     if let Ok(sqlite) = db::get_db_conn() {
@@ -302,34 +321,102 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
 ///   * large (> threshold) → register in place + zero-copy VIEW
 #[tauri::command]
 pub async fn import_file_to_workspace(
+    window: tauri::Window,
     workspace: String,
     path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<SourceTable>, String> {
     let src_path = PathBuf::from(&path);
+    let file_name = src_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string();
     if !src_path.exists() {
+        let _ = window.emit("import-progress", ImportProgress {
+            file: file_name, stage: "error".into(), table: None, columns: None, rows: None,
+            error: Some(format!("源路径不存在: {path}")),
+        });
         return Err(format!("源路径不存在: {path}"));
     }
+
+    let _ = window.emit("import-progress", ImportProgress {
+        file: file_name.clone(), stage: "copying".into(), table: None, columns: None, rows: None, error: None,
+    });
 
     let ws_dir = resolve_workspace_dir(&workspace)?;
     std::fs::create_dir_all(&ws_dir).map_err(|e| format!("无法创建工作区目录: {e}"))?;
 
     // Always copy the source into the workspace so it shows up in the Files tree
-    // and the project stays self-contained. (Zero-copy for very large files is a
-    // future optimization — see `decide_storage`.)
-    let target_path = copy_into_workspace_if_needed(&src_path, &ws_dir)?;
+    // and the project stays self-contained.
+    let target_path = match copy_into_workspace_if_needed(&src_path, &ws_dir) {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = window.emit("import-progress", ImportProgress {
+                file: file_name.clone(), stage: "error".into(), table: None, columns: None, rows: None,
+                error: Some(format!("复制文件失败: {e}")),
+            });
+            return Err(e);
+        }
+    };
+
+    let _ = window.emit("import-progress", ImportProgress {
+        file: file_name.clone(), stage: "scanning".into(), table: None, columns: None, rows: None, error: None,
+    });
 
     // Scan the imported target (blocking), then run the shared sync (naming +
-    // register/rename). The lake for this workspace is assumed already attached
-    // (it is attached on workspace load via register_workspace_sources).
+    // register/rename). The lake for this workspace is assumed already attached.
     let target_for_scan = target_path.clone();
     let entries = match tauri::async_runtime::spawn_blocking(move || scan::scan_path(&target_for_scan, false)).await {
         Ok(v) => v,
-        Err(e) => return Err(format!("scan task join error: {e}")),
+        Err(e) => {
+            let _ = window.emit("import-progress", ImportProgress {
+                file: file_name.clone(), stage: "error".into(), table: None, columns: None, rows: None,
+                error: Some(format!("扫描失败: {e}")),
+            });
+            return Err(format!("scan task join error: {e}"));
+        }
     };
-    sync_entries(state.conn.clone(), state.sources.clone(), workspace, ws_dir, entries, false)
-        .await
-        .map_err(|e| e.to_string())
+
+    let _ = window.emit("import-progress", ImportProgress {
+        file: file_name.clone(), stage: "registering".into(), table: None, columns: None, rows: None, error: None,
+    });
+
+    let window_for_sync = window.clone();
+    let file_for_sync = file_name.clone();
+    let result = sync_entries(state.conn.clone(), state.sources.clone(), workspace, ws_dir, entries, false, Some(move |stage_msg: &str| {
+        let _ = window_for_sync.emit("import-progress", ImportProgress {
+            file: file_for_sync.clone(), stage: "registering".into(), table: Some(stage_msg.to_string()),
+            columns: None, rows: None, error: None,
+        });
+    }))
+    .await
+    .map_err(|e| e.to_string());
+
+    match &result {
+        Ok(tables) => {
+            if let Some(t) = tables.first() {
+                let _ = window.emit("import-progress", ImportProgress {
+                    file: file_name.clone(), stage: "done".into(),
+                    table: Some(t.name.clone()),
+                    columns: Some(t.columns.len() as i64),
+                    rows: t.row_count_estimate,
+                    error: None,
+                });
+            } else {
+                let _ = window.emit("import-progress", ImportProgress {
+                    file: file_name.clone(), stage: "done".into(), table: None, columns: None, rows: None, error: None,
+                });
+            }
+        }
+        Err(e) => {
+            let _ = window.emit("import-progress", ImportProgress {
+                file: file_name.clone(), stage: "error".into(), table: None, columns: None, rows: None,
+                error: Some(e.clone()),
+            });
+        }
+    }
+    result
 }
 
 /// Switch to a workspace (re-attach its DuckLake) and incrementally sync sources
@@ -368,7 +455,7 @@ pub async fn register_workspace_sources_inner(
         Err(e) => return Err(format!("scan task join error: {e}")),
     };
 
-    sync_entries(state.conn.clone(), state.sources.clone(), workspace_path, ws_dir, entries, true)
+    sync_entries(state.conn.clone(), state.sources.clone(), workspace_path, ws_dir, entries, true, None::<fn(&str)>)
         .await
         .map_err(|e| e.to_string())
 }
@@ -431,6 +518,10 @@ async fn sync_entries(
     ws_dir: PathBuf,
     entries: Vec<scan::ScanEntry>,
     prune_orphans: bool,
+    // Optional progress callback (file import path). Called with a human-
+    // readable stage message (e.g. the table name being built). `None` for
+    // startup sync / agent paths that don't need UI progress.
+    progress: Option<impl Fn(&str) + Send + Sync + 'static>,
 ) -> AppResult<Vec<SourceTable>> {
     use std::collections::{HashMap, HashSet};
     let sync_start = std::time::Instant::now();
@@ -570,7 +661,9 @@ async fn sync_entries(
                     };
                     work.view_name = target.clone();
                     drop_lake_object(&guard, &rec.table_name);
-                    match register::register(&guard, &work, storage) {
+                    let prog = progress.as_ref().map(|p| p as &dyn Fn(&str));
+                    if let Some(p) = prog { p(target); }
+                    match register::register(&guard, &work, storage, prog) {
                         Ok(t) => {
                             let new_rec = source_record_from(&t, e, rec.created_at, src);
                             let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
@@ -612,7 +705,9 @@ async fn sync_entries(
                         e.clone()
                     };
                     work.view_name = target.clone();
-                    match register::register(&guard, &work, storage) {
+                    let prog = progress.as_ref().map(|p| p as &dyn Fn(&str));
+                    if let Some(p) = prog { p(target); }
+                    match register::register(&guard, &work, storage, prog) {
                         Ok(t) => {
                             println!("[sync] {}: new source → register", e.label);
                             lake_mutated = true;

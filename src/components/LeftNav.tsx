@@ -1,6 +1,6 @@
 import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import type { SourceTable, QueryTask, Workspace, FileItem, RegisterStatus } from "../lib/types";
+import type { SourceTable, QueryTask, Workspace, FileItem, RegisterStatus, ImportProgress } from "../lib/types";
 import { t } from "../lib/i18n";
 import { logoSrc } from "../lib/theme";
 
@@ -14,6 +14,16 @@ const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("
  * - Tree list grouped by directory.
  * - Bottom footer with a logo ("研途教育"), a layout switcher, and settings gear.
  */
+/** Map backend import stage codes to Chinese labels for the progress banner. */
+function stageLabel(stage: string): string {
+  switch (stage) {
+    case "copying": return "复制文件";
+    case "scanning": return "扫描";
+    case "registering": return "映射为表";
+    default: return stage;
+  }
+}
+
 export default function LeftNav(props: {
   workspace: string;
   workspacePath?: string;
@@ -39,6 +49,8 @@ export default function LeftNav(props: {
   onImportFile?: (filePath: string) => void;
   leftOpen?: boolean;
   onToggleLeft?: () => void;
+  /** Current file-import progress (null = idle). Shown as a status banner. */
+  importStatus?: ImportProgress | null;
 }) {
   // Group tables by their parent directory for a tree-like feel.
   // Two kinds of objects are collected into the flat (empty-path) group that
@@ -508,6 +520,36 @@ export default function LeftNav(props: {
                         </div>
                       </Show>
                     </div>
+                  </Show>
+
+                  {/* Import progress banner */}
+                  <Show when={props.importStatus}>
+                    {(st) => (
+                      <div
+                        class="import-banner"
+                        classList={{
+                          "import-banner--done": st().stage === "done",
+                          "import-banner--error": st().stage === "error",
+                        }}
+                      >
+                        <Show when={st().stage === "done"} fallback={
+                          <Show when={st().stage === "error"} fallback={
+                            <span class="import-banner__spinner" />
+                          }>
+                            <span class="import-banner__icon import-banner__icon--error">✕</span>
+                          </Show>
+                        }>
+                          <span class="import-banner__icon import-banner__icon--done">✓</span>
+                        </Show>
+                        <span class="import-banner__text">
+                          {st().stage === "done"
+                            ? `${st().file} → ${st().table ?? ""}（${st().columns ?? 0}列${st().rows != null ? `, ${st().rows}行` : ""}）`
+                            : st().stage === "error"
+                            ? `${st().file}：${st().error ?? "导入失败"}`
+                            : `${st().file} → ${stageLabel(st().stage)}${st().table ? ` ${st().table}` : ""}…`}
+                        </span>
+                      </div>
+                    )}
                   </Show>
 
                   {/* Category 3: 数据 */}

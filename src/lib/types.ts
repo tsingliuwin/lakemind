@@ -3,6 +3,17 @@
 
 export type SourceKind = "parquet" | "csv" | "json" | "delta" | "excel" | "table" | "view";
 
+/** 文件导入进度事件（后端 emit "import-progress"）。 */
+export interface ImportProgress {
+  file: string;
+  /** "copying" | "scanning" | "registering" | "done" | "error" */
+  stage: string;
+  table?: string;
+  columns?: number;
+  rows?: number;
+  error?: string;
+}
+
 /** 项目名行状态点的颜色档位：
  * - "all"     绿：应注册的数据文件已全部注册成表（或工作区无数据文件）
  * - "partial" 橙：仅部分注册成功

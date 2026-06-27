@@ -12,7 +12,7 @@ import SettingsPage from "./components/SettingsPage";
 import HomePanel from "./components/HomePanel";
 import { executeSql, importFileToWorkspace } from "./lib/duckdb";
 import { tryFormatDuckdbSql } from "./lib/sqlFormat";
-import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage, RegisterStatus } from "./lib/types";
+import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage, RegisterStatus, ImportProgress } from "./lib/types";
 import ChatView from "./components/ChatView";
 import { appendDelta, pushToolCall, mergeToolResult, normalizeMessage } from "./lib/chat";
 import "./App.css";
@@ -33,6 +33,8 @@ export default function App() {
   // File-registration coverage of the active workspace → colored dot by the
   // project name (all/partial/none). Refreshed after workspace switch + import.
   const [registerStatus, setRegisterStatus] = createSignal<RegisterStatus>("all");
+  // Current file-import progress (null = idle). Driven by "import-progress" events.
+  const [importStatus, setImportStatus] = createSignal<ImportProgress | null>(null);
 
   /** Fetch registration coverage for a workspace and update the status dot. */
   async function refreshRegisterStatus(wsPath: string) {
@@ -177,6 +179,38 @@ export default function App() {
   onMount(async () => {
     void loadModelsFromSettings();
 
+    // File-import progress: update the status signal in real time AND log every
+    // stage to the bottom console so the whole process is inspectable later.
+    const unlistenImport = await listen<ImportProgress>("import-progress", (event) => {
+      const p = event.payload;
+      setImportStatus(p);
+
+      // Log every stage to the console.
+      const stageText: Record<string, string> = {
+        copying: "复制文件",
+        scanning: "扫描",
+        registering: p.table ? `映射为表 ${p.table}` : "映射",
+        done: `完成 → ${p.table ?? ""}（${p.columns ?? 0} 列${p.rows != null ? `, ${p.rows} 行` : ""}）`,
+        error: `失败：${p.error ?? "未知错误"}`,
+      };
+      const desc = `导入 ${p.file} · ${stageText[p.stage] ?? p.stage}`;
+      setLogs((prev) => [{
+        id: ++logSeq,
+        ts: Date.now(),
+        sql: desc,
+        status: p.stage === "error" ? "error" as const : "ok" as const,
+        rowCount: p.stage === "done" ? (p.rows ?? undefined) : undefined,
+        error: p.stage === "error" ? (p.error ?? undefined) : undefined,
+      }, ...prev].slice(0, 100));
+
+      if (p.stage === "done" || p.stage === "error") {
+        const clearMs = p.stage === "done" ? 3000 : 8000;
+        setTimeout(() => {
+          setImportStatus((cur) => (cur === p ? null : cur));
+        }, clearMs);
+      }
+    });
+
     const unlistenAgent = await listen<any>("agent-event", (event) => {
       const payload = event.payload;
       const targetId = payload.taskId;
@@ -310,6 +344,7 @@ export default function App() {
     onCleanup(() => {
       window.removeEventListener("keydown", handleGlobalKeyDown);
       unlistenAgent();
+      unlistenImport();
     });
   });
 
@@ -1180,6 +1215,7 @@ export default function App() {
           onNewQuery={() => createTask("SELECT 1 AS n;", "sql")}
           onNewChat={() => createTask("", "chat")}
           leftOpen={leftOpen()}
+          importStatus={importStatus()}
           onToggleLeft={() => setLeftOpen(!leftOpen())}
         />
 
