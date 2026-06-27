@@ -151,6 +151,138 @@ pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<Source
     .await
 }
 
+/// Background liveness check, run after the fast startup list renders.
+///
+/// For each registered source we run `SELECT * FROM "name" LIMIT 0`. This is
+/// intentionally a **metadata-only** probe (cheap, ~280ms/table) whose purpose
+/// is to **verify the lake object is usable**. The fast sync path trusts the
+/// fingerprint and skips `table_exists_in_lake`, so a lake object that went
+/// missing without a fingerprint change would otherwise only surface as a query
+/// error on click. Here we detect that and rebuild from the persisted scan_path.
+///
+/// We do NOT warm data pages (e.g. LIMIT 50) — pre-reading rows for every table
+/// is wasted work when the user typically clicks only a few. The first click on
+/// a table pays the column-store cold-start (~1s); the second hits the page
+/// cache (~300ms). That's an inherent DuckDB trade-off we accept rather than
+/// speculatively reading data the user may never look at.
+///
+/// Returns the refreshed source list (custom tables/views included) so the
+/// frontend can update the data tree if any rebuild happened.
+#[tauri::command]
+pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
+    let ws_path = state.workspace_path.lock().await.clone();
+    let warmup_start = std::time::Instant::now();
+
+    // Read source records from SQLite (no DuckDB lock needed).
+    let sqlite = db::get_db_conn()?;
+    let records = db::list_sources(&sqlite, &ws_path)?;
+    drop(sqlite);
+
+    // Warm each source with a SHORT connection lock, one at a time, yielding the
+    // lock between tables. This lets a user's click-triggered query slip in
+    // immediately (a single LIMIT 0 holds the lock for ~300ms, vs. the whole
+    // batch for 5s+ in a single run_blocking — which blocked all clicks until it
+    // finished). If a table turns out missing, rebuild it right here.
+    let mut rebuilt = false;
+    for rec in &records {
+        let conn = state.conn.clone();
+        let rec_clone = rec.clone();
+        let ws_path_clone = ws_path.clone();
+        let did_rebuild = tauri::async_runtime::spawn_blocking(move || -> bool {
+            let guard = conn.blocking_lock();
+            // LIMIT 0: metadata-only probe (cheap). Validates the lake object is
+            // usable without reading data pages the user may never look at.
+            let probe = format!("SELECT * FROM \"{}\" LIMIT 0", rec_clone.table_name.replace('"', "\"\""));
+            if guard.execute(&probe, []).is_ok() {
+                return false;
+            }
+            // Lake object missing/corrupt despite a matching fingerprint → rebuild.
+            eprintln!("[warmup] {} not usable, rebuilding from scan_path", rec_clone.table_name);
+            let kind = str_to_kind(&rec_clone.kind);
+            let entry = scan::ScanEntry {
+                label: rec_clone.label.clone(),
+                view_name: rec_clone.table_name.clone(),
+                kind,
+                path: rec_clone.file_path.clone(),
+                scan_path: rec_clone.scan_path.clone(),
+                partition_keys: rec_clone.partition_keys.clone(),
+                file_size: rec_clone.file_size as u64,
+                mtime: rec_clone.file_mtime,
+            };
+            let storage = StorageKind::from_db_str(&rec_clone.storage);
+            drop_lake_object(&guard, &rec_clone.table_name);
+            match register::register(&guard, &entry, storage) {
+                Ok(t) => {
+                    let new_rec = source_record_from(&t, &entry, rec_clone.created_at, &rec_clone.name_source);
+                    if let Ok(sqlite) = db::get_db_conn() {
+                        let _ = db::upsert_source(&sqlite, &ws_path_clone, &new_rec);
+                    }
+                    true
+                }
+                Err(e) => {
+                    eprintln!("[warmup] rebuild {} failed: {e}", rec_clone.table_name);
+                    false
+                }
+            }
+        })
+        .await
+        .unwrap_or(false);
+        rebuilt = rebuilt || did_rebuild;
+    }
+
+    // Checkpoint if any rebuild happened.
+    if rebuilt {
+        let conn = state.conn.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            let guard = conn.blocking_lock();
+            let _ = guard.execute("CHECKPOINT;", []);
+        })
+        .await;
+    }
+
+    // Warm custom tables (short lock each) and return the refreshed list.
+    let conn = state.conn.clone();
+    let ws_path2 = ws_path.clone();
+    let result = run_blocking(state, move |conn| {
+        let sqlite = db::get_db_conn()?;
+        let records = db::list_sources(&sqlite, &ws_path2)?;
+        let mut result = Vec::new();
+        let mut known: HashSet<String> = HashSet::new();
+        for rec in &records {
+            known.insert(rec.table_name.clone());
+            result.push(build_source_table_from_record(rec));
+        }
+        for sql in CUSTOM_TABLE_SQLS {
+            let Ok(mut stmt) = conn.prepare(sql) else { continue };
+            let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else { continue };
+            for name in rows.flatten() {
+                if known.contains(&name) { continue; }
+                known.insert(name.clone());
+                let _ = conn.execute(&format!("SELECT * FROM \"{}\" LIMIT 0", name.replace('"', "\"\"")), []);
+                let cols = schema::describe_view(conn, &name).unwrap_or_default();
+                result.push(SourceTable {
+                    name: name.clone(),
+                    label: name,
+                    kind: SourceKind::View,
+                    storage: StorageKind::Custom,
+                    path: String::new(),
+                    scan_path: String::new(),
+                    partition_keys: Vec::new(),
+                    row_count_estimate: None,
+                    columns: cols,
+                });
+            }
+        }
+        Ok(result)
+    })
+    .await;
+
+    eprintln!("[warmup] done: {} sources in {}ms", records.len(), warmup_start.elapsed().as_millis());
+    // Silence unused warning while keeping conn available for future use.
+    let _ = conn;
+    result
+}
+
 // ===========================================================================
 // Lake import + sync
 // ===========================================================================

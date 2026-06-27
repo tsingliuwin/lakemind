@@ -357,7 +357,18 @@ export default function App() {
       // when done, gated on still being on the same workspace.
       void invoke<SourceTable[]>("register_workspace_sources", { workspacePath: ws.path })
         .then((synced) => {
-          if (currentWorkspace()?.path === ws.path) setSources(synced);
+          if (currentWorkspace()?.path === ws.path) {
+            setSources(synced);
+            // After sync, warm up every table in the background: this pre-caches
+            // DuckDB parquet footers/stats (so the user's first click isn't a cold
+            // start) AND verifies each lake object is usable, rebuilding any that
+            // went missing. The returned list refreshes the tree if rebuilds ran.
+            void invoke<SourceTable[]>("warmup_sources")
+              .then((warmed) => {
+                if (currentWorkspace()?.path === ws.path) setSources(warmed);
+              })
+              .catch((err) => console.error("Failed to warmup sources:", err));
+          }
         })
         .catch((err) => console.error("Failed to sync workspace sources:", err));
     } catch (err) {
