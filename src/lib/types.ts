@@ -124,6 +124,18 @@ export type Segment =
       table?: SqlResult;
       elapsedMs?: number;
     }
+  | {
+      type: "chart";
+      id: string;
+      chartType: "bar" | "line" | "pie" | "scatter";
+      title?: string;
+      /** X 轴 / 分类列名。 */
+      xField?: string;
+      /** Y 轴 / 数值列名（多列 = 多系列）。 */
+      yFields?: string[];
+      /** 原始查询数据（用于渲染 + 切换类型时重算）。 */
+      table: SqlResult;
+    }
   | { type: "text"; id: string; text: string }
   | { type: "error"; id: string; text: string };
 

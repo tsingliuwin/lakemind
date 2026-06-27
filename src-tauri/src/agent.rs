@@ -64,6 +64,21 @@ pub enum Segment {
         id: String,
         text: String,
     },
+    /// ECharts visualization — emitted by the `render_chart` tool. Carries the
+    /// chart config (type + axis mapping) plus the raw `SqlResult` so the
+    /// frontend can render and let the user switch chart types.
+    #[serde(rename_all = "camelCase")]
+    Chart {
+        id: String,
+        chart_type: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        x_field: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        y_fields: Option<Vec<String>>,
+        table: SqlResult,
+    },
     /// Terminal/agent execution error.
     Error {
         id: String,
@@ -329,6 +344,28 @@ fn emit_tool_awaiting(
         sql: Some(ddl),
         table: None,
         elapsed_ms: None,
+    }));
+}
+
+/// Emit a `chart` segment — a complete chart config + data, rendered inline in
+/// the conversation by the frontend's ChartSegment component.
+fn emit_chart(
+    window: &tauri::Window,
+    task_id: &str,
+    id: &str,
+    chart_type: &str,
+    title: Option<&str>,
+    x_field: Option<&str>,
+    y_fields: Option<&[String]>,
+    table: SqlResult,
+) {
+    emit_event(window, task_id, "chart", None, Some(Segment::Chart {
+        id: id.to_string(),
+        chart_type: chart_type.to_string(),
+        title: title.map(|s| s.to_string()),
+        x_field: x_field.map(|s| s.to_string()),
+        y_fields: y_fields.map(|v| v.to_vec()),
+        table,
     }));
 }
 
@@ -1135,6 +1172,128 @@ impl Tool for DropObjectTool {
     }
 }
 
+// --- render_chart ---------------------------------------------------------
+
+#[derive(Deserialize, Serialize)]
+struct RenderChartArgs {
+    sql: String,
+    chart_type: String,
+    #[serde(default)]
+    x_field: Option<String>,
+    #[serde(default)]
+    y_fields: Option<Vec<String>>,
+    #[serde(default)]
+    title: Option<String>,
+}
+
+struct RenderChartTool {
+    app_state: AppState,
+    task_id: String,
+    window: tauri::Window,
+}
+
+impl Tool for RenderChartTool {
+    const NAME: &'static str = "render_chart";
+    type Error = ToolError;
+    type Args = RenderChartArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "render_chart".to_string(),
+            description: "用图表可视化查询结果。先写好 SELECT 语句（和 execute_query 一样），指定图表类型和轴映射。适合趋势（折线 line）、对比（柱状 bar）、占比（饼图 pie）、相关性（散点 scatter）。图表会展示在对话中，用户可切换图表类型。".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "sql": { "type": "string", "description": "用于获取图表数据的 SELECT 查询语句" },
+                    "chart_type": { "type": "string", "enum": ["bar", "line", "pie", "scatter"], "description": "图表类型" },
+                    "x_field": { "type": "string", "description": "X 轴/分类列名（饼图时为名称列）" },
+                    "y_fields": { "type": "array", "items": { "type": "string" }, "description": "Y 轴/数值列名，支持多列（多系列）。饼图时取第一个" },
+                    "title": { "type": "string", "description": "图表标题（可选）" }
+                },
+                "required": ["sql", "chart_type"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let sql = args.sql.trim();
+        let sql_upper = sql.to_uppercase();
+        let forbidden = ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "TRUNCATE", "ATTACH", "DETACH"];
+        for kw in &forbidden {
+            if sql_upper.contains(kw) {
+                return Err(ToolError(format!("出于安全考虑，禁止执行包含 {} 操作的 SQL 语句。", kw)));
+            }
+        }
+
+        let valid_types = ["bar", "line", "pie", "scatter"];
+        if !valid_types.contains(&args.chart_type.as_str()) {
+            return Err(ToolError(format!(
+                "不支持的图表类型「{}」，可选：bar / line / pie / scatter", args.chart_type
+            )));
+        }
+
+        let call_id = next_tool_id("chart");
+        emit_tool_call(&self.window, &self.task_id, &call_id, "render_chart", json!({
+            "sql": sql,
+            "chart_type": args.chart_type,
+            "x_field": args.x_field,
+            "y_fields": args.y_fields,
+        }));
+
+        let start = std::time::Instant::now();
+        let conn = self.app_state.conn.clone();
+        let sql_string = sql.to_string();
+        let res = tokio::task::spawn_blocking(move || -> Result<SqlResult, ToolError> {
+            let guard = conn.blocking_lock();
+            execute::run_query(&guard, &sql_string, Some(200)).map_err(|e| ToolError(e.to_string()))
+        })
+        .await
+        .map_err(|e| ToolError(format!("线程生成失败: {e}")))?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        match res {
+            Ok(table) => {
+                let row_count = table.row_count;
+                // Emit the chart segment — frontend renders it inline.
+                emit_chart(
+                    &self.window, &self.task_id, &call_id,
+                    &args.chart_type,
+                    args.title.as_deref(),
+                    args.x_field.as_deref(),
+                    args.y_fields.as_deref(),
+                    table,
+                );
+                let summary = format!("已生成{}图，共 {} 个数据点", chart_type_cn(&args.chart_type), row_count);
+                emit_tool_result(
+                    &self.window, &self.task_id, &call_id, "ok",
+                    summary.clone(), None, None, Some(elapsed),
+                );
+                Ok(summary)
+            }
+            Err(err) => {
+                let msg = format!("查询失败: {}", err.0);
+                emit_tool_result(
+                    &self.window, &self.task_id, &call_id, "error",
+                    msg.clone(), None, None, Some(elapsed),
+                );
+                Err(err)
+            }
+        }
+    }
+}
+
+/// Chinese label for a chart type (used in the tool result summary).
+fn chart_type_cn(t: &str) -> &str {
+    match t {
+        "bar" => "柱状",
+        "line" => "折线",
+        "pie" => "饼",
+        "scatter" => "散点",
+        _ => "图表",
+    }
+}
+
 pub(crate) fn sanitize_endpoint(endpoint: &str) -> String {
     let mut clean = endpoint.trim().to_string();
     while clean.ends_with('/') {
@@ -1192,6 +1351,14 @@ const PREAMBLE: &str = r#"# 角色
 - 建表/视图的 `select_sql` 必须先用 `execute_query` 验证能跑通、字段正确，再调用 `create_table`/`create_view`。
 - 一次只创建一个对象；创建后用 `describe_table` 确认结构符合预期。
 - 如果是多步加工，先用 `tmp_`/`tmp_v_` 搭中间结果，最后产出 `t_`/`v_`。
+
+### C. 可视化（主动判断）
+当结果适合用图表展示时，用 `render_chart` 工具生成可视化：
+- **趋势分析**（如各月销售额变化）→ 折线图 line
+- **分类对比**（如各部门业绩排名）→ 柱状图 bar
+- **占比构成**（如各渠道占比）→ 饼图 pie
+- **相关性分析**（如价格与销量关系）→ 散点图 scatter
+调用时传入 SELECT 语句 + 图表类型 + X 轴/Y 轴列名。图表会展示在对话中，用户可切换类型。
 
 ## 第四步：总结
 基于查询或加工的结果，用中文给出清晰的结论。结论必须引用具体数据。若创建了表/视图，说明它叫什么、用途是什么。
@@ -1346,6 +1513,21 @@ pub async fn run_agent_chat_stream(
     let create_table_tool = CreateTableTool { shared: ddl_shared.clone() };
     let create_view_tool = CreateViewTool { shared: ddl_shared.clone() };
     let drop_object_tool = DropObjectTool { shared: ddl_shared };
+    let render_chart_tool = RenderChartTool {
+        app_state: app_state.clone(),
+        task_id: task_id.clone(),
+        window: window.clone(),
+    };
+    let render_chart_tool_2 = RenderChartTool {
+        app_state: app_state.clone(),
+        task_id: task_id.clone(),
+        window: window.clone(),
+    };
+    let render_chart_tool_3 = RenderChartTool {
+        app_state: app_state.clone(),
+        task_id: task_id.clone(),
+        window: window.clone(),
+    };
 
     let format = provider.api_format.to_lowercase();
     if format == "openai" {
@@ -1367,7 +1549,8 @@ pub async fn run_agent_chat_stream(
             .tool(sample_tool)
             .tool(create_table_tool)
             .tool(create_view_tool)
-            .tool(drop_object_tool);
+            .tool(drop_object_tool)
+            .tool(render_chart_tool);
 
         if model_id.starts_with("o1") || model_id.starts_with("o3") {
             agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
@@ -1396,7 +1579,8 @@ pub async fn run_agent_chat_stream(
             .tool(sample_tool)
             .tool(create_table_tool)
             .tool(create_view_tool)
-            .tool(drop_object_tool);
+            .tool(drop_object_tool)
+            .tool(render_chart_tool_2);
 
         if model_id.starts_with("o1") || model_id.starts_with("o3") {
             agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
@@ -1426,6 +1610,7 @@ pub async fn run_agent_chat_stream(
             .tool(create_table_tool)
             .tool(create_view_tool)
             .tool(drop_object_tool)
+            .tool(render_chart_tool_3)
             .build();
 
         let stream = agent.stream_chat(prompt.clone(), rig_history)

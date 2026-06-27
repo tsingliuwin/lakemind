@@ -4662,6 +4662,52 @@ button.lm-select-trigger:hover:not(:disabled) {
    Collapsed (default for completed steps): a one-line summary chip.
    Expanded (running step, or user-toggled): shows SQL + inline table + actions.
    =========================================================================== */
+/* Chart segment (ECharts visualization inline in conversation). */
+.chart-seg {
+  margin: 8px 0;
+  border-radius: 8px;
+  border: 1px solid var(--border-faint);
+  overflow: hidden;
+}
+.chart-seg__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-faint);
+  background: var(--bg-elevated);
+}
+.chart-seg__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-right: 4px;
+}
+.chart-seg__type-btn {
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s ease;
+}
+.chart-seg__type-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.chart-seg__type-btn.active {
+  color: var(--text-primary);
+  background: var(--bg-active);
+  border-color: var(--border-strong);
+}
+.chart-seg__canvas {
+  width: 100%;
+  height: 280px;
+}
+
 .tool-seg {
   margin: 8px 0;
   background: transparent;

@@ -75,6 +75,41 @@ export function pushToolCall(
 }
 
 /**
+ * Push a `chart` segment into the segment list. A chart is a self-contained
+ * visualization (type + axis mapping + raw data) — it doesn't merge with any
+ * existing segment.
+ */
+export function pushChart(
+  segments: Segment[],
+  chart: {
+    id: string;
+    chartType: "bar" | "line" | "pie" | "scatter";
+    title?: string;
+    xField?: string;
+    yFields?: string[];
+    table: SqlResult;
+  },
+): Segment[] {
+  const next = [...segments];
+  const last = next[next.length - 1];
+  if (last && last.type === "reasoning" && last.startTime && !last.elapsedMs) {
+    next[next.length - 1] = { ...last, elapsedMs: Date.now() - last.startTime };
+  }
+  return [
+    ...next,
+    {
+      type: "chart" as const,
+      id: chart.id,
+      chartType: chart.chartType,
+      title: chart.title,
+      xField: chart.xField,
+      yFields: chart.yFields,
+      table: chart.table,
+    },
+  ];
+}
+
+/**
  * Merge a `tool_result` into the matching tool segment by id (status →
  * ok|error|awaiting, attach summary/sql/table/elapsedMs). No-op if the id is
  * unknown. `awaiting` is the intermediate state in 变更前确认 mode before the

@@ -1,6 +1,7 @@
 import { For, Index, Show, Switch, Match, createSignal, createEffect, createMemo, onMount, onCleanup, untrack } from "solid-js";
 import type { ChatMessage, Segment } from "../lib/types";
 import ToolSegment from "./ToolSegment";
+import ChartSegment from "./ChartSegment";
 import MarkdownRenderer from "./MarkdownRenderer";
 
 type ReasoningSeg = Extract<Segment, { type: "reasoning" }>;
@@ -521,6 +522,13 @@ export default function ChatView(props: {
                                   onOpenInSqlPanel={props.onOpenInSqlPanel}
                                   onConfirm={(approved) => props.onConfirmTool(s().id, approved)}
                                 />
+                              )}
+                            </Show>
+                          </Match>
+                          <Match when={seg().type === "chart"}>
+                            <Show when={seg()}>
+                              {(s) => (
+                                <ChartSegment seg={s() as Extract<Segment, { type: "chart" }>} />
                               )}
                             </Show>
                           </Match>

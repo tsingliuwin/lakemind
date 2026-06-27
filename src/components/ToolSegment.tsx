@@ -10,6 +10,7 @@ const TOOL_LABELS: Record<string, string> = {
   create_table: "创建表",
   create_view: "创建视图",
   drop_object: "删除对象",
+  render_chart: "生成图表",
   step: "步骤",
 };
 
@@ -66,6 +67,7 @@ export default function ToolSegment(props: {
     return !!(
       s.status === "awaiting" || // awaiting: always show DDL + confirm buttons
       (sqlFromArgs() && s.tool === "execute_query") ||
+      (sqlFromArgs() && s.tool === "render_chart") || // chart: show the SQL that produced the data
       (tableFromArgs() && s.tool !== "execute_query") ||
       s.sql ||
       s.table ||
@@ -126,6 +128,13 @@ export default function ToolSegment(props: {
               <line x1="18" y1="20" x2="18" y2="10"></line>
               <line x1="12" y1="20" x2="12" y2="4"></line>
               <line x1="6" y1="20" x2="6" y2="14"></line>
+            </svg>
+          ) : t()?.tool === "render_chart" ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+              <line x1="18" y1="20" x2="18" y2="10" />
+              <line x1="12" y1="20" x2="12" y2="4" />
+              <line x1="6" y1="20" x2="6" y2="14" />
+              <line x1="3" y1="20" x2="21" y2="20" />
             </svg>
           ) : (
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
@@ -189,7 +198,7 @@ export default function ToolSegment(props: {
           </Show>
 
           {/* Args / SQL preview */}
-          <Show when={sqlFromArgs() && t()?.tool === "execute_query"}>
+          <Show when={sqlFromArgs() && (t()?.tool === "execute_query" || t()?.tool === "render_chart")}>
             <SqlBlock sql={sqlFromArgs()!} onCopy onOpenInSqlPanel={props.onOpenInSqlPanel} />
           </Show>
           <Show when={tableFromArgs() && t()?.tool !== "execute_query"}>

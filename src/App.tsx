@@ -14,7 +14,7 @@ import { executeSql, importFileToWorkspace } from "./lib/duckdb";
 import { tryFormatDuckdbSql } from "./lib/sqlFormat";
 import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage, RegisterStatus, ImportProgress, DepInfo } from "./lib/types";
 import ChatView from "./components/ChatView";
-import { appendDelta, pushToolCall, mergeToolResult, normalizeMessage } from "./lib/chat";
+import { appendDelta, pushToolCall, pushChart, mergeToolResult, normalizeMessage } from "./lib/chat";
 import "./App.css";
 
 /**
@@ -258,6 +258,16 @@ export default function App() {
               sql: s.sql,
               table: s.table,
               elapsedMs: s.elapsedMs,
+            });
+          } else if (kind === "chart" && payload.segment) {
+            const s = payload.segment;
+            segments = pushChart(segments, {
+              id: s.id,
+              chartType: s.chartType,
+              title: s.title,
+              xField: s.xField,
+              yFields: s.yFields,
+              table: s.table,
             });
             // A DDL tool just finished (created/dropped a table or view) —
             // refresh the data tree immediately so the change is visible. Only
