@@ -30,7 +30,12 @@ export default function BottomConsole(props: {
     for (const l of props.logs) {
       if (l.status === "ok") ok++;
       else err++;
-      if (l.elapsedMs != null) lastMs = l.elapsedMs;
+      // `logs` is newest-first ([entry, ...prev]); take the FIRST entry that has
+      // a timing (the most recent run) and stop. Previously this overwrote on
+      // every iteration, ending up with the OLDEST timed entry's value.
+      if (lastMs === null && l.elapsedMs != null) {
+        lastMs = l.elapsedMs;
+      }
     }
     return { ok, err, lastMs };
   });

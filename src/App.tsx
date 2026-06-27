@@ -1016,11 +1016,19 @@ export default function App() {
         elapsedMs: res.elapsedMs,
       };
 
-      try {
-        const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
-        setSources(dbTables);
-      } catch (refreshErr) {
-        console.error("refresh table list failed:", refreshErr);
+      // Refresh the data tree only when the query may have changed the schema
+      // (DDL). A plain SELECT (e.g. table preview) leaves the tree unchanged, so
+      // we skip the `list_duckdb_tables` round-trip — that call walks DuckLake
+      // catalog metadata (slow, ~1s/custom table) and would block the left nav
+      // for a moment after every click.
+      const isDdl = /^\s*(create|drop|alter|insert|update|delete|truncate)\b/i.test(q);
+      if (isDdl) {
+        try {
+          const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
+          setSources(dbTables);
+        } catch (refreshErr) {
+          console.error("refresh table list failed:", refreshErr);
+        }
       }
     } catch (e) {
       const msg = String(e);
