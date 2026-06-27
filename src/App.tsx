@@ -177,6 +177,18 @@ export default function App() {
   onMount(async () => {
     void loadModelsFromSettings();
 
+    // Progressive row-count updates: each `row-count` event carries one table's
+    // count; merge it into sources without disturbing the rest.
+    const unlistenRowCount = await listen<{ name: string; count: number | null }>(
+      "row-count",
+      (event) => {
+        const { name, count } = event.payload;
+        setSources((prev) =>
+          prev.map((t) => (t.name === name ? { ...t, rowCountEstimate: count } : t))
+        );
+      }
+    );
+
     const unlistenAgent = await listen<any>("agent-event", (event) => {
       const payload = event.payload;
       const targetId = payload.taskId;
@@ -305,6 +317,7 @@ export default function App() {
     onCleanup(() => {
       window.removeEventListener("keydown", handleGlobalKeyDown);
       unlistenAgent();
+      unlistenRowCount();
     });
   });
 
@@ -348,15 +361,17 @@ export default function App() {
       // Background A: scan files + sync sources (may rebuild changed tables).
       void invoke<SourceTable[]>("register_workspace_sources", { workspacePath: ws.path })
         .then((synced) => {
-          if (currentWorkspace()?.path === ws.path) setSources(synced);
+          if (currentWorkspace()?.path === ws.path) {
+            setSources(synced);
+            // After sync, re-request row counts for the (possibly rebuilt) set.
+            void invoke("count_rows_stream", { names: synced.map((t) => t.name) })
+              .catch((err) => console.error("Failed to stream row counts:", err));
+          }
         })
         .catch((err) => console.error("Failed to sync workspace sources:", err));
-      // Background B: fill in row counts once computed.
-      void invoke<SourceTable[]>("list_duckdb_tables")
-        .then((withCounts) => {
-          if (currentWorkspace()?.path === ws.path) setSources(withCounts);
-        })
-        .catch((err) => console.error("Failed to load row counts:", err));
+      // Background B: fill in row counts progressively (per-table events).
+      void invoke("count_rows_stream", { names: fastTables.map((t) => t.name) })
+        .catch((err) => console.error("Failed to stream row counts:", err));
     } catch (err) {
       console.error("Failed to load workspace tasks & sources:", err);
     } finally {

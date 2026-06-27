@@ -136,9 +136,10 @@ pub async fn list_tables_fast(
 #[tauri::command]
 pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
     let ws_path = state.workspace_path.lock().await.clone();
-    // The source cache (hydrated by `register_workspace_sources`) already carries
-    // every source's columns/metadata without row counts. We reuse it to avoid
-    // re-running describe_view, and only fill in the (slow) row counts here.
+    // Row counts are intentionally NOT computed here — `count(*)` on materialized
+    // DuckLake tables scans parquet and blocks the connection for the whole list.
+    // Instead they're filled in progressively by `count_rows_stream` (per-table,
+    // yielding the lock between tables so user queries aren't blocked).
     let cached: Vec<SourceTable> = state.sources.lock().await.clone();
     run_blocking(state, move |conn| {
         let sqlite = db::get_db_conn()?;
@@ -148,26 +149,19 @@ pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<Source
         let cache_by_name: HashMap<String, &SourceTable> =
             cached.iter().map(|t| (t.name.clone(), t)).collect();
 
-        // 1. Registered sources (authoritative). Reuse the cached metadata
-        //    (columns etc.) and only compute the row count — the part the fast
-        //    initial render skipped.
+        // 1. Registered sources (authoritative). Reuse the cached metadata.
         let mut result = Vec::new();
         let mut known: HashSet<String> = HashSet::new();
         for rec in &records {
             known.insert(rec.table_name.clone());
-            let mut t = if let Some(c) = cache_by_name.get(&rec.table_name) {
-                (*c).clone()
-            } else {
-                match build_source_table_from_record(conn, rec) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        eprintln!("list: skip source {} (metadata failed): {}", rec.table_name, e);
-                        continue;
-                    }
-                }
-            };
-            t.row_count_estimate = count_rows(conn, &t.name);
-            result.push(t);
+            if let Some(t) = cache_by_name.get(&rec.table_name) {
+                result.push((*t).clone());
+                continue;
+            }
+            match build_source_table_from_record(conn, rec) {
+                Ok(t) => result.push(t),
+                Err(e) => eprintln!("list: skip source {} (metadata failed): {}", rec.table_name, e),
+            }
         }
 
         // 2. Custom tables/views not tracked in `sources`. Best-effort: each SQL
@@ -185,9 +179,7 @@ pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<Source
                     continue;
                 }
                 known.insert(name.clone());
-                // Custom objects aren't in the source cache, so hydrate here.
                 let cols = schema::describe_view(conn, &name).unwrap_or_default();
-                let count = count_rows(conn, &name);
                 result.push(SourceTable {
                     name: name.clone(),
                     label: name,
@@ -196,7 +188,7 @@ pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<Source
                     path: String::new(),
                     scan_path: String::new(),
                     partition_keys: Vec::new(),
-                    row_count_estimate: count,
+                    row_count_estimate: None,
                     columns: cols,
                 });
             }
@@ -263,8 +255,17 @@ pub async fn register_workspace_sources_inner(
 ) -> Result<Vec<SourceTable>, String> {
     let ws_dir = resolve_workspace_dir(&workspace_path)?;
 
-    // Rebuild the session connection and attach this workspace's DuckLake.
-    switch_workspace_lake(state, workspace_path.clone(), ws_dir.clone()).await?;
+    // Attach this workspace's DuckLake only when we're not already on it. On a
+    // fresh launch the default workspace is already attached (AppState::new /
+    // list_tables_fast), so the background sync skips the connection rebuild +
+    // source-clear that would otherwise make the table list flicker away and
+    // back. An explicit workspace switch still re-attaches here.
+    {
+        let current = state.workspace_path.lock().await.clone();
+        if current != workspace_path {
+            switch_workspace_lake(state, workspace_path.clone(), ws_dir.clone()).await?;
+        }
+    }
 
     // Scan the workspace dir for the files currently present (blocking).
     let ws_dir_for_scan = ws_dir.clone();
@@ -1004,6 +1005,37 @@ fn count_rows(conn: &duckdb::Connection, name: &str) -> Option<i64> {
     let n = name.replace('"', "\"\"");
     conn.query_row(&format!("SELECT count(*) FROM \"{n}\""), [], |r| r.get::<_, i64>(0))
         .ok()
+}
+
+/// Per-table row count emitted by `count_rows_stream`.
+#[derive(Clone, serde::Serialize)]
+struct RowCountEvent {
+    name: String,
+    count: Option<i64>,
+}
+
+/// Stream row counts table-by-table so the UI updates progressively and each
+/// table's `count(*)` releases the connection lock between tables (letting a
+/// user's own query slip in instead of waiting for every table to be counted).
+#[tauri::command]
+pub async fn count_rows_stream(
+    window: tauri::Window,
+    names: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    for name in names {
+        let conn = state.conn.clone();
+        let name_for_count = name.clone();
+        let count = tauri::async_runtime::spawn_blocking(move || -> Option<i64> {
+            let guard = conn.blocking_lock();
+            count_rows(&guard, &name_for_count)
+        })
+        .await
+        .ok()
+        .flatten();
+        let _ = window.emit("row-count", RowCountEvent { name, count });
+    }
+    Ok(())
 }
 
 /// Lazily INSTALL+LOAD the delta/excel extensions only if such a source is present.
