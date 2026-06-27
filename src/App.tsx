@@ -279,7 +279,12 @@ export default function App() {
       if (list && list.length > 0) {
         setWorkspaces(list);
         const defaultWS = list.find((w) => w.path === "DefaultProject") || list[0];
-        setCurrentWorkspace(defaultWS);
+        // Only switch if the resolved default differs from the current workspace
+        // — otherwise the unchanged-value set would re-trigger the workspace-load
+        // effect (duplicate scan/sync + list_tables_fast on startup).
+        if (currentWorkspace().path !== defaultWS.path) {
+          setCurrentWorkspace(defaultWS);
+        }
       }
     } catch (err) {
       console.error("Failed to load workspaces:", err);

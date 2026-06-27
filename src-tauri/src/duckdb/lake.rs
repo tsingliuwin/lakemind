@@ -106,20 +106,24 @@ pub fn attach_workspace_lake(conn: &Connection, ws_dir: &Path) -> AppResult<()> 
             return Err(AppError::new(format!("ATTACH ducklake 失败: {msg}")));
         }
         // Unclean shutdown (e.g. killing `tauri dev`) left a WAL that doesn't match
-        // the catalog — and the catalog may itself be truncated: a half-written
-        // catalog passes ATTACH but later fails mid-query with "Could not read
-        // enough bytes" when its stats are read. Dropping just the WAL and reusing
-        // the (possibly truncated) catalog is not safe; rebuild the whole lake store.
-        // Tables are re-materialized from the workspace source files on the next
-        // `register_workspace_sources`.
-        eprintln!("ducklake: WAL mismatch after crash, rebuilding lake store: {msg}");
-        let _ = std::fs::remove_file(&catalog);
+        // the catalog. The catalog file itself is usually intact (DuckLake's
+        // SQLite catalog checkpoints the committed state). Try the least-
+        // destructive recovery first: drop just the stale WAL and re-ATTACH. Only
+        // if that also fails (catalog genuinely corrupt/truncated) do we wipe the
+        // whole lake store and let `register_workspace_sources` re-materialize.
+        eprintln!("ducklake: WAL mismatch after crash, attempting WAL-only recovery: {msg}");
         let _ = std::fs::remove_file(&wal_str);
-        let _ = std::fs::remove_dir_all(&data_dir);
-        std::fs::create_dir_all(&data_dir)
-            .map_err(|e| AppError::new(format!("无法重建 lake 数据目录: {e}")))?;
-        conn.execute(&sql, [])
-            .map_err(|e| AppError::new(format!("ATTACH ducklake 失败（已尝试重建 lake store）: {e}")))?;
+        if conn.execute(&sql, []).is_ok() {
+            eprintln!("ducklake: recovered via WAL drop (catalog intact)");
+        } else {
+            eprintln!("ducklake: WAL drop failed, rebuilding lake store");
+            let _ = std::fs::remove_file(&catalog);
+            let _ = std::fs::remove_dir_all(&data_dir);
+            std::fs::create_dir_all(&data_dir)
+                .map_err(|e| AppError::new(format!("无法重建 lake 数据目录: {e}")))?;
+            conn.execute(&sql, [])
+                .map_err(|e| AppError::new(format!("ATTACH ducklake 失败（已尝试重建 lake store）: {e}")))?;
+        }
     }
 
     conn.execute("USE lake;", [])

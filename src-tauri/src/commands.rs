@@ -303,17 +303,19 @@ async fn sync_entries(
     drop(sqlite);
 
     // 2. Decide each entry's target view name + name_source.
-    //    - matched record already settled ("llm") → reuse its name, no LLM call.
-    //    - otherwise (new / "legacy" / "fallback") → choose_name (LLM → pinyin),
-    //      concurrent with per-call timeout.
+    //    - matched record already settled ("llm" OR "fallback") → reuse its name,
+    //      no LLM call. The name is stable and already in use; re-evaluating every
+    //      launch would re-run LLM/pinyin naming (slow) for no benefit.
+    //    - only "legacy" (pre-naming-module) names get re-evaluated.
     let mut decisions: Vec<(String, &'static str)> = vec![(String::new(), "fallback"); entries.len()];
     let need_choose: Vec<(usize, String)> = entries
         .iter()
         .enumerate()
         .filter_map(|(i, e)| {
             if let Some(rec) = existing_by_scan.get(&e.scan_path) {
-                if rec.name_source == "llm" {
-                    decisions[i] = (rec.table_name.clone(), "llm");
+                if rec.name_source == "llm" || rec.name_source == "fallback" {
+                    let src: &'static str = if rec.name_source == "llm" { "llm" } else { "fallback" };
+                    decisions[i] = (rec.table_name.clone(), src);
                     return None;
                 }
             }
@@ -362,6 +364,9 @@ async fn sync_entries(
         load_extensions_if_needed(&guard, &entries);
 
         let mut result: Vec<SourceTable> = Vec::new();
+        // Track whether any DuckLake mutation happened (rebuild/register/rename/
+        // orphan-drop). If nothing changed, we skip the (2s+) checkpoint.
+        let mut lake_mutated = false;
 
         // Present sources: rename to the target name if it changed, else hydrate
         // (rebuild the lake object if it vanished).
@@ -379,8 +384,13 @@ async fn sync_entries(
                 // see fresh data.
                 let fingerprint_unchanged =
                     rec.file_mtime == e.mtime && rec.file_size == e.file_size as i64;
-                let exists = table_exists_in_lake(&guard, &rec.table_name);
-                if exists && fingerprint_unchanged {
+                if fingerprint_unchanged {
+                    // Fingerprint matches → trust the persisted lake object exists
+                    // (the catalog is durable and was attached at startup). Skipping
+                    // the `table_exists_in_lake` check here is critical: that DuckLake
+                    // metadata query takes ~1s per table, so verifying all-reused
+                    // sources added seconds of pointless startup latency. Only when
+                    // the fingerprint differs do we query DuckLake (to decide rebuild).
                     println!("[sync] {}: fingerprint match → reuse (cached)", e.label);
                     if needs_rename {
                         // Rename preserves the data; no re-materialization.
@@ -389,6 +399,7 @@ async fn sync_entries(
                             result.push(build_source_table_from_record(&rec));
                             continue;
                         }
+                        lake_mutated = true;
                     }
                     // Update the record (name + label + name_source) and hydrate.
                     // Also refresh the file fingerprint from the scan entry so a
@@ -408,12 +419,9 @@ async fn sync_entries(
                     }
                     result.push(build_source_table_from_record(&updated));
                 } else {
-                    // Lake object vanished OR file changed — rebuild under the target name.
-                    println!(
-                        "[sync] {}: {} → rebuild",
-                        e.label,
-                        if exists { "fingerprint changed" } else { "lake object missing" }
-                    );
+                    // Fingerprint changed → rebuild under the target name.
+                    println!("[sync] {}: fingerprint changed → rebuild", e.label);
+                    lake_mutated = true;
                     let mut work = if storage == StorageKind::Table {
                         materialize_into_workspace(e, &ws_dir)?
                     } else {
@@ -466,6 +474,7 @@ async fn sync_entries(
                     match register::register(&guard, &work, storage) {
                         Ok(t) => {
                             println!("[sync] {}: new source → register", e.label);
+                            lake_mutated = true;
                             let rec = source_record_from(&t, e, now, src);
                             let _ = db::upsert_source(&sqlite, &ws_path, &rec);
                             result.push(t);
@@ -484,7 +493,18 @@ async fn sync_entries(
                 if !entry_scan_paths.contains(&rec.scan_path) {
                     drop_lake_object(&guard, &rec.table_name);
                     let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
+                    lake_mutated = true;
                 }
+            }
+        }
+
+        // Checkpoint the DuckLake catalog so newly-created/updated tables are
+        // flushed into lake.sqlite before the process exits. Skipped when nothing
+        // in the lake changed (the common all-reused startup) — a 2s+ checkpoint
+        // with no writes is pure waste.
+        if lake_mutated {
+            if let Err(e) = guard.execute("CHECKPOINT;", []) {
+                eprintln!("[sync] checkpoint warning: {e}");
             }
         }
 
@@ -976,17 +996,18 @@ fn rename_lake_object(
 /// cannot make an existing table look absent (which would trigger needless
 /// rebuilds on every sync).
 pub(crate) fn table_exists_in_lake(conn: &duckdb::Connection, name: &str) -> bool {
-    let n = name.replace('"', "\"\"");
-    let table_sql = format!(
-        "SELECT count(*) FROM duckdb_tables() WHERE database_name='lake' AND schema_name='main' AND table_name=\"{n}\""
-    );
-    if conn.query_row(&table_sql, [], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0 {
+    // Use a bound parameter (single-quoted literal) for the name. Previously this
+    // used a double-quoted identifier (`table_name="s_xxx"`) which DuckDB treats
+    // as a column reference, not a string value — the comparison silently failed
+    // (parse error → unwrap_or(0) → "not found"), forcing a rebuild every launch.
+    let table_sql =
+        "SELECT count(*) FROM duckdb_tables() WHERE database_name='lake' AND schema_name='main' AND table_name=?";
+    if conn.query_row(table_sql, [name], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0 {
         return true;
     }
-    let view_sql = format!(
-        "SELECT count(*) FROM duckdb_views() WHERE database_name='lake' AND schema_name='main' AND view_name=\"{n}\""
-    );
-    conn.query_row(&view_sql, [], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0
+    let view_sql =
+        "SELECT count(*) FROM duckdb_views() WHERE database_name='lake' AND schema_name='main' AND view_name=?";
+    conn.query_row(view_sql, [name], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0
 }
 
 fn count_rows(conn: &duckdb::Connection, name: &str) -> Option<i64> {
