@@ -1,5 +1,5 @@
 import { For, Show, createSignal } from "solid-js";
-import { typeFamily, type SourceTable } from "../lib/types";
+import { typeFamily, type SourceTable, type DepInfo } from "../lib/types";
 import { t } from "../lib/i18n";
 
 /**
@@ -10,11 +10,22 @@ import { t } from "../lib/i18n";
  * Clicking a column injects `SELECT col FROM "t" LIMIT 1000` into the editor;
  * the Preview button runs `SELECT * FROM "t" LIMIT 50` directly.
  */
+
+/** True if a dependency name is a lake table/view (clickable), false if it's a
+ * file name (not clickable — files aren't selectable in the data tree). */
+function isLakeObject(name: string): boolean {
+  return /^(s_|t_|v_|tmp_|tmp_v_)/.test(name);
+}
+
 export default function RightInspector(props: {
   table: SourceTable | null;
   busy: boolean;
   onInjectSql: (sql: string) => void;
   onPreview: (table: SourceTable) => void;
+  /** Upstream + downstream dependencies for the selected table. */
+  deps?: DepInfo | null;
+  /** Click a dependency name to select that table. */
+  onSelectDep?: (name: string) => void;
 }) {
   const [copied, setCopied] = createSignal(false);
   return (
@@ -74,7 +85,70 @@ export default function RightInspector(props: {
               </Show>
             </div>
 
-            <div class="ri-path" title={tVal().scanPath}>{tVal().scanPath}</div>
+            {/* Dependency info: upstream (what this depends on) + downstream
+                (what depends on this). Shown above the field list so the user
+                sees relationships before diving into columns. */}
+            <Show when={props.deps && (props.deps.upstreams.length > 0 || props.deps.downstreams.length > 0)}>
+              <div class="ri-section-label">依赖关系</div>
+              <div class="ri-deps">
+                <Show when={props.deps!.upstreams.length > 0}>
+                  <div class="ri-dep-group">
+                    <span class="ri-dep-label">↑ 上游</span>
+                    <div class="ri-dep-items">
+                      <For each={props.deps!.upstreams}>
+                        {(name) => {
+                          const clickable = isLakeObject(name);
+                          return (
+                            <div class="ri-dep-row">
+                              <Show
+                                when={clickable}
+                                fallback={
+                                  <div class="ri-dep-chip ri-dep-chip--static" title={name}>
+                                    <span class="ri-dep-chip-name">{name}</span>
+                                  </div>
+                                }
+                              >
+                                <button class="ri-dep-chip" title={`查看 ${name}`} onClick={() => props.onSelectDep?.(name)}>
+                                  <span class="ri-dep-chip-name">{name}</span>
+                                </button>
+                              </Show>
+                              <button class="ri-dep-copy" title="复制" onClick={() => void navigator.clipboard.writeText(name)}>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                </svg>
+                              </button>
+                            </div>
+                          );
+                        }}
+                      </For>
+                    </div>
+                  </div>
+                </Show>
+                <Show when={props.deps!.downstreams.length > 0}>
+                  <div class="ri-dep-group">
+                    <span class="ri-dep-label ri-dep-label--down">↓ 下游</span>
+                    <div class="ri-dep-items">
+                      <For each={props.deps!.downstreams}>
+                        {(name) => (
+                          <div class="ri-dep-row">
+                            <button class="ri-dep-chip ri-dep-chip--down" title={`查看 ${name}`} onClick={() => props.onSelectDep?.(name)}>
+                              <span class="ri-dep-chip-name">{name}</span>
+                            </button>
+                            <button class="ri-dep-copy" title="复制" onClick={() => void navigator.clipboard.writeText(name)}>
+                              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                              </svg>
+                            </button>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </div>
+                </Show>
+              </div>
+            </Show>
 
             <div class="ri-section-label">{t("fieldsLabel")}</div>
             <div class="ri-cols">

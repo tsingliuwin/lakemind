@@ -14,6 +14,12 @@ export interface ImportProgress {
   error?: string;
 }
 
+/** 依赖关系：上游（它依赖谁）+ 下游（谁依赖它）。 */
+export interface DepInfo {
+  upstreams: string[];
+  downstreams: string[];
+}
+
 /** 项目名行状态点的颜色档位：
  * - "all"     绿：应注册的数据文件已全部注册成表（或工作区无数据文件）
  * - "partial" 橙：仅部分注册成功

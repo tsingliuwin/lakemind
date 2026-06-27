@@ -34,6 +34,18 @@ struct ImportProgress {
     /// Error message (on "error").
     error: Option<String>,
 }
+
+/// Dependency info for a table/view: what it depends on (upstream) and what
+/// depends on it (downstream). Used by the right-inspector panel and the
+/// delete-protection check.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DepInfo {
+    /// Objects this table/view references in its SELECT (empty for s_ sources).
+    upstreams: Vec<String>,
+    /// Objects that reference this table/view in their SELECT.
+    downstreams: Vec<String>,
+}
 use tokio::sync::Mutex;
 
 use crate::db::{self, SourceRecord};
@@ -282,20 +294,25 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
             let Ok(mut stmt) = conn.prepare(sql) else { continue };
             let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else { continue };
             for name in rows.flatten() {
-                if known.contains(&name) { continue; }
+                if known.contains(&name) || name.starts_with("_tmp_") { continue; }
                 known.insert(name.clone());
                 let _ = conn.execute(&format!("SELECT * FROM \"{}\" LIMIT 0", name.replace('"', "\"\"")), []);
                 let t = hydrate_custom_object(conn, &sqlite, &ws_path2, &name);
                 // Backfill object_defs for views/tables that exist in the catalog
-                // but aren't tracked yet (e.g. created before object_defs existed,
-                // or after a table rebuild). This makes them appear in the next
-                // startup's fast list without a catalog query.
+                // but aren't tracked yet. Fetch the view's defining SQL from the
+                // DuckLake catalog so dependency extraction (extract_upstreams)
+                // works — without it, downstream maps would be empty.
                 if db::get_object_def(&sqlite, &ws_path2, &name).ok().flatten().is_none() {
+                    let view_sql = conn.query_row(
+                        "SELECT sql FROM duckdb_views() WHERE database_name='lake' AND schema_name='main' AND view_name=?",
+                        [&name],
+                        |r| r.get::<_, String>(0),
+                    ).unwrap_or_default();
                     let cols_json = serde_json::to_string(&t.columns).unwrap_or_else(|_| "[]".into());
                     let _ = sqlite.execute(
                         "INSERT OR IGNORE INTO object_defs (workspace_path, table_name, kind, select_sql, input_hash, created_at, columns, row_count)
-                         VALUES (?, ?, 'view', '', '', ?, ?, ?)",
-                        rusqlite::params![ws_path2, name, crate::commands::now_ms(), cols_json, t.row_count_estimate],
+                         VALUES (?, ?, 'view', ?, '', ?, ?, ?)",
+                        rusqlite::params![ws_path2, name, view_sql, crate::commands::now_ms(), cols_json, t.row_count_estimate],
                     );
                 }
                 result.push(t);
@@ -309,6 +326,80 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
     // Silence unused warning while keeping conn available for future use.
     let _ = conn;
     result
+}
+
+/// Get the upstream and downstream dependencies of a table/view.
+///
+/// - **upstreams**: for t_/v_ objects, the lake tables referenced in their
+///   `select_sql` (via `extract_upstreams`). For s_ source tables, the backing
+///   **file name** (from `sources.file_path`) — the file is the true upstream
+///   of a source table, making the dependency chain complete: file → s_ → t_/v_.
+/// - **downstreams**: objects whose `select_sql` references this table.
+#[tauri::command]
+pub async fn get_dependencies(
+    table_name: String,
+    state: State<'_, AppState>,
+) -> Result<DepInfo, String> {
+    let ws_path = state.workspace_path.lock().await.clone();
+    let sqlite = db::get_db_conn()?;
+
+    // Try object_defs first (t_/v_ have select_sql → real upstreams).
+    let mut upstreams = fingerprint::get_upstreams(&sqlite, &ws_path, &table_name);
+
+    // s_ source tables have no select_sql — their upstream is the source file.
+    if upstreams.is_empty() {
+        if let Ok(Some(rec)) = db::get_source_by_table(&sqlite, &ws_path, &table_name) {
+            if !rec.file_path.is_empty() {
+                let file_name = std::path::Path::new(&rec.file_path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&rec.file_path);
+                upstreams.push(file_name.to_string());
+            }
+        }
+    }
+
+    let downstreams = fingerprint::get_downstreams(&sqlite, &ws_path, &table_name);
+    Ok(DepInfo { upstreams, downstreams })
+}
+
+/// Delete a table/view safely. If any other object depends on it (downstream),
+/// the deletion is refused with a message listing the dependents — the user
+/// must delete those first. Otherwise drops the lake object + cleans up SQLite.
+#[tauri::command]
+pub async fn drop_table_safe(
+    table_name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let ws_path = state.workspace_path.lock().await.clone();
+
+    // Check downstream dependencies first — refuse if anything depends on this.
+    let sqlite = db::get_db_conn()?;
+    let downstreams = fingerprint::get_downstreams(&sqlite, &ws_path, &table_name);
+    if !downstreams.is_empty() {
+        return Err(format!(
+            "无法删除「{}」：被以下对象依赖：{}。请先删除下游对象。",
+            table_name,
+            downstreams.join("、")
+        ));
+    }
+
+    // Safe to delete — drop the lake object and clean up all SQLite mappings.
+    let conn = state.conn.clone();
+    let ws_path2 = ws_path.clone();
+    let name = table_name.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let guard = conn.blocking_lock();
+        drop_lake_object(&guard, &name);
+        let sqlite = db::get_db_conn()?;
+        let _ = db::delete_object_def(&sqlite, &ws_path2, &name);
+        let _ = db::delete_source_by_table(&sqlite, &ws_path2, &name);
+        let _ = guard.execute("CHECKPOINT;", []);
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("删除任务失败: {e}"))?;
+    Ok(())
 }
 
 // ===========================================================================

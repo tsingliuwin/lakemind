@@ -1703,6 +1703,7 @@ body.is-resizing-column * {
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+  min-width: 0;
 }
 
 .right .ri-copy-btn {
@@ -1859,6 +1860,141 @@ body.is-resizing-column * {
 .right .ri-footer .preview-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Dependency chips in the right inspector. */
+.ri-deps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 16px 8px;
+}
+.ri-dep-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ri-dep-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding-left: 2px;
+}
+.ri-dep-label--down {
+  color: var(--text-secondary);
+}
+.ri-dep-items {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-left: 2px;
+}
+.ri-dep-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+.ri-dep-chip {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: var(--font-mono, "SF Mono", Menlo, Consolas, monospace);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border: 1px solid var(--border-faint);
+  cursor: pointer;
+  outline: none;
+  overflow: hidden;
+  transition: background 0.15s ease;
+}
+.ri-dep-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.ri-dep-copy {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  outline: none;
+  border-radius: 3px;
+}
+.ri-dep-copy:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border: none;
+}
+.ri-dep-copy:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.ri-dep-chip:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border-faint) !important;
+}
+.ri-dep-chip--down {
+  color: var(--text-primary);
+}
+.ri-dep-chip--static {
+  cursor: default;
+}
+.ri-dep-chip--static:hover {
+  background: var(--bg-hover);
+}
+
+/* Right-click context menu for data tree leaves. */
+.ctx-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+.ctx-menu {
+  position: fixed;
+  z-index: 1001;
+  min-width: 120px;
+  padding: 4px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ctx-item {
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: left;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ctx-item:hover {
+  background: var(--bg-hover);
+}
+.ctx-item--danger {
+  color: #ef4444;
+}
+.ctx-item--danger:hover {
+  background: rgba(239, 68, 68, 0.12);
 }
 
 .ri-empty {

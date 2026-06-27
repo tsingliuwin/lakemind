@@ -12,7 +12,7 @@ import SettingsPage from "./components/SettingsPage";
 import HomePanel from "./components/HomePanel";
 import { executeSql, importFileToWorkspace } from "./lib/duckdb";
 import { tryFormatDuckdbSql } from "./lib/sqlFormat";
-import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage, RegisterStatus, ImportProgress } from "./lib/types";
+import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage, RegisterStatus, ImportProgress, DepInfo } from "./lib/types";
 import ChatView from "./components/ChatView";
 import { appendDelta, pushToolCall, mergeToolResult, normalizeMessage } from "./lib/chat";
 import "./App.css";
@@ -35,6 +35,8 @@ export default function App() {
   const [registerStatus, setRegisterStatus] = createSignal<RegisterStatus>("all");
   // Current file-import progress (null = idle). Driven by "import-progress" events.
   const [importStatus, setImportStatus] = createSignal<ImportProgress | null>(null);
+  // Dependency info for the selected table (upstreams + downstreams).
+  const [deps, setDeps] = createSignal<DepInfo | null>(null);
 
   /** Fetch registration coverage for a workspace and update the status dot. */
   async function refreshRegisterStatus(wsPath: string) {
@@ -1103,6 +1105,38 @@ export default function App() {
     setSelectedTable(t);
     setInspectorOpen(true);
     previewTable(t);
+    // Fetch dependency info (upstreams + downstreams) for the right panel.
+    void invoke<DepInfo>("get_dependencies", { tableName: t.name })
+      .then(setDeps)
+      .catch(() => setDeps(null));
+  }
+
+  /** Select a table by name (used by dependency chip clicks + context menu). */
+  function selectTableByName(name: string) {
+    const t = sources().find((s) => s.name === name);
+    if (t) selectTable(t);
+  }
+
+  /** Delete a table/view with dependency protection. */
+  async function deleteTable(name: string) {
+    try {
+      await invoke("drop_table_safe", { tableName: name });
+      // Refresh data tree after successful deletion.
+      const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
+      setSources(dbTables);
+      if (selectedTable()?.name === name) setSelectedTable(null);
+      setDeps(null);
+    } catch (e) {
+      // Dependency check failed — show the reason in the console.
+      const msg = typeof e === "string" ? e : "删除失败";
+      setLogs((prev) => [{
+        id: ++logSeq,
+        ts: Date.now(),
+        sql: `删除 ${name}`,
+        status: "error" as const,
+        error: msg,
+      }, ...prev].slice(0, 100));
+    }
   }
 
   /** 检查器 → 编辑器：注入一段 SQL（格式化后）并自动执行。 */
@@ -1216,6 +1250,7 @@ export default function App() {
           onNewChat={() => createTask("", "chat")}
           leftOpen={leftOpen()}
           importStatus={importStatus()}
+          onDeleteTable={deleteTable}
           onToggleLeft={() => setLeftOpen(!leftOpen())}
         />
 
@@ -1448,6 +1483,8 @@ export default function App() {
                 busy={busy()}
                 onInjectSql={injectSql}
                 onPreview={previewTable}
+                deps={deps()}
+                onSelectDep={selectTableByName}
               />
             </Show>
 

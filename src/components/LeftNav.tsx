@@ -51,6 +51,8 @@ export default function LeftNav(props: {
   onToggleLeft?: () => void;
   /** Current file-import progress (null = idle). Shown as a status banner. */
   importStatus?: ImportProgress | null;
+  /** Delete a table/view (with dependency check on the backend). */
+  onDeleteTable?: (name: string) => void;
 }) {
   // Group tables by their parent directory for a tree-like feel.
   // Two kinds of objects are collected into the flat (empty-path) group that
@@ -95,6 +97,8 @@ export default function LeftNav(props: {
   // The file the user actively clicked — shown with the same dark "selected"
   // treatment as task/data leaves (distinct from the soft cross-link highlight).
   const [selectedFile, setSelectedFile] = createSignal<string | null>(null);
+  // Right-click context menu for data tree leaves.
+  const [ctxMenu, setCtxMenu] = createSignal<{ name: string; x: number; y: number } | null>(null);
 
   const fileToTable = createMemo(() => {
     const m = new Map<string, string>();
@@ -257,6 +261,29 @@ export default function LeftNav(props: {
 
   return (
     <nav class="leftnav">
+      {/* Right-click context menu for data tree leaves. */}
+      <Show when={ctxMenu()}>
+        {(m) => (
+          <>
+            <div class="ctx-overlay" onClick={() => setCtxMenu(null)} />
+            <div
+              class="ctx-menu"
+              style={{ left: `${m().x}px`, top: `${m().y}px` }}
+            >
+              <button
+                class="ctx-item ctx-item--danger"
+                onClick={() => {
+                  const name = m().name;
+                  setCtxMenu(null);
+                  props.onDeleteTable?.(name);
+                }}
+              >
+                删除
+              </button>
+            </div>
+          </>
+        )}
+      </Show>
       {/* ZCode style top header with Z logo and history arrows */}
       <div class="ln-top-bar" classList={{ "mac-nav": isMac }}>
         <Show when={!isMac}>
@@ -596,6 +623,10 @@ export default function LeftNav(props: {
                                   disabled={props.busy}
                                   title={t.path.split("/").pop() ?? t.path}
                                   onClick={() => handleSelectTable(t)}
+                                  onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    setCtxMenu({ name: t.name, x: e.clientX, y: e.clientY });
+                                  }}
                                   style={{
                                     "padding-left": "8px",
                                     background:

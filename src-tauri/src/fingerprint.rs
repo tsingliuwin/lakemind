@@ -212,3 +212,41 @@ fn list_all_object_hashes(conn: &Connection, ws_path: &str) -> HashMap<String, S
     }
     out
 }
+
+/// Get the upstream object names for a given table/view by looking up its
+/// `object_defs.select_sql` and running `extract_upstreams`. Returns empty for
+/// source tables (s_*) which have no select_sql — they depend on files, not
+/// other lake objects.
+pub fn get_upstreams(conn: &Connection, ws_path: &str, table_name: &str) -> Vec<String> {
+    let Ok(def) = crate::db::get_object_def(conn, ws_path, table_name) else {
+        return Vec::new();
+    };
+    match def {
+        Some(d) => extract_upstreams(&d.select_sql),
+        None => Vec::new(),
+    }
+}
+
+/// Build a reverse dependency map: for each object in `object_defs`, extract its
+/// upstreams; then invert so the result maps `upstream_name → [objects that
+/// depend on it]`. This lets us answer "who depends on table X?" in O(1).
+pub fn build_downstream_map(conn: &Connection, ws_path: &str) -> HashMap<String, Vec<String>> {
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    let Ok(defs) = crate::db::list_object_defs(conn, ws_path) else {
+        return map;
+    };
+    for d in &defs {
+        let ups = extract_upstreams(&d.select_sql);
+        for u in ups {
+            map.entry(u).or_default().push(d.table_name.clone());
+        }
+    }
+    map
+}
+
+/// Get the downstream objects that depend on `table_name`. Convenience wrapper
+/// around `build_downstream_map` for a single lookup.
+pub fn get_downstreams(conn: &Connection, ws_path: &str, table_name: &str) -> Vec<String> {
+    let map = build_downstream_map(conn, ws_path);
+    map.get(table_name).cloned().unwrap_or_default()
+}
