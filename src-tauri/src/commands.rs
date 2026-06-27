@@ -19,6 +19,7 @@ use tokio::sync::Mutex;
 
 use crate::db::{self, SourceRecord};
 use crate::duckdb::{execute, naming, register, scan, schema};
+use crate::fingerprint;
 use crate::error::{AppError, AppResult};
 use crate::model::{SourceKind, SourceTable, SqlResult, StorageKind};
 use crate::state::AppState;
@@ -71,23 +72,40 @@ const CUSTOM_TABLE_SQLS: [&str; 2] = [
 /// `register_workspace_sources`. This lets the table list appear in ~instantly
 /// Millisecond-fast startup table list: a **pure SQLite read**, zero DuckDB.
 ///
-/// Columns and row counts are cached in the `sources` table (valid as long as
-/// the source fingerprint matches, refreshed on rebuild), so we can render the
-/// full list — names, columns, row counts — without touching DuckDB at all.
-/// Custom tables/views (t_/v_) aren't in `sources`; they're picked up by the
-/// background `register_workspace_sources` and merged in when it completes.
+/// Both `sources` (s_ tables) and `object_defs` (agent-created t_/v_ views)
+/// cache columns + row counts keyed by fingerprint, so we can render the full
+/// list — sources AND views, with columns + row counts — without touching
+/// DuckDB at all. Views appear just as fast as source tables.
 #[tauri::command]
 pub async fn list_tables_fast(
     workspace_path: String,
     _state: State<'_, AppState>,
 ) -> Result<Vec<SourceTable>, String> {
     let start = std::time::Instant::now();
-    // No lake attach, no DuckDB connection — just the SQLite mapping cache.
+    // No lake attach, no DuckDB connection — just the SQLite caches.
     let sqlite = db::get_db_conn()?;
     let records = db::list_sources(&sqlite, &workspace_path)?;
-    let result: Vec<SourceTable> = records.iter().map(build_source_table_from_record).collect();
+    let mut result: Vec<SourceTable> = records.iter().map(build_source_table_from_record).collect();
+
+    // Agent-created views/tables from object_defs (cached columns + row count,
+    // valid as long as input_hash matches — verified later by warmup/sync).
+    let defs = db::list_object_defs(&sqlite, &workspace_path)?;
+    for d in &defs {
+        result.push(SourceTable {
+            name: d.table_name.clone(),
+            label: d.table_name.clone(),
+            kind: SourceKind::View,
+            storage: StorageKind::Custom,
+            path: String::new(),
+            scan_path: String::new(),
+            partition_keys: Vec::new(),
+            row_count_estimate: d.row_count,
+            columns: d.columns.clone(),
+        });
+    }
+
     eprintln!(
-        "[boot] list_tables_fast: {} tables from SQLite in {}ms",
+        "[boot] list_tables_fast: {} objects from SQLite in {}ms",
         result.len(),
         start.elapsed().as_millis()
     );
@@ -132,19 +150,7 @@ pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<Source
                     continue;
                 }
                 known.insert(name.clone());
-                let cols = schema::describe_view(conn, &name).unwrap_or_default();
-                let count = count_rows(conn, &name);
-                result.push(SourceTable {
-                    name: name.clone(),
-                    label: name,
-                    kind: SourceKind::View,
-                    storage: StorageKind::Custom,
-                    path: String::new(),
-                    scan_path: String::new(),
-                    partition_keys: Vec::new(),
-                    row_count_estimate: count,
-                    columns: cols,
-                });
+                result.push(hydrate_custom_object(conn, &sqlite, &ws_path, &name));
             }
         }
         Ok(result)
@@ -260,19 +266,20 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
                 if known.contains(&name) { continue; }
                 known.insert(name.clone());
                 let _ = conn.execute(&format!("SELECT * FROM \"{}\" LIMIT 0", name.replace('"', "\"\"")), []);
-                let cols = schema::describe_view(conn, &name).unwrap_or_default();
-                let count = count_rows(conn, &name);
-                result.push(SourceTable {
-                    name: name.clone(),
-                    label: name,
-                    kind: SourceKind::View,
-                    storage: StorageKind::Custom,
-                    path: String::new(),
-                    scan_path: String::new(),
-                    partition_keys: Vec::new(),
-                    row_count_estimate: count,
-                    columns: cols,
-                });
+                let t = hydrate_custom_object(conn, &sqlite, &ws_path2, &name);
+                // Backfill object_defs for views/tables that exist in the catalog
+                // but aren't tracked yet (e.g. created before object_defs existed,
+                // or after a table rebuild). This makes them appear in the next
+                // startup's fast list without a catalog query.
+                if db::get_object_def(&sqlite, &ws_path2, &name).ok().flatten().is_none() {
+                    let cols_json = serde_json::to_string(&t.columns).unwrap_or_else(|_| "[]".into());
+                    let _ = sqlite.execute(
+                        "INSERT OR IGNORE INTO object_defs (workspace_path, table_name, kind, select_sql, input_hash, created_at, columns, row_count)
+                         VALUES (?, ?, 'view', '', '', ?, ?, ?)",
+                        rusqlite::params![ws_path2, name, crate::commands::now_ms(), cols_json, t.row_count_estimate],
+                    );
+                }
+                result.push(t);
             }
         }
         Ok(result)
@@ -1148,6 +1155,50 @@ fn count_rows(conn: &duckdb::Connection, name: &str) -> Option<i64> {
     let n = name.replace('"', "\"\"");
     conn.query_row(&format!("SELECT count(*) FROM \"{n}\""), [], |r| r.get::<_, i64>(0))
         .ok()
+}
+
+/// Build a SourceTable for a custom (agent-created) table/view. Prefers the
+/// `object_defs` cache when the upstream fingerprint still matches — then
+/// columns + row_count come straight from SQLite, no DuckDB query. Falls back to
+/// live `describe_view` + `count_rows` when the cache is missing or stale.
+fn hydrate_custom_object(
+    conn: &duckdb::Connection,
+    sqlite: &rusqlite::Connection,
+    ws_path: &str,
+    name: &str,
+) -> SourceTable {
+    // Try the cache: valid only if the persisted input_hash still matches.
+    if let Ok(Some(def)) = db::get_object_def(sqlite, ws_path, name) {
+        let upstreams = fingerprint::extract_upstreams(&def.select_sql);
+        let current_hash = fingerprint::compute_input_hash(sqlite, ws_path, &upstreams);
+        if current_hash == def.input_hash {
+            return SourceTable {
+                name: name.to_string(),
+                label: name.to_string(),
+                kind: SourceKind::View,
+                storage: StorageKind::Custom,
+                path: String::new(),
+                scan_path: String::new(),
+                partition_keys: Vec::new(),
+                row_count_estimate: def.row_count,
+                columns: def.columns,
+            };
+        }
+    }
+    // Cache miss or stale → live hydrate.
+    let cols = schema::describe_view(conn, name).unwrap_or_default();
+    let count = count_rows(conn, name);
+    SourceTable {
+        name: name.to_string(),
+        label: name.to_string(),
+        kind: SourceKind::View,
+        storage: StorageKind::Custom,
+        path: String::new(),
+        scan_path: String::new(),
+        partition_keys: Vec::new(),
+        row_count_estimate: count,
+        columns: cols,
+    }
 }
 
 /// Lazily INSTALL+LOAD the delta/excel extensions only if such a source is present.

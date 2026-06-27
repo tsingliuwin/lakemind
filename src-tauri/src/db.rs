@@ -217,17 +217,23 @@ pub struct ObjectDef {
     pub select_sql: String,
     pub input_hash: String,
     pub created_at: i64,
+    /// Cached column structure (JSON). Valid as long as input_hash matches.
+    pub columns: Vec<crate::model::ColumnInfo>,
+    /// Cached row count. Valid as long as input_hash matches.
+    pub row_count: Option<i64>,
 }
 
 /// Insert or update an object definition (keyed by `(workspace_path, table_name)`).
 pub fn upsert_object_def(conn: &Connection, ws_path: &str, d: &ObjectDef) -> Result<(), String> {
+    let cols = serde_json::to_string(&d.columns).unwrap_or_else(|_| "[]".into());
     conn.execute(
-        "INSERT INTO object_defs (workspace_path, table_name, kind, select_sql, input_hash, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        "INSERT INTO object_defs (workspace_path, table_name, kind, select_sql, input_hash, created_at, columns, row_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(workspace_path, table_name) DO UPDATE SET
             kind=excluded.kind, select_sql=excluded.select_sql,
-            input_hash=excluded.input_hash, created_at=excluded.created_at",
-        rusqlite::params![ws_path, d.table_name, d.kind, d.select_sql, d.input_hash, d.created_at],
+            input_hash=excluded.input_hash, created_at=excluded.created_at,
+            columns=excluded.columns, row_count=excluded.row_count",
+        rusqlite::params![ws_path, d.table_name, d.kind, d.select_sql, d.input_hash, d.created_at, cols, d.row_count],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -241,18 +247,23 @@ pub fn get_object_def(
 ) -> Result<Option<ObjectDef>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT table_name, kind, select_sql, input_hash, created_at
+            "SELECT table_name, kind, select_sql, input_hash, created_at, columns, row_count
              FROM object_defs WHERE workspace_path = ? AND table_name = ?",
         )
         .map_err(|e| e.to_string())?;
     let mut rows = stmt
         .query_map(rusqlite::params![ws_path, table_name], |row| {
+            let cols_json: String = row.get(5).unwrap_or_else(|_| "[]".to_string());
+            let columns: Vec<crate::model::ColumnInfo> =
+                serde_json::from_str(&cols_json).unwrap_or_default();
             Ok(ObjectDef {
                 table_name: row.get(0)?,
                 kind: row.get(1)?,
                 select_sql: row.get(2)?,
                 input_hash: row.get(3)?,
                 created_at: row.get(4)?,
+                columns,
+                row_count: row.get(6).ok(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -274,6 +285,39 @@ pub fn delete_object_def(
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// All object definitions for one workspace, in creation order.
+pub fn list_object_defs(conn: &Connection, ws_path: &str) -> Result<Vec<ObjectDef>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT table_name, kind, select_sql, input_hash, created_at, columns, row_count
+             FROM object_defs WHERE workspace_path = ? ORDER BY created_at ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([ws_path], |row| {
+            let cols_json: String = row.get(5).unwrap_or_else(|_| "[]".to_string());
+            let columns: Vec<crate::model::ColumnInfo> =
+                serde_json::from_str(&cols_json).unwrap_or_default();
+            Ok(ObjectDef {
+                table_name: row.get(0)?,
+                kind: row.get(1)?,
+                select_sql: row.get(2)?,
+                input_hash: row.get(3)?,
+                created_at: row.get(4)?,
+                columns,
+                row_count: row.get(6).ok(),
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for r in rows {
+        if let Ok(d) = r {
+            out.push(d);
+        }
+    }
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -405,6 +449,8 @@ pub fn init_global_db() -> Result<(), String> {
             select_sql      TEXT NOT NULL,
             input_hash      TEXT NOT NULL,
             created_at      INTEGER NOT NULL,
+            columns         TEXT NOT NULL DEFAULT '[]',
+            row_count       INTEGER,
             PRIMARY KEY (workspace_path, table_name),
             FOREIGN KEY(workspace_path) REFERENCES workspaces(path) ON DELETE CASCADE
         )",

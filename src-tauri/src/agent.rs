@@ -851,11 +851,28 @@ impl DdlToolShared {
         let select_sql = select_sql.to_string();
         let kind = kind.to_string();
         let created_at = now_ms();
+        let conn = self.app_state.conn.clone();
         let _ = tokio::task::spawn_blocking(move || -> Result<(), String> {
             let sqlite = crate::db::get_db_conn()?;
             let upstreams = crate::fingerprint::extract_upstreams(&select_sql);
             let input_hash =
                 crate::fingerprint::compute_input_hash(&sqlite, &ws_path, &upstreams);
+            // Capture the freshly-built object's columns + row count so the
+            // data-tree list can read them from SQLite (no DuckDB query) as long
+            // as the upstream fingerprint is unchanged.
+            let (columns, row_count) = {
+                let guard = conn.blocking_lock();
+                let cols = crate::duckdb::schema::describe_view(&guard, &name).unwrap_or_default();
+                let escaped = name.replace('"', "\"\"");
+                let cnt = guard
+                    .query_row(
+                        &format!("SELECT count(*) FROM \"{}\"", escaped),
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .ok();
+                (cols, cnt)
+            };
             crate::db::upsert_object_def(
                 &sqlite,
                 &ws_path,
@@ -865,6 +882,8 @@ impl DdlToolShared {
                     select_sql,
                     input_hash,
                     created_at,
+                    columns,
+                    row_count,
                 },
             )
         })
