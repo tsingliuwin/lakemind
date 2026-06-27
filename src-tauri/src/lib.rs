@@ -55,7 +55,6 @@ pub fn run() {
             commands::delete_task,
             commands::list_duckdb_tables,
             commands::list_tables_fast,
-            commands::count_rows_stream,
             commands::get_app_config,
             commands::set_app_config,
             commands::load_settings_json,

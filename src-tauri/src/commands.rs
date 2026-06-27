@@ -10,7 +10,7 @@
 //! * **FS** — native directory picker, read a workspace folder.
 //! * **Workspace / Task** — registry + per-workspace SQL/chat task persistence.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -69,63 +69,29 @@ const CUSTOM_TABLE_SQLS: [&str; 2] = [
 /// Row counts are left as `None` — they're filled in later by the async
 /// `list_duckdb_tables`. File scanning + sync still run in the background via
 /// `register_workspace_sources`. This lets the table list appear in ~instantly
-/// instead of blocking on a full directory walk + row counts.
+/// Millisecond-fast startup table list: a **pure SQLite read**, zero DuckDB.
+///
+/// Columns and row counts are cached in the `sources` table (valid as long as
+/// the source fingerprint matches, refreshed on rebuild), so we can render the
+/// full list — names, columns, row counts — without touching DuckDB at all.
+/// Custom tables/views (t_/v_) aren't in `sources`; they're picked up by the
+/// background `register_workspace_sources` and merged in when it completes.
 #[tauri::command]
 pub async fn list_tables_fast(
     workspace_path: String,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<Vec<SourceTable>, String> {
-    // Attach this workspace's lake if we're not already on it. On a fresh launch
-    // the default workspace is already attached (AppState::new), so this is a
-    // no-op then; it only re-attaches on an explicit workspace switch.
-    {
-        let current = state.workspace_path.lock().await.clone();
-        if current != workspace_path {
-            let ws_dir = resolve_workspace_dir(&workspace_path)?;
-            switch_workspace_lake(&state, workspace_path.clone(), ws_dir).await?;
-        }
-    }
-
-    let ws_path = workspace_path;
-    run_blocking(state, move |conn| {
-        let sqlite = db::get_db_conn()?;
-        let records = db::list_sources(&sqlite, &ws_path)?;
-
-        let mut result = Vec::new();
-        let mut known: HashSet<String> = HashSet::new();
-        for rec in &records {
-            known.insert(rec.table_name.clone());
-            // describe_view only; no count_rows.
-            match build_source_table_from_record(conn, rec) {
-                Ok(t) => result.push(t),
-                Err(e) => eprintln!("fast list: skip source {} (metadata failed): {}", rec.table_name, e),
-            }
-        }
-
-        // Custom tables/views from the lake catalog (no row count).
-        for sql in CUSTOM_TABLE_SQLS {
-            let Ok(mut stmt) = conn.prepare(sql) else { continue };
-            let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else { continue };
-            for name in rows.flatten() {
-                if known.contains(&name) { continue; }
-                known.insert(name.clone());
-                let cols = schema::describe_view(conn, &name).unwrap_or_default();
-                result.push(SourceTable {
-                    name: name.clone(),
-                    label: name,
-                    kind: SourceKind::View,
-                    storage: StorageKind::Custom,
-                    path: String::new(),
-                    scan_path: String::new(),
-                    partition_keys: Vec::new(),
-                    row_count_estimate: None,
-                    columns: cols,
-                });
-            }
-        }
-        Ok(result)
-    })
-    .await
+    let start = std::time::Instant::now();
+    // No lake attach, no DuckDB connection — just the SQLite mapping cache.
+    let sqlite = db::get_db_conn()?;
+    let records = db::list_sources(&sqlite, &workspace_path)?;
+    let result: Vec<SourceTable> = records.iter().map(build_source_table_from_record).collect();
+    eprintln!(
+        "[boot] list_tables_fast: {} tables from SQLite in {}ms",
+        result.len(),
+        start.elapsed().as_millis()
+    );
+    Ok(result)
 }
 
 /// All tables/views for the current workspace: registered sources (from the
@@ -136,32 +102,19 @@ pub async fn list_tables_fast(
 #[tauri::command]
 pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
     let ws_path = state.workspace_path.lock().await.clone();
-    // Row counts are intentionally NOT computed here — `count(*)` on materialized
-    // DuckLake tables scans parquet and blocks the connection for the whole list.
-    // Instead they're filled in progressively by `count_rows_stream` (per-table,
-    // yielding the lock between tables so user queries aren't blocked).
-    let cached: Vec<SourceTable> = state.sources.lock().await.clone();
+    // Registered sources come straight from the SQLite cache (columns + row
+    // count stored), so only custom tables/views need a live DuckLake catalog
+    // query here. Used to refresh after DDL/import.
     run_blocking(state, move |conn| {
         let sqlite = db::get_db_conn()?;
         let records = db::list_sources(&sqlite, &ws_path)?;
 
-        // Index the cache by table name for O(1) lookup.
-        let cache_by_name: HashMap<String, &SourceTable> =
-            cached.iter().map(|t| (t.name.clone(), t)).collect();
-
-        // 1. Registered sources (authoritative). Reuse the cached metadata.
+        // 1. Registered sources (authoritative). Pure SQLite cache.
         let mut result = Vec::new();
         let mut known: HashSet<String> = HashSet::new();
         for rec in &records {
             known.insert(rec.table_name.clone());
-            if let Some(t) = cache_by_name.get(&rec.table_name) {
-                result.push((*t).clone());
-                continue;
-            }
-            match build_source_table_from_record(conn, rec) {
-                Ok(t) => result.push(t),
-                Err(e) => eprintln!("list: skip source {} (metadata failed): {}", rec.table_name, e),
-            }
+            result.push(build_source_table_from_record(rec));
         }
 
         // 2. Custom tables/views not tracked in `sources`. Best-effort: each SQL
@@ -339,6 +292,7 @@ async fn sync_entries(
     prune_orphans: bool,
 ) -> AppResult<Vec<SourceTable>> {
     use std::collections::{HashMap, HashSet};
+    let sync_start = std::time::Instant::now();
 
     // 1. Load existing mappings, indexed by scan_path (stable file identity).
     let sqlite = db::get_db_conn()?;
@@ -422,36 +376,44 @@ async fn sync_entries(
                 // A source is reused as-is only when its lake object still exists
                 // AND its file fingerprint (mtime+size) is unchanged. A changed
                 // file falls through to the rebuild branch so downstream objects
-                // see fresh data (previously the change was silently ignored).
+                // see fresh data.
                 let fingerprint_unchanged =
                     rec.file_mtime == e.mtime && rec.file_size == e.file_size as i64;
-                if table_exists_in_lake(&guard, &rec.table_name) && fingerprint_unchanged {
+                let exists = table_exists_in_lake(&guard, &rec.table_name);
+                if exists && fingerprint_unchanged {
+                    println!("[sync] {}: fingerprint match → reuse (cached)", e.label);
                     if needs_rename {
                         // Rename preserves the data; no re-materialization.
                         if let Err(err) = rename_lake_object(&guard, &rec.table_name, target, storage) {
                             eprintln!("rename {} -> {} failed: {err}", rec.table_name, target);
-                            if let Ok(t) = build_source_table_from_record(&guard, &rec) {
-                                result.push(t);
-                            }
+                            result.push(build_source_table_from_record(&rec));
                             continue;
                         }
                     }
                     // Update the record (name + label + name_source) and hydrate.
+                    // Also refresh the file fingerprint from the scan entry so a
+                    // previously-uninitialized (migrated) row gets its real
+                    // mtime/size recorded without triggering a rebuild.
                     let mut updated = rec.clone();
                     updated.table_name = target.clone();
                     updated.label = e.label.clone();
                     updated.name_source = src.to_string();
+                    updated.file_mtime = e.mtime;
+                    updated.file_size = e.file_size as i64;
                     let _ = db::upsert_source(&sqlite, &ws_path, &updated);
                     // upsert is keyed by (ws, table_name); if renamed, the old row
                     // under the old name is now stale — drop it.
                     if needs_rename {
                         let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
                     }
-                    if let Ok(t) = build_source_table_from_record(&guard, &updated) {
-                        result.push(t);
-                    }
+                    result.push(build_source_table_from_record(&updated));
                 } else {
                     // Lake object vanished OR file changed — rebuild under the target name.
+                    println!(
+                        "[sync] {}: {} → rebuild",
+                        e.label,
+                        if exists { "fingerprint changed" } else { "lake object missing" }
+                    );
                     let mut work = if storage == StorageKind::Table {
                         materialize_into_workspace(e, &ws_dir)?
                     } else {
@@ -470,21 +432,46 @@ async fn sync_entries(
                     }
                 }
             } else {
-                // New source: register under the target name.
+                // New source. If the lake object already exists under the target
+                // name (e.g. the SQLite mapping was cleared but the DuckLake table
+                // survived), reuse it and just record the mapping + fingerprint —
+                // no re-materialization needed. Only build from scratch when the
+                // object is genuinely absent.
                 let storage = decide_storage(e);
-                let mut work = if storage == StorageKind::Table {
-                    materialize_into_workspace(e, &ws_dir)?
+                if table_exists_in_lake(&guard, target) {
+                    println!("[sync] {}: new mapping, lake object exists → adopt", e.label);
+                    let cols = schema::describe_view(&guard, target).unwrap_or_default();
+                    let count = count_rows(&guard, target);
+                    let t = SourceTable {
+                        name: target.clone(),
+                        label: e.label.clone(),
+                        kind: e.kind.clone(),
+                        storage,
+                        path: e.path.clone(),
+                        scan_path: e.scan_path.clone(),
+                        partition_keys: e.partition_keys.clone(),
+                        row_count_estimate: count,
+                        columns: cols,
+                    };
+                    let rec = source_record_from(&t, e, now, src);
+                    let _ = db::upsert_source(&sqlite, &ws_path, &rec);
+                    result.push(t);
                 } else {
-                    e.clone()
-                };
-                work.view_name = target.clone();
-                match register::register(&guard, &work, storage) {
-                    Ok(t) => {
-                        let rec = source_record_from(&t, e, now, src);
-                        let _ = db::upsert_source(&sqlite, &ws_path, &rec);
-                        result.push(t);
+                    let mut work = if storage == StorageKind::Table {
+                        materialize_into_workspace(e, &ws_dir)?
+                    } else {
+                        e.clone()
+                    };
+                    work.view_name = target.clone();
+                    match register::register(&guard, &work, storage) {
+                        Ok(t) => {
+                            println!("[sync] {}: new source → register", e.label);
+                            let rec = source_record_from(&t, e, now, src);
+                            let _ = db::upsert_source(&sqlite, &ws_path, &rec);
+                            result.push(t);
+                        }
+                        Err(err) => eprintln!("register {} failed: {err}", e.label),
                     }
-                    Err(err) => eprintln!("register {} failed: {err}", e.label),
                 }
             }
         }
@@ -507,6 +494,7 @@ async fn sync_entries(
         let mut cache = sources_cache.blocking_lock();
         cache.clear();
         cache.extend(result.iter().cloned());
+        eprintln!("[sync] done: {} tables in {}ms", result.len(), sync_start.elapsed().as_millis());
         Ok(result)
     })
     .await;
@@ -1007,37 +995,6 @@ fn count_rows(conn: &duckdb::Connection, name: &str) -> Option<i64> {
         .ok()
 }
 
-/// Per-table row count emitted by `count_rows_stream`.
-#[derive(Clone, serde::Serialize)]
-struct RowCountEvent {
-    name: String,
-    count: Option<i64>,
-}
-
-/// Stream row counts table-by-table so the UI updates progressively and each
-/// table's `count(*)` releases the connection lock between tables (letting a
-/// user's own query slip in instead of waiting for every table to be counted).
-#[tauri::command]
-pub async fn count_rows_stream(
-    window: tauri::Window,
-    names: Vec<String>,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    for name in names {
-        let conn = state.conn.clone();
-        let name_for_count = name.clone();
-        let count = tauri::async_runtime::spawn_blocking(move || -> Option<i64> {
-            let guard = conn.blocking_lock();
-            count_rows(&guard, &name_for_count)
-        })
-        .await
-        .ok()
-        .flatten();
-        let _ = window.emit("row-count", RowCountEvent { name, count });
-    }
-    Ok(())
-}
-
 /// Lazily INSTALL+LOAD the delta/excel extensions only if such a source is present.
 fn load_extensions_if_needed(conn: &duckdb::Connection, entries: &[scan::ScanEntry]) {
     let needs_delta = entries.iter().any(|e| e.kind == SourceKind::Delta);
@@ -1052,15 +1009,12 @@ fn load_extensions_if_needed(conn: &duckdb::Connection, entries: &[scan::ScanEnt
     }
 }
 
-/// Hydrate a [`SourceTable`] from a mapping record + live DuckLake metadata.
-///
-/// Intentionally does NOT count rows — `SELECT count(*)` on materialized
-/// DuckLake tables scans parquet, which is slow for large lakes. Row counts are
-/// filled in lazily by `list_duckdb_tables` (called async after the fast
-/// initial render) so the table list appears instantly with `row_count = None`.
-fn build_source_table_from_record(conn: &duckdb::Connection, rec: &SourceRecord) -> AppResult<SourceTable> {
-    let columns = schema::describe_view(conn, &rec.table_name).unwrap_or_default();
-    Ok(SourceTable {
+/// Build a [`SourceTable`] purely from the cached mapping record — no DuckDB
+/// query at all. Both `columns` and `row_count_estimate` come straight from
+/// SQLite; they're valid as long as the source fingerprint matches (refreshed on
+/// rebuild). This is what makes the startup list millisecond-fast.
+fn build_source_table_from_record(rec: &SourceRecord) -> SourceTable {
+    SourceTable {
         name: rec.table_name.clone(),
         label: rec.label.clone(),
         kind: str_to_kind(&rec.kind),
@@ -1068,14 +1022,15 @@ fn build_source_table_from_record(conn: &duckdb::Connection, rec: &SourceRecord)
         path: rec.file_path.clone(),
         scan_path: rec.scan_path.clone(),
         partition_keys: rec.partition_keys.clone(),
-        row_count_estimate: None,
-        columns,
-    })
+        row_count_estimate: rec.row_count,
+        columns: rec.columns.clone(),
+    }
 }
 
 /// Build a mapping record from a freshly-registered source. The file
-/// fingerprint (mtime/size) is taken from the originating `ScanEntry` so the
-/// next sync can detect content changes and trigger a rebuild.
+/// fingerprint (mtime/size) is taken from the originating `ScanEntry`; the
+/// cached columns + row count come from the `SourceTable` (already computed by
+/// `register`) so the startup list can skip DuckDB entirely.
 fn source_record_from(t: &SourceTable, e: &scan::ScanEntry, created_at: i64, name_source: &str) -> SourceRecord {
     SourceRecord {
         table_name: t.name.clone(),
@@ -1089,6 +1044,8 @@ fn source_record_from(t: &SourceTable, e: &scan::ScanEntry, created_at: i64, nam
         name_source: name_source.to_string(),
         file_mtime: e.mtime,
         file_size: e.file_size as i64,
+        columns: t.columns.clone(),
+        row_count: t.row_count_estimate,
     }
 }
 

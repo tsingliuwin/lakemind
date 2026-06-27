@@ -72,20 +72,28 @@ pub struct SourceRecord {
     pub file_mtime: i64,
     /// Source file size in bytes (sum for multi-file globs). Companion to mtime.
     pub file_size: i64,
+    /// Cached column structure (JSON). Valid as long as the fingerprint matches;
+    /// refreshed on rebuild. Lets the startup list skip `describe_view`.
+    pub columns: Vec<crate::model::ColumnInfo>,
+    /// Cached row count. Valid as long as the fingerprint matches; refreshed on
+    /// rebuild. `None` when never computed.
+    pub row_count: Option<i64>,
 }
 
 /// Insert or update a source mapping (keyed by `(workspace_path, table_name)`).
 pub fn upsert_source(conn: &Connection, ws_path: &str, r: &SourceRecord) -> Result<(), String> {
     let keys = serde_json::to_string(&r.partition_keys).unwrap_or_else(|_| "[]".into());
+    let cols = serde_json::to_string(&r.columns).unwrap_or_else(|_| "[]".into());
     conn.execute(
-        "INSERT INTO sources (workspace_path, table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO sources (workspace_path, table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(workspace_path, table_name) DO UPDATE SET
             label=excluded.label, kind=excluded.kind, storage=excluded.storage,
             file_path=excluded.file_path, scan_path=excluded.scan_path,
             partition_keys=excluded.partition_keys, name_source=excluded.name_source,
-            file_mtime=excluded.file_mtime, file_size=excluded.file_size",
-        rusqlite::params![ws_path, r.table_name, r.label, r.kind, r.storage, r.file_path, r.scan_path, keys, r.created_at, r.name_source, r.file_mtime, r.file_size],
+            file_mtime=excluded.file_mtime, file_size=excluded.file_size,
+            columns=excluded.columns, row_count=excluded.row_count",
+        rusqlite::params![ws_path, r.table_name, r.label, r.kind, r.storage, r.file_path, r.scan_path, keys, r.created_at, r.name_source, r.file_mtime, r.file_size, cols, r.row_count],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -95,7 +103,7 @@ pub fn upsert_source(conn: &Connection, ws_path: &str, r: &SourceRecord) -> Resu
 pub fn list_sources(conn: &Connection, ws_path: &str) -> Result<Vec<SourceRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size
+            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count
              FROM sources WHERE workspace_path = ? ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -104,6 +112,9 @@ pub fn list_sources(conn: &Connection, ws_path: &str) -> Result<Vec<SourceRecord
             let keys_json: String = row.get(6)?;
             let partition_keys: Vec<String> =
                 serde_json::from_str(&keys_json).unwrap_or_default();
+            let cols_json: String = row.get(11).unwrap_or_else(|_| "[]".to_string());
+            let columns: Vec<crate::model::ColumnInfo> =
+                serde_json::from_str(&cols_json).unwrap_or_default();
             Ok(SourceRecord {
                 table_name: row.get(0)?,
                 label: row.get(1)?,
@@ -116,6 +127,8 @@ pub fn list_sources(conn: &Connection, ws_path: &str) -> Result<Vec<SourceRecord
                 name_source: row.get(8).unwrap_or_else(|_| "legacy".to_string()),
                 file_mtime: row.get(9).unwrap_or(0),
                 file_size: row.get(10).unwrap_or(0),
+                columns,
+                row_count: row.get(12).ok(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -137,7 +150,7 @@ pub fn get_source_by_table(
 ) -> Result<Option<SourceRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size
+            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count
              FROM sources WHERE workspace_path = ? AND table_name = ?",
         )
         .map_err(|e| e.to_string())?;
@@ -146,6 +159,9 @@ pub fn get_source_by_table(
             let keys_json: String = row.get(6)?;
             let partition_keys: Vec<String> =
                 serde_json::from_str(&keys_json).unwrap_or_default();
+            let cols_json: String = row.get(11).unwrap_or_else(|_| "[]".to_string());
+            let columns: Vec<crate::model::ColumnInfo> =
+                serde_json::from_str(&cols_json).unwrap_or_default();
             Ok(SourceRecord {
                 table_name: row.get(0)?,
                 label: row.get(1)?,
@@ -158,6 +174,8 @@ pub fn get_source_by_table(
                 name_source: row.get(8).unwrap_or_else(|_| "legacy".to_string()),
                 file_mtime: row.get(9).unwrap_or(0),
                 file_size: row.get(10).unwrap_or(0),
+                columns,
+                row_count: row.get(12).ok(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -338,7 +356,10 @@ pub fn init_global_db() -> Result<(), String> {
     // Migrate tasks table to add model_id column if it doesn't exist
     let _ = conn.execute("ALTER TABLE tasks ADD COLUMN model_id TEXT;", []);
 
-    // sources: the file ↔ table ↔ storage mapping (NEW)
+    // sources: the file ↔ table ↔ storage mapping. file_mtime/file_size form
+    // the source fingerprint; columns/row_count are cached DuckLake metadata
+    // valid as long as the fingerprint matches (refreshed on rebuild). All part
+    // of the base schema — no ALTER migration.
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sources (
             workspace_path TEXT NOT NULL,
@@ -351,20 +372,16 @@ pub fn init_global_db() -> Result<(), String> {
             partition_keys TEXT NOT NULL DEFAULT '[]',
             created_at     INTEGER NOT NULL,
             name_source    TEXT NOT NULL DEFAULT 'legacy',
+            file_mtime     INTEGER NOT NULL DEFAULT 0,
+            file_size      INTEGER NOT NULL DEFAULT 0,
+            columns        TEXT NOT NULL DEFAULT '[]',
+            row_count      INTEGER,
             PRIMARY KEY (workspace_path, table_name),
             FOREIGN KEY(workspace_path) REFERENCES workspaces(path) ON DELETE CASCADE
         )",
         [],
     )
     .map_err(|e| format!("Failed to create sources table: {e}"))?;
-
-    // Migrate existing sources table to add name_source (idempotent; errors if
-    // the column already exists, which we ignore).
-    let _ = conn.execute("ALTER TABLE sources ADD COLUMN name_source TEXT NOT NULL DEFAULT 'legacy';", []);
-
-    // Migrate sources to add file fingerprint columns (idempotent).
-    let _ = conn.execute("ALTER TABLE sources ADD COLUMN file_mtime INTEGER NOT NULL DEFAULT 0;", []);
-    let _ = conn.execute("ALTER TABLE sources ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0;", []);
 
     // config: key/value user settings (NEW)
     conn.execute(

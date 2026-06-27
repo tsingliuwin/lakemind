@@ -177,18 +177,6 @@ export default function App() {
   onMount(async () => {
     void loadModelsFromSettings();
 
-    // Progressive row-count updates: each `row-count` event carries one table's
-    // count; merge it into sources without disturbing the rest.
-    const unlistenRowCount = await listen<{ name: string; count: number | null }>(
-      "row-count",
-      (event) => {
-        const { name, count } = event.payload;
-        setSources((prev) =>
-          prev.map((t) => (t.name === name ? { ...t, rowCountEstimate: count } : t))
-        );
-      }
-    );
-
     const unlistenAgent = await listen<any>("agent-event", (event) => {
       const payload = event.payload;
       const targetId = payload.taskId;
@@ -317,7 +305,6 @@ export default function App() {
     onCleanup(() => {
       window.removeEventListener("keydown", handleGlobalKeyDown);
       unlistenAgent();
-      unlistenRowCount();
     });
   });
 
@@ -351,27 +338,23 @@ export default function App() {
         setSql("SELECT 1 AS n;");
       }
 
-      // 2. Show tables instantly (names + columns, no row counts, no file scan),
-      //    then run the expensive scan/sync + row-count pass in the background.
+      // 2. Show tables instantly from the SQLite cache (millisecond-fast: names +
+      //    columns + row counts all persisted). Then run the file scan + sync in
+      //    the background; it rebuilds only sources whose fingerprint changed and
+      //    merges custom tables/views back in when done.
       const fastTables = await invoke<SourceTable[]>("list_tables_fast", { workspacePath: ws.path });
       setSources(fastTables);
       setSelectedTable(null);
       refreshRegisterStatus(ws.path);
 
-      // Background A: scan files + sync sources (may rebuild changed tables).
+      // Background: scan files + sync sources (rebuilds only changed tables, picks
+      // up custom t_/v_ objects from the lake catalog). Overwrites the fast list
+      // when done, gated on still being on the same workspace.
       void invoke<SourceTable[]>("register_workspace_sources", { workspacePath: ws.path })
         .then((synced) => {
-          if (currentWorkspace()?.path === ws.path) {
-            setSources(synced);
-            // After sync, re-request row counts for the (possibly rebuilt) set.
-            void invoke("count_rows_stream", { names: synced.map((t) => t.name) })
-              .catch((err) => console.error("Failed to stream row counts:", err));
-          }
+          if (currentWorkspace()?.path === ws.path) setSources(synced);
         })
         .catch((err) => console.error("Failed to sync workspace sources:", err));
-      // Background B: fill in row counts progressively (per-table events).
-      void invoke("count_rows_stream", { names: fastTables.map((t) => t.name) })
-        .catch((err) => console.error("Failed to stream row counts:", err));
     } catch (err) {
       console.error("Failed to load workspace tasks & sources:", err);
     } finally {
