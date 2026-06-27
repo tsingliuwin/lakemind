@@ -133,6 +133,7 @@ pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<Source
                 }
                 known.insert(name.clone());
                 let cols = schema::describe_view(conn, &name).unwrap_or_default();
+                let count = count_rows(conn, &name);
                 result.push(SourceTable {
                     name: name.clone(),
                     label: name,
@@ -141,7 +142,7 @@ pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<Source
                     path: String::new(),
                     scan_path: String::new(),
                     partition_keys: Vec::new(),
-                    row_count_estimate: None,
+                    row_count_estimate: count,
                     columns: cols,
                 });
             }
@@ -260,6 +261,7 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
                 known.insert(name.clone());
                 let _ = conn.execute(&format!("SELECT * FROM \"{}\" LIMIT 0", name.replace('"', "\"\"")), []);
                 let cols = schema::describe_view(conn, &name).unwrap_or_default();
+                let count = count_rows(conn, &name);
                 result.push(SourceTable {
                     name: name.clone(),
                     label: name,
@@ -268,7 +270,7 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
                     path: String::new(),
                     scan_path: String::new(),
                     partition_keys: Vec::new(),
-                    row_count_estimate: None,
+                    row_count_estimate: count,
                     columns: cols,
                 });
             }

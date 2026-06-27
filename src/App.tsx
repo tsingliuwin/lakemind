@@ -352,23 +352,26 @@ export default function App() {
       setSelectedTable(null);
       refreshRegisterStatus(ws.path);
 
-      // Background: scan files + sync sources (rebuilds only changed tables, picks
-      // up custom t_/v_ objects from the lake catalog). Overwrites the fast list
-      // when done, gated on still being on the same workspace.
+      // Background: scan files + sync sources (rebuilds only changed tables).
       void invoke<SourceTable[]>("register_workspace_sources", { workspacePath: ws.path })
-        .then((synced) => {
-          if (currentWorkspace()?.path === ws.path) {
-            setSources(synced);
-            // After sync, warm up every table in the background: this pre-caches
-            // DuckDB parquet footers/stats (so the user's first click isn't a cold
-            // start) AND verifies each lake object is usable, rebuilding any that
-            // went missing. The returned list refreshes the tree if rebuilds ran.
-            void invoke<SourceTable[]>("warmup_sources")
-              .then((warmed) => {
-                if (currentWorkspace()?.path === ws.path) setSources(warmed);
-              })
-              .catch((err) => console.error("Failed to warmup sources:", err));
-          }
+        .then(() => {
+          if (currentWorkspace()?.path !== ws.path) return;
+          // After sync, refresh via list_duckdb_tables which merges custom
+          // tables/views (t_/v_) from the lake catalog — sync + fast list only
+          // know about s_ sources in SQLite. This makes views appear right after
+          // sync instead of waiting for the slower warmup pass.
+          void invoke<SourceTable[]>("list_duckdb_tables")
+            .then((merged) => {
+              if (currentWorkspace()?.path === ws.path) setSources(merged);
+            })
+            .catch((err) => console.error("Failed to refresh table list:", err));
+          // Warm up in the background: verifies each lake object is usable and
+          // rebuilds any that went missing. Refreshes the tree if rebuilds ran.
+          void invoke<SourceTable[]>("warmup_sources")
+            .then((warmed) => {
+              if (currentWorkspace()?.path === ws.path) setSources(warmed);
+            })
+            .catch((err) => console.error("Failed to warmup sources:", err));
         })
         .catch((err) => console.error("Failed to sync workspace sources:", err));
     } catch (err) {
