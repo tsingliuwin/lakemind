@@ -126,60 +126,71 @@ fn read_identifier(bytes: &[u8], start: usize) -> Option<(String, usize)> {
     Some((name, j))
 }
 
-/// Combined input hash for an object whose `select_sql` references `upstreams`.
+/// Combined input hash for an object defined by `select_sql` that references
+/// `upstreams`.
 ///
-/// Each upstream contributes a fingerprint unit:
-///   * if it's a registered `s_*` source → `<mtime>:<size>`
-///   * if it has an `object_defs` row → its stored `input_hash`
-///   * otherwise (unknown, e.g. a temp not yet recorded) → `?` (forces a miss,
-///     so the object gets rebuilt rather than stale-cached)
+/// The hash covers TWO things so that a stale cache is never served:
+///   1. **The definition itself** — `select_sql` is hashed first. If the agent
+///      rebuilds an object with a different query (e.g. added a WHERE, changed a
+///      JOIN) while referencing the *same* upstream tables, the hash still
+///      changes → the object is correctly rebuilt instead of reused.
+///   2. **Each upstream's fingerprint:**
+///      * registered `s_*` source → `<mtime>:<size>`
+///      * `t_*`/`v_*` with an `object_defs` row → its stored `input_hash`
+///      * otherwise (unknown) → `?` (forces a miss → rebuild, never stale)
 ///
-/// Units are sorted by name for determinism, joined, and hashed to a u64 string.
+/// Upstream units are sorted by name for determinism.
 pub fn compute_input_hash(
     conn: &Connection,
     ws_path: &str,
+    select_sql: &str,
     upstreams: &[String],
 ) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
-    if upstreams.is_empty() {
-        return "0".to_string();
-    }
-
-    // Load all source rows once (s_* fingerprints) for quick lookup.
-    let source_fp: HashMap<String, String> = match crate::db::list_sources(conn, ws_path) {
-        Ok(rows) => rows
-            .iter()
-            .map(|r| (r.table_name.clone(), format!("{}:{}", r.file_mtime, r.file_size)))
-            .collect(),
-        Err(_) => HashMap::new(),
-    };
-    // Load all object_def rows once (t_*/v_* fingerprints).
-    let def_fp: HashMap<String, String> = list_all_object_hashes(conn, ws_path);
-
-    let mut units: Vec<(String, String)> = Vec::new();
-    for name in upstreams {
-        let fp = if let Some(f) = source_fp.get(name) {
-            f.clone()
-        } else if let Some(f) = def_fp.get(name) {
-            f.clone()
-        } else {
-            // Unknown upstream → conservative: treat as volatile so we never
-            // serve a stale cached object.
-            "?".to_string()
-        };
-        units.push((name.clone(), fp));
-    }
-    units.sort_by(|a, b| a.0.cmp(&b.0));
-
     let mut hasher = DefaultHasher::new();
-    for (name, fp) in &units {
-        name.hash(&mut hasher);
-        b'|'.hash(&mut hasher);
-        fp.hash(&mut hasher);
-        b';'.hash(&mut hasher);
+
+    // 1. The definition: any change to the SQL itself (logic, columns, filters)
+    //    invalidates the cache even when the upstream tables are identical.
+    select_sql.hash(&mut hasher);
+    b'#'.hash(&mut hasher); // separator between definition and upstreams
+
+    // 2. Upstream fingerprints (may be empty — e.g. SELECT 1 — but the SQL part
+    //    above still makes the hash meaningful).
+    if !upstreams.is_empty() {
+        let source_fp: HashMap<String, String> = match crate::db::list_sources(conn, ws_path) {
+            Ok(rows) => rows
+                .iter()
+                .map(|r| (r.table_name.clone(), format!("{}:{}", r.file_mtime, r.file_size)))
+                .collect(),
+            Err(_) => HashMap::new(),
+        };
+        let def_fp: HashMap<String, String> = list_all_object_hashes(conn, ws_path);
+
+        let mut units: Vec<(String, String)> = Vec::new();
+        for name in upstreams {
+            let fp = if let Some(f) = source_fp.get(name) {
+                f.clone()
+            } else if let Some(f) = def_fp.get(name) {
+                f.clone()
+            } else {
+                // Unknown upstream → conservative: treat as volatile so we never
+                // serve a stale cached object.
+                "?".to_string()
+            };
+            units.push((name.clone(), fp));
+        }
+        units.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (name, fp) in &units {
+            name.hash(&mut hasher);
+            b'|'.hash(&mut hasher);
+            fp.hash(&mut hasher);
+            b';'.hash(&mut hasher);
+        }
     }
+
     format!("{:x}", hasher.finish())
 }
 

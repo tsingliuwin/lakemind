@@ -832,7 +832,7 @@ impl DdlToolShared {
             };
             let upstreams = crate::fingerprint::extract_upstreams(&select_sql);
             let current_hash =
-                crate::fingerprint::compute_input_hash(&sqlite, &ws_path, &upstreams);
+                crate::fingerprint::compute_input_hash(&sqlite, &ws_path, &select_sql, &upstreams);
             if current_hash != def.input_hash {
                 return false;
             }
@@ -856,7 +856,7 @@ impl DdlToolShared {
             let sqlite = crate::db::get_db_conn()?;
             let upstreams = crate::fingerprint::extract_upstreams(&select_sql);
             let input_hash =
-                crate::fingerprint::compute_input_hash(&sqlite, &ws_path, &upstreams);
+                crate::fingerprint::compute_input_hash(&sqlite, &ws_path, &select_sql, &upstreams);
             // Capture the freshly-built object's columns + row count so the
             // data-tree list can read them from SQLite (no DuckDB query) as long
             // as the upstream fingerprint is unchanged.

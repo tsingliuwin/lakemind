@@ -1170,7 +1170,7 @@ fn hydrate_custom_object(
     // Try the cache: valid only if the persisted input_hash still matches.
     if let Ok(Some(def)) = db::get_object_def(sqlite, ws_path, name) {
         let upstreams = fingerprint::extract_upstreams(&def.select_sql);
-        let current_hash = fingerprint::compute_input_hash(sqlite, ws_path, &upstreams);
+        let current_hash = fingerprint::compute_input_hash(sqlite, ws_path, &def.select_sql, &upstreams);
         if current_hash == def.input_hash {
             return SourceTable {
                 name: name.to_string(),
