@@ -42,7 +42,7 @@ const TOOLTIP_STYLE = {
   textStyle: { color: "#e6e7eb", fontSize: 12 },
 };
 const TITLE_STYLE = (text: string) => ({
-  text, left: "center", top: 6,
+  text, left: "center",
   textStyle: { color: "#e6e7eb", fontSize: 13, fontWeight: 500 },
 });
 
@@ -72,13 +72,13 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
         .map((r) => ({ name: String(r[xIdx]), value: num(r[yIdx]) }));
       return {
         color: PALETTE,
-        title: title ? TITLE_STYLE(title) : undefined,
+        title: title ? { ...TITLE_STYLE(title), top: 8 } : undefined,
         tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)", ...TOOLTIP_STYLE },
-        legend: { bottom: 4, type: "scroll", textStyle: { color: "#9aa0a6", fontSize: 11 }, itemWidth: 10, itemHeight: 10 },
+        legend: { bottom: 2, type: "scroll", textStyle: { color: "#9aa0a6", fontSize: 11 }, itemWidth: 10, itemHeight: 10 },
         series: [{
           type: "pie",
-          radius: ["38%", "66%"],
-          center: ["50%", "46%"],
+          radius: ["30%", "52%"],
+          center: ["50%", "50%"],
           data,
           label: { color: "#e6e7eb", fontSize: 11, formatter: "{b}: {d}%" },
           labelLine: { lineStyle: { color: "#5c6066" } },
@@ -96,7 +96,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
         color: PALETTE,
         title: title ? TITLE_STYLE(title) : undefined,
         tooltip: { trigger: "item", ...TOOLTIP_STYLE },
-        grid: { left: 55, right: 20, top: title ? 40 : 16, bottom: 36 },
+        grid: { left: 60, right: 24, top: title ? 44 : 20, bottom: 24 },
         xAxis: { type: "value", name: xField ?? cols[xIdx] ?? "X", nameTextStyle: { color: "#9aa0a6", fontSize: 11 }, scale: true, ...AXIS_STYLE },
         yAxis: { type: "value", name: yCols[0] ?? "Y", nameTextStyle: { color: "#9aa0a6", fontSize: 11 }, scale: true, ...AXIS_STYLE },
         series: [{ type: "scatter", data, symbolSize: 7, itemStyle: { opacity: 0.85 } }],
@@ -105,6 +105,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
 
     // bar / line
     const categoryData = table.rows.map((r) => String(r[xIdx >= 0 ? xIdx : 0] ?? ""));
+    const rotated = categoryData.length > 8;
     const series = yCols.map((yn) => {
       const yi = cols.indexOf(yn);
       return {
@@ -120,9 +121,10 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
       color: PALETTE,
       title: title ? TITLE_STYLE(title) : undefined,
       tooltip: { trigger: "axis", ...TOOLTIP_STYLE },
-      legend: { bottom: 4, type: "scroll", textStyle: { color: "#9aa0a6", fontSize: 11 }, itemWidth: 10, itemHeight: 10 },
-      grid: { left: 55, right: 20, top: title ? 40 : 16, bottom: 36 },
-      xAxis: { type: "category", data: categoryData, ...AXIS_STYLE, axisLabel: { ...AXIS_STYLE.axisLabel, rotate: categoryData.length > 8 ? 30 : 0 } },
+      legend: { bottom: 2, type: "scroll", textStyle: { color: "#9aa0a6", fontSize: 11 }, itemWidth: 10, itemHeight: 10 },
+      // bottom space: legend (~22px) + X axis label (~18px normal / ~40px rotated) + gaps
+      grid: { left: 60, right: 24, top: title ? 44 : 20, bottom: rotated ? 72 : 52 },
+      xAxis: { type: "category", data: categoryData, ...AXIS_STYLE, axisLabel: { ...AXIS_STYLE.axisLabel, rotate: rotated ? 30 : 0 } },
       yAxis: { type: "value", ...AXIS_STYLE },
       series,
     };
