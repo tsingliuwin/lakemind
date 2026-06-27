@@ -15,7 +15,7 @@
 //! in-memory `sources` cache here is just a read-through mirror for the
 //! *current* workspace.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -59,6 +59,9 @@ pub struct AppState {
     /// Each entry holds a oneshot sender that resumes the blocked tool once the
     /// user approves or cancels from the UI (via `resolve_tool_confirmation`).
     pub pending_confirmations: Arc<Mutex<HashMap<String, PendingConfirmation>>>,
+    /// Aborted task IDs. Inserted by `abort_chat`; checked by `run_stream_loop`
+    /// each iteration so a long-running stream stops promptly.
+    pub aborted_tasks: Arc<Mutex<HashSet<String>>>,
 }
 
 impl AppState {
@@ -90,6 +93,7 @@ impl AppState {
             workspace_dir: Arc::new(Mutex::new(ws)),
             workspace_path: Arc::new(Mutex::new("DefaultProject".to_string())),
             pending_confirmations: Arc::new(Mutex::new(HashMap::new())),
+            aborted_tasks: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 }

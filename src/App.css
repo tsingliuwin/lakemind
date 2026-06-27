@@ -4582,6 +4582,14 @@ button.lm-select-trigger:hover:not(:disabled) {
   color: var(--text-dim);
   cursor: not-allowed;
 }
+/* Stop button variant: solid red, replaces send during streaming. */
+.chat-composer__stop {
+  background: var(--accent-red);
+  color: #fff;
+}
+.chat-composer__stop:hover {
+  background: #dc2626;
+}
 
 /* --- 回到底部悬浮按钮 --- */
 .chat-view {

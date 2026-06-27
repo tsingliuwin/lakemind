@@ -24,6 +24,8 @@ export default function ChatView(props: {
   workspace: string;
   taskName: string;
   onSend: (prompt: string) => void;
+  /** Abort the running stream (stop button). */
+  onStop?: () => void;
   onOpenInSqlPanel: (sql: string) => void;
   onDelete?: () => void;
   availableModels: string[];
@@ -728,17 +730,32 @@ export default function ChatView(props: {
                 </Show>
               </div>
 
-              <button
-                class="chat-composer__send-square"
-                disabled={isStreaming() || !input().trim()}
-                onClick={() => void send()}
-                title={isStreaming() ? "运行中" : "发送"}
+              <Show
+                when={isStreaming()}
+                fallback={
+                  <button
+                    class="chat-composer__send-square"
+                    disabled={!input().trim()}
+                    onClick={() => void send()}
+                    title="发送"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                      <line x1="12" y1="19" x2="12" y2="5"></line>
+                      <polyline points="5 12 12 5 19 12"></polyline>
+                    </svg>
+                  </button>
+                }
               >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
-                  <line x1="12" y1="19" x2="12" y2="5"></line>
-                  <polyline points="5 12 12 5 19 12"></polyline>
-                </svg>
-              </button>
+                <button
+                  class="chat-composer__send-square chat-composer__stop"
+                  onClick={() => props.onStop?.()}
+                  title="停止生成"
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor" style="width: 12px; height: 12px;">
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                </button>
+              </Show>
             </div>
           </div>
         </div>

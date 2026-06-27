@@ -65,6 +65,7 @@ pub fn run() {
             commands::save_settings_json,
             commands::start_agent_chat,
             commands::resolve_tool_confirmation,
+            commands::abort_chat,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

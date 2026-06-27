@@ -532,6 +532,19 @@ export default function App() {
   }
 
   /** ChatView 发送消息：追加 user 消息 → 触发 Rust Agent 循环。 */
+  /** Abort the running agent stream for a task. */
+  async function stopChat(taskId: string) {
+    try {
+      await invoke("abort_chat", { taskId });
+      // The backend emits "done" after the abort is processed, which unlocks
+      // the input via the agent-event listener. But also set it here in case
+      // the stream is stuck in a tool call.
+      setStreamingTaskId(null);
+    } catch (err) {
+      console.error("Failed to abort chat:", err);
+    }
+  }
+
   async function sendChatMessage(prompt: string) {
     const id = activeTaskId();
     if (!id) return;
@@ -1382,6 +1395,7 @@ export default function App() {
                           taskName={activeTask()?.name ?? ""}
                           streaming={streamingTaskId() === id()}
                           onSend={sendChatMessage}
+                          onStop={() => void stopChat(id())}
                           onOpenInSqlPanel={openInSqlPanel}
                           onDelete={() => deleteTask(id())}
                           availableModels={availableModels()}

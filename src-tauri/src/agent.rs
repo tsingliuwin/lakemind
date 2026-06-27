@@ -1432,10 +1432,32 @@ fn assistant_text(msg: &ChatMessageDto) -> String {
 async fn run_stream_loop<R>(
     window: tauri::Window,
     task_id: String,
+    state: &AppState,
     mut stream: impl futures_util::Stream<Item = Result<MultiTurnStreamItem<R>, StreamingError>> + Unpin,
 ) {
     use futures_util::StreamExt;
+    // Check the abort flag before processing each chunk. If set, stop early and
+    // emit a "done" so the frontend unlocks the input.
+    {
+        let aborted = state.aborted_tasks.lock().await;
+        if aborted.contains(&task_id) {
+            drop(aborted);
+            state.aborted_tasks.lock().await.remove(&task_id);
+            emit_event(&window, &task_id, "done", None, None);
+            return;
+        }
+    }
     while let Some(chunk) = stream.next().await {
+        // Check abort mid-stream too.
+        {
+            let aborted = state.aborted_tasks.lock().await;
+            if aborted.contains(&task_id) {
+                drop(aborted);
+                state.aborted_tasks.lock().await.remove(&task_id);
+                emit_event(&window, &task_id, "done", None, None);
+                return;
+            }
+        }
         match chunk {
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text_struct))) => {
                 emit_delta(&window, &task_id, "text", &text_struct.text);
@@ -1564,7 +1586,7 @@ pub async fn run_agent_chat_stream(
         let stream = agent.stream_chat(prompt.clone(), rig_history)
             .multi_turn(100)
             .await;
-        run_stream_loop(window.clone(), task_id.clone(), stream).await;
+        run_stream_loop(window.clone(), task_id.clone(), &app_state, stream).await;
     } else if format == "responses" {
         let base_url = sanitize_endpoint(&provider.endpoint);
         let client: rig_core::providers::openai::Client = rig_core::providers::openai::Client::builder()
@@ -1594,7 +1616,7 @@ pub async fn run_agent_chat_stream(
         let stream = agent.stream_chat(prompt.clone(), rig_history)
             .multi_turn(100)
             .await;
-        run_stream_loop(window.clone(), task_id.clone(), stream).await;
+        run_stream_loop(window.clone(), task_id.clone(), &app_state, stream).await;
     } else if format == "anthropic" {
         let base_url = sanitize_endpoint(&provider.endpoint);
         let client: rig_core::providers::anthropic::Client = rig_core::providers::anthropic::Client::builder()
@@ -1620,7 +1642,7 @@ pub async fn run_agent_chat_stream(
         let stream = agent.stream_chat(prompt.clone(), rig_history)
             .multi_turn(100)
             .await;
-        run_stream_loop(window.clone(), task_id.clone(), stream).await;
+        run_stream_loop(window.clone(), task_id.clone(), &app_state, stream).await;
     } else {
         return Err(format!("不支持的 API 格式: {}", provider.api_format));
     }

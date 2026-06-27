@@ -1254,6 +1254,18 @@ pub async fn resolve_tool_confirmation(
     }
 }
 
+/// Abort a running agent chat stream. Sets the abort flag so `run_stream_loop`
+/// stops on the next iteration and emits "done" to unlock the frontend.
+#[tauri::command]
+pub async fn abort_chat(
+    task_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut aborted = state.aborted_tasks.lock().await;
+    aborted.insert(task_id);
+    Ok(())
+}
+
 // ===========================================================================
 // Internals — connection switching, import strategy, helpers
 // ===========================================================================
