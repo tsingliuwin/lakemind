@@ -587,6 +587,9 @@ export default function SettingsPage(props: {
                 <tr><td class="cmd-key">describe_table</td><td class="cmd-desc">获取指定表或视图的结构（列名、数据类型等）。</td></tr>
                 <tr><td class="cmd-key">execute_query</td><td class="cmd-desc">执行只读的 SQL 查询，并返回结果。</td></tr>
                 <tr><td class="cmd-key">sample_data</td><td class="cmd-desc">获取指定表或视图的前 5 行样例数据。</td></tr>
+                <tr><td class="cmd-key">create_table</td><td class="cmd-desc">创建物化物理表持久化加工后的数据（t_/tmp_ 前缀）。</td></tr>
+                <tr><td class="cmd-key">create_view</td><td class="cmd-desc">创建零拷贝虚拟视图封装查询逻辑（v_/tmp_v_ 前缀）。</td></tr>
+                <tr><td class="cmd-key">drop_object</td><td class="cmd-desc">删除指定的表或视图（同时清理同名视图与表两种形态）。</td></tr>
               </tbody>
             </table>
           </div>
