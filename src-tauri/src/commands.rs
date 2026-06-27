@@ -363,43 +363,42 @@ pub async fn get_dependencies(
     Ok(DepInfo { upstreams, downstreams })
 }
 
-/// Delete a table/view safely. If any other object depends on it (downstream),
-/// the deletion is refused with a message listing the dependents — the user
-/// must delete those first. Otherwise drops the lake object + cleans up SQLite.
+/// Delete a table/view safely. If the object has downstream dependencies, they
+/// are cascaded (deleted first, leaves → target) so everything is removed in one
+/// pass. Drops lake objects + cleans up SQLite mappings for all affected objects.
 #[tauri::command]
 pub async fn drop_table_safe(
     table_name: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let ws_path = state.workspace_path.lock().await.clone();
 
-    // Check downstream dependencies first — refuse if anything depends on this.
+    // Compute the cascade deletion order (downstreams first, target last).
     let sqlite = db::get_db_conn()?;
-    let downstreams = fingerprint::get_downstreams(&sqlite, &ws_path, &table_name);
-    if !downstreams.is_empty() {
-        return Err(format!(
-            "无法删除「{}」：被以下对象依赖：{}。请先删除下游对象。",
-            table_name,
-            downstreams.join("、")
-        ));
-    }
+    let cascade = fingerprint::cascade_delete_order(&sqlite, &ws_path, &table_name);
 
-    // Safe to delete — drop the lake object and clean up all SQLite mappings.
+    // Drop all objects in order + clean up SQLite mappings.
     let conn = state.conn.clone();
     let ws_path2 = ws_path.clone();
-    let name = table_name.clone();
+    let count = cascade.len();
     let _ = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let guard = conn.blocking_lock();
-        drop_lake_object(&guard, &name);
-        let sqlite = db::get_db_conn()?;
-        let _ = db::delete_object_def(&sqlite, &ws_path2, &name);
-        let _ = db::delete_source_by_table(&sqlite, &ws_path2, &name);
+        for name in &cascade {
+            drop_lake_object(&guard, name);
+            let sqlite = db::get_db_conn()?;
+            let _ = db::delete_object_def(&sqlite, &ws_path2, name);
+            let _ = db::delete_source_by_table(&sqlite, &ws_path2, name);
+        }
         let _ = guard.execute("CHECKPOINT;", []);
         Ok(())
     })
     .await
     .map_err(|e| format!("删除任务失败: {e}"))?;
-    Ok(())
+    Ok(if count > 1 {
+        format!("已删除 {} 及其 {} 个下游依赖", table_name, count - 1)
+    } else {
+        format!("已删除 {}", table_name)
+    })
 }
 
 // ===========================================================================

@@ -787,9 +787,10 @@ impl DdlToolShared {
                 if let Some((name, select_sql, kind)) = object_meta {
                     self.persist_object_def(&name, &select_sql, &kind).await;
                 }
-                // drop_object: remove any persisted definition for this name.
+                // drop_object: remove persisted definitions for ALL dropped names
+                // (cascade delete may drop multiple objects in one batch).
                 if tool_name == "drop_object" {
-                    if let Some(name) = ddl_extract_name(&ddl) {
+                    for name in ddl_extract_all_names(&ddl) {
                         self.delete_object_def(&name).await;
                     }
                 }
@@ -904,16 +905,24 @@ impl DdlToolShared {
 
 /// Best-effort extraction of the target object name from a DROP DDL string, for
 /// cleaning up the persisted definition after `drop_object`.
-fn ddl_extract_name(ddl: &str) -> Option<String> {
-    // Matches: DROP (VIEW|TABLE) IF EXISTS "name";  → returns name
-    let upper = ddl.to_uppercase();
-    let idx = upper.find("DROP ")?;
-    let after = &ddl[idx..];
-    // Find the first quoted identifier.
-    let q = after.find('"')?;
-    let rest = &after[q + 1..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
+/// Extract ALL quoted object names from a DROP DDL batch (cascade delete may
+/// contain multiple `DROP VIEW/TABLE IF EXISTS "name";` statements).
+fn ddl_extract_all_names(ddl: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut rest = ddl;
+    while let Some(q) = rest.find('"') {
+        let after = &rest[q + 1..];
+        if let Some(end) = after.find('"') {
+            let name = &after[..end];
+            if !name.is_empty() {
+                names.push(name.to_string());
+            }
+            rest = &after[end + 1..];
+        } else {
+            break;
+        }
+    }
+    names
 }
 
 // --- create_table ---------------------------------------------------------
@@ -1046,7 +1055,7 @@ impl Tool for DropObjectTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: "drop_object".to_string(),
-            description: "删除指定的表或视图（同时清理同名视图与表两种形态）。删除后数据不可恢复，请确认后再使用。".to_string(),
+            description: "删除指定的表或视图。如果该对象有下游依赖（其他表/视图引用了它），会自动级联删除所有下游依赖（先删下游再删目标）。删除后数据不可恢复，请确认后再使用。".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -1059,16 +1068,64 @@ impl Tool for DropObjectTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let name = sanitize_ddl_ident(args.name.trim())?;
-        let summary_pending = format!("删除对象 {}", name);
+
+        // 1. Compute the cascade deletion order: all transitive downstreams
+        //    (leaves first) + the target last. This way one batch of DROP
+        //    statements removes everything without "still referenced" errors.
+        let ws_path = self.shared.app_state.workspace_path.lock().await.clone();
+        let name_for_cascade = name.clone();
+        let cascade = tokio::task::spawn_blocking(move || -> Vec<String> {
+            let Ok(sqlite) = crate::db::get_db_conn() else { return vec![name_for_cascade]; };
+            crate::fingerprint::cascade_delete_order(&sqlite, &ws_path, &name_for_cascade)
+        })
+        .await
+        .unwrap_or_else(|_| vec![name.clone()]);
+
+        // 2. Determine each object's type (table vs view) so we emit precise
+        //    DROP statements instead of blindly trying both.
+        let conn = self.shared.app_state.conn.clone();
+        let cascade_for_type = cascade.clone();
+        let type_map: Vec<(String, bool, bool)> = tokio::task::spawn_blocking(move || {
+            let guard = conn.blocking_lock();
+            cascade_for_type.iter().map(|n| {
+                let is_tbl = guard.query_row(
+                    "SELECT count(*) FROM duckdb_tables() WHERE database_name='lake' AND schema_name='main' AND table_name=?",
+                    [n], |r| r.get::<_, i64>(0),
+                ).unwrap_or(0) > 0;
+                let is_vw = guard.query_row(
+                    "SELECT count(*) FROM duckdb_views() WHERE database_name='lake' AND schema_name='main' AND view_name=?",
+                    [n], |r| r.get::<_, i64>(0),
+                ).unwrap_or(0) > 0;
+                (n.clone(), is_tbl, is_vw)
+            }).collect()
+        })
+        .await
+        .unwrap_or_default();
+
+        let has_downstream = cascade.len() > 1;
+        let summary_pending = if has_downstream {
+            format!("删除 {} 及其 {} 个下游依赖", name, cascade.len() - 1)
+        } else {
+            format!("删除对象 {}", name)
+        };
+
         self.shared.run(
             "drop_object", "drop",
-            json!({ "name": name }),
+            json!({ "name": name.clone() }),
             summary_pending,
             None,
-            move || format!(
-                "DROP VIEW IF EXISTS \"{name}\";\nDROP TABLE IF EXISTS \"{name}\";",
-                name = name
-            ),
+            move || {
+                let mut parts = Vec::new();
+                for (n, is_tbl, is_vw) in &type_map {
+                    if *is_vw { parts.push(format!("DROP VIEW IF EXISTS \"{}\";", n)); }
+                    if *is_tbl { parts.push(format!("DROP TABLE IF EXISTS \"{}\";", n)); }
+                }
+                if parts.is_empty() {
+                    format!("-- 「{}」 not found in lake catalog", name)
+                } else {
+                    parts.join("\n")
+                }
+            },
         )
         .await
     }

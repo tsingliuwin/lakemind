@@ -250,3 +250,37 @@ pub fn get_downstreams(conn: &Connection, ws_path: &str, table_name: &str) -> Ve
     let map = build_downstream_map(conn, ws_path);
     map.get(table_name).cloned().unwrap_or_default()
 }
+
+/// Compute the cascade deletion order for `table_name` and all its transitive
+/// downstreams. Returns names ordered so that dependents come **before** their
+/// dependencies — i.e. leaf-most objects first, the target last. This way a
+/// single batch of DROP statements removes everything without "still
+/// referenced" errors.
+///
+/// Cycle-safe via a `visited` set (cyclic deps shouldn't happen in practice,
+/// but we guard anyway).
+pub fn cascade_delete_order(conn: &Connection, ws_path: &str, table_name: &str) -> Vec<String> {
+    let map = build_downstream_map(conn, ws_path);
+    let mut result: Vec<String> = Vec::new();
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+    collect_cascade(table_name, &map, &mut result, &mut visited);
+    result
+}
+
+fn collect_cascade(
+    name: &str,
+    map: &HashMap<String, Vec<String>>,
+    result: &mut Vec<String>,
+    visited: &mut std::collections::HashSet<String>,
+) {
+    if !visited.insert(name.to_string()) {
+        return; // already processed (or cycle)
+    }
+    // Visit downstreams first (they depend on `name`, so must be deleted before it).
+    if let Some(deps) = map.get(name) {
+        for d in deps {
+            collect_cascade(d, map, result, visited);
+        }
+    }
+    result.push(name.to_string());
+}
