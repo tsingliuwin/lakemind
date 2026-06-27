@@ -891,13 +891,17 @@ impl DdlToolShared {
         .await;
     }
 
-    /// Remove the `object_defs` row for `name` (called after a successful drop).
+    /// Remove the `object_defs` and `sources` rows for `name` (called after a
+    /// successful drop). Both tables are checked so s_ source tables (in sources)
+    /// and t_/v_ views (in object_defs) are both cleaned up.
     async fn delete_object_def(&self, name: &str) {
         let ws_path = self.app_state.workspace_path.lock().await.clone();
         let name = name.to_string();
         let _ = tokio::task::spawn_blocking(move || -> Result<(), String> {
             let sqlite = crate::db::get_db_conn()?;
-            crate::db::delete_object_def(&sqlite, &ws_path, &name)
+            let _ = crate::db::delete_object_def(&sqlite, &ws_path, &name);
+            let _ = crate::db::delete_source_by_table(&sqlite, &ws_path, &name);
+            Ok(())
         })
         .await;
     }
