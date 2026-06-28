@@ -589,11 +589,11 @@ impl Tool for LoadOkfBlockTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: "load_okf_block".to_string(),
-            description: "读取本地 OKF 知识库中某概念文件下的特定二级标题板块（如：读取 tables 分类下订单表的 '关联关系' 或是 pipelines 分类下的 '异常排障记录'）。这样可以避免加载全文，节省 token。".to_string(),
+            description: "读取本地 OKF 知识库中某概念文件下的特定二级标题板块（如：读取 tables 分类下订单表的 '关联关系' 或是 concepts 分类下的 '公司背景'，或是 pipelines 分类下的 '异常排障记录'）。这样可以避免加载全文，节省 token。".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "category": { "type": "string", "description": "OKF 的目录类别，例如 tables, views, sources, pipelines/specific" },
+                    "category": { "type": "string", "description": "OKF 的目录类别，例如 tables, views, sources, concepts, pipelines/specific" },
                     "name": { "type": "string", "description": "文件概念名，不带 .md 扩展名，例如 t_sales" },
                     "heading": { "type": "string", "description": "要读取的二级标题，例如 关联关系, 物理画像, 异常排障记录" }
                 },
@@ -652,7 +652,7 @@ impl Tool for WriteOkfBlockTool {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "category": { "type": "string", "description": "OKF 目录，例如 tables, views, sources, pipelines/specific" },
+                    "category": { "type": "string", "description": "OKF 目录，例如 tables, views, sources, concepts, pipelines/specific" },
                     "name": { "type": "string", "description": "概念名，例如 t_sales" },
                     "heading": { "type": "string", "description": "二级标题名，例如 关联关系, 探索备注, 异常排障记录" },
                     "content": { "type": "string", "description": "要写入的纯文本或 Markdown 段落" }
