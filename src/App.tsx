@@ -334,9 +334,14 @@ export default function App() {
                 // FinalResponse events using the internal tracking fields
                 // (_totalInputAllTurns / _totalCachedAllTurns). This guarantees
                 // the rate is always ≤ 100 % and reflects the whole session.
+                //
+                // _peakInputTokens tracks the maximum inputTokens ever seen so
+                // the context window bar never shrinks when a new turn starts
+                // with a smaller context (rig re-sends only text history).
                 const prevOut          = prevUsage?.outputTokens       ?? 0;
                 const prevTotalInput   = prevUsage?._totalInputAllTurns  ?? 0;
                 const prevTotalCached  = prevUsage?._totalCachedAllTurns ?? 0;
+                const prevPeak         = prevUsage?._peakInputTokens     ?? 0;
 
                 const cumulativeOut       = prevOut + usageData.outputTokens;
                 const totalInputAllTurns  = prevTotalInput  + usageData.inputTokens;
@@ -344,6 +349,7 @@ export default function App() {
                 const avgCacheHitRate = totalInputAllTurns > 0
                   ? Math.round(totalCachedAllTurns / totalInputAllTurns * 100)
                   : 0;
+                const peakInputTokens = Math.max(usageData.inputTokens, prevPeak);
 
                 t = {
                   ...t,
@@ -354,6 +360,7 @@ export default function App() {
                     cacheHitRate:         avgCacheHitRate,
                     _totalInputAllTurns:  totalInputAllTurns,
                     _totalCachedAllTurns: totalCachedAllTurns,
+                    _peakInputTokens:     peakInputTokens,
                   },
                 };
               }

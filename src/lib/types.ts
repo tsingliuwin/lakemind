@@ -176,6 +176,13 @@ export interface TokenUsage {
    */
   _totalInputAllTurns?: number;
   _totalCachedAllTurns?: number;
+  /**
+   * Peak inputTokens ever seen across all FinalResponse events in this
+   * conversation. Only increases — used to display the context window bar so
+   * it never shrinks when a new user turn starts with a smaller context
+   * (rig re-sends only text history, not tool results, between turns).
+   */
+  _peakInputTokens?: number;
 }
 
 export interface QueryTask {

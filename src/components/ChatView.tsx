@@ -1,5 +1,5 @@
 import { For, Index, Show, Switch, Match, createSignal, createEffect, createMemo, onMount, onCleanup, untrack } from "solid-js";
-import type { ChatMessage, Segment } from "../lib/types";
+import type { ChatMessage, Segment, TokenUsage } from "../lib/types";
 import ToolSegment from "./ToolSegment";
 import ChartSegment from "./ChartSegment";
 import MarkdownRenderer from "./MarkdownRenderer";
@@ -27,11 +27,7 @@ export default function ChatView(props: {
   /** Abort the running stream (stop button). */
   onStop?: () => void;
   /** Token usage from the last LLM response (for context window display). */
-  tokenUsage?: {
-    inputTokens: number; outputTokens: number; totalTokens: number;
-    cachedInputTokens: number; messagesTokens: number; toolsTokens: number;
-    preambleTokens: number; cacheHitRate: number;
-  } | null;
+  tokenUsage?: TokenUsage | null;
   /** Current model's context window size (from settings.json). */
   contextWindow?: number;
   onOpenInSqlPanel: (sql: string) => void;
@@ -55,12 +51,17 @@ export default function ChatView(props: {
   const usage = createMemo(() => props.tokenUsage ?? {
     inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedInputTokens: 0,
     messagesTokens: 0, toolsTokens: 0, preambleTokens: 0, cacheHitRate: 0,
+    _peakInputTokens: 0, _totalInputAllTurns: 0, _totalCachedAllTurns: 0,
+  });
+  // Use peak input for the bar so it never shrinks between turns.
+  const peakInput = createMemo(() => {
+    const u = usage();
+    return u._peakInputTokens ?? u.inputTokens;
   });
   const usedPct = createMemo(() => {
-    const u = usage();
-    const input = u.inputTokens;
     const ctxWindow = props.contextWindow ?? 128000;
-    return input > 0 ? Math.min(100, (input / ctxWindow * 100)) : 0;
+    const peak = peakInput();
+    return peak > 0 ? Math.min(100, (peak / ctxWindow * 100)) : 0;
   });
   let modelRef: HTMLDivElement | undefined;
   let priorityRef: HTMLDivElement | undefined;
@@ -683,7 +684,8 @@ export default function ChatView(props: {
                 <div class="token-usage-panel">
                   {(() => {
                     const u = usage();
-                    const input = u.inputTokens;
+                    const input = u.inputTokens;     // latest turn — used for breakdown %
+                    const peak  = peakInput();         // historical max — used for bar & capacity
                     const ctxWindow = props.contextWindow ?? 128000;
                     const pctVal = usedPct();
                     const fmt = (n: number) => n >= 10000 ? `${(n / 10000).toFixed(0)}万` : n.toLocaleString();
@@ -693,7 +695,7 @@ export default function ChatView(props: {
                         <div class="token-usage-panel__title">
                           上下文容量
                           <span class="token-usage-panel__capacity">
-                            {fmt(input)}/{fmt(ctxWindow)} ({pctVal.toFixed(0)}%)
+                            {fmt(peak)}/{fmt(ctxWindow)} ({pctVal.toFixed(0)}%)
                           </span>
                         </div>
                         <div class="token-usage-panel__bar">
