@@ -253,6 +253,36 @@ pub fn delete_okf_files(ws_path: &str, name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Extract the text block of a heading from the file content
+pub fn parse_okf_block_from_content(content: &str, heading: &str) -> Option<String> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut block_content = Vec::new();
+    let mut recording = false;
+
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            let heading_text = trimmed.trim_start_matches('#').trim();
+            if recording {
+                break;
+            }
+            if heading_text.eq_ignore_ascii_case(heading) {
+                recording = true;
+                continue;
+            }
+        }
+        if recording {
+            block_content.push(line);
+        }
+    }
+
+    if recording {
+        Some(block_content.join("\n").trim().to_string())
+    } else {
+        None
+    }
+}
+
 /// Parse specific block section out of OKF Markdown document by header
 pub fn read_okf_block(
     ws_path: &str,
@@ -284,34 +314,8 @@ pub fn read_okf_block(
     let content = fs::read_to_string(&file_path)
         .map_err(|e| format!("读取文件失败: {}", e))?;
 
-    let lines: Vec<&str> = content.lines().collect();
-    let mut block_content = Vec::new();
-    let mut recording = false;
-
-    for line in lines {
-        let trimmed = line.trim();
-        if trimmed.starts_with('#') {
-            let _level = trimmed.chars().take_while(|&c| c == '#').count();
-            let heading_text = trimmed.trim_start_matches('#').trim();
-            if recording {
-                // Stopped by next heading of equal or higher importance (or any heading for simplicity)
-                break;
-            }
-            if heading_text.eq_ignore_ascii_case(heading) {
-                recording = true;
-                continue;
-            }
-        }
-        if recording {
-            block_content.push(line);
-        }
-    }
-
-    if recording {
-        Ok(block_content.join("\n").trim().to_string())
-    } else {
-        Err(format!("未找到标题为 '{}' 的板块", heading))
-    }
+    parse_okf_block_from_content(&content, heading)
+        .ok_or_else(|| format!("未找到标题为 '{}' 的板块", heading))
 }
 
 pub fn write_okf_block(
@@ -383,9 +387,23 @@ pub fn write_okf_block(
     }
 
     if !written {
+        // Detect preferred heading level from file style
+        let mut level = if category == "concepts" { 2 } else { 1 };
+        for line in &new_lines {
+            let trimmed = line.trim();
+            if trimmed.starts_with('#') {
+                let current_level = trimmed.chars().take_while(|&c| c == '#').count();
+                if current_level > 1 {
+                    level = current_level;
+                    break;
+                }
+            }
+        }
+        let prefix = "#".repeat(level);
+
         // Heading not found, append to end
         new_lines.push("".to_string());
-        new_lines.push(format!("# {}", heading));
+        new_lines.push(format!("{} {}", prefix, heading));
         new_lines.push(new_content.to_string());
     }
 
@@ -420,12 +438,7 @@ pub fn parse_column_semantics(
     };
 
     // Find title in YAML frontmatter
-    for line in content.lines() {
-        if line.starts_with("title:") {
-            desc = Some(line.trim_start_matches("title:").trim().to_string());
-            break;
-        }
-    }
+    desc = parse_yaml_field(&content, "title");
 
     // Parse sections
     let lines: Vec<&str> = content.lines().collect();
@@ -485,20 +498,52 @@ pub fn parse_yaml_field(content: &str, field: &str) -> Option<String> {
     None
 }
 
-/// Retroactively generate OKF markdown files for existing SQLite object defs.
+/// Retroactively generate OKF markdown files for existing SQLite object defs and sources.
 pub fn ensure_all_object_okf(ws_path: &str) {
     let Ok(sqlite) = crate::db::get_db_conn() else { return };
-    let Ok(objs) = crate::db::list_object_defs(&sqlite, ws_path) else { return };
-    for obj in objs {
-        if obj.kind == "table" {
-            let file_path = get_okf_dir(ws_path).join("tables").join(format!("{}.md", obj.table_name));
-            if !file_path.exists() {
-                let _ = write_table_okf(ws_path, &obj.table_name, &obj.columns, obj.row_count);
+    
+    // 1. Process sources
+    if let Ok(sources) = crate::db::list_sources(&sqlite, ws_path) {
+        for src in sources {
+            let source_path = get_okf_dir(ws_path).join("sources").join(format!("{}.md", src.table_name));
+            if !source_path.exists() {
+                let _ = write_source_okf(
+                    ws_path,
+                    &src.table_name,
+                    &src.label,
+                    &src.file_path,
+                    src.file_size,
+                    src.file_mtime,
+                    &src.columns,
+                    src.row_count,
+                );
             }
-        } else {
-            let file_path = get_okf_dir(ws_path).join("views").join(format!("{}.md", obj.table_name));
-            if !file_path.exists() {
-                let _ = write_view_okf(ws_path, &obj.table_name, &obj.select_sql, &obj.columns);
+            let pipeline_path = get_okf_dir(ws_path).join("pipelines").join("specific").join(format!("{}_ingest.md", src.table_name));
+            if !pipeline_path.exists() {
+                let _ = write_pipeline_okf(
+                    ws_path,
+                    &src.table_name,
+                    &src.label,
+                    &src.file_path,
+                    &src.storage,
+                );
+            }
+        }
+    }
+
+    // 2. Process table/view object defs
+    if let Ok(objs) = crate::db::list_object_defs(&sqlite, ws_path) {
+        for obj in objs {
+            if obj.kind == "table" {
+                let file_path = get_okf_dir(ws_path).join("tables").join(format!("{}.md", obj.table_name));
+                if !file_path.exists() {
+                    let _ = write_table_okf(ws_path, &obj.table_name, &obj.columns, obj.row_count);
+                }
+            } else {
+                let file_path = get_okf_dir(ws_path).join("views").join(format!("{}.md", obj.table_name));
+                if !file_path.exists() {
+                    let _ = write_view_okf(ws_path, &obj.table_name, &obj.select_sql, &obj.columns);
+                }
             }
         }
     }
@@ -520,8 +565,15 @@ pub fn get_okf_memory_summary(ws_path: &str) -> String {
                     let name = entry.path().file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
                     if let Ok(content) = fs::read_to_string(entry.path()) {
                         let title = parse_yaml_field(&content, "title").unwrap_or_else(|| name.clone());
-                        let desc = parse_yaml_field(&content, "description").unwrap_or_default();
-                        sources_info.push(format!("- **源文件原始视图 `{}`** (业务名称: {}): {}", name, title, desc));
+                        let mut desc = parse_yaml_field(&content, "description").unwrap_or_default();
+                        if desc.is_empty() {
+                            if let Some(note) = parse_okf_block_from_content(&content, "探索备注") {
+                                desc = note;
+                            } else if let Some(biz_desc) = parse_okf_block_from_content(&content, "业务描述") {
+                                desc = biz_desc;
+                            }
+                        }
+                        sources_info.push(format!("- **源文件原始视图 `{}`** (业务名称: {}): {}", name, title, desc.replace('\n', " ")));
                     }
                 }
             }
@@ -543,7 +595,14 @@ pub fn get_okf_memory_summary(ws_path: &str) -> String {
                     let name = entry.path().file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
                     if let Ok(content) = fs::read_to_string(entry.path()) {
                         let title = parse_yaml_field(&content, "title").unwrap_or_else(|| name.clone());
-                        let desc = parse_yaml_field(&content, "description").unwrap_or_default();
+                        let mut desc = parse_yaml_field(&content, "description").unwrap_or_default();
+                        if desc.is_empty() {
+                            if let Some(biz_desc) = parse_okf_block_from_content(&content, "业务描述") {
+                                desc = biz_desc;
+                            } else if let Some(note) = parse_okf_block_from_content(&content, "探索备注") {
+                                desc = note;
+                            }
+                        }
                         
                         let (_, col_comments, relations) = parse_column_semantics(ws_path, &name);
                         let mut table_detail = format!("### 数据物理表 `{}` (业务名称: {})\n", name, title);
@@ -585,7 +644,14 @@ pub fn get_okf_memory_summary(ws_path: &str) -> String {
                     let name = entry.path().file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
                     if let Ok(content) = fs::read_to_string(entry.path()) {
                         let title = parse_yaml_field(&content, "title").unwrap_or_else(|| name.clone());
-                        let desc = parse_yaml_field(&content, "description").unwrap_or_default();
+                        let mut desc = parse_yaml_field(&content, "description").unwrap_or_default();
+                        if desc.is_empty() {
+                            if let Some(biz_desc) = parse_okf_block_from_content(&content, "业务描述") {
+                                desc = biz_desc;
+                            } else if let Some(note) = parse_okf_block_from_content(&content, "探索备注") {
+                                desc = note;
+                            }
+                        }
                         
                         let (_, col_comments, relations) = parse_column_semantics(ws_path, &name);
                         let mut view_detail = format!("### 逻辑分层视图 `{}` (业务名称: {})\n", name, title);
@@ -613,6 +679,81 @@ pub fn get_okf_memory_summary(ws_path: &str) -> String {
         if !views_info.is_empty() {
             summary.push_str("# 逻辑视图及其业务逻辑与释义记忆 (views)\n");
             summary.push_str(&views_info.join("\n"));
+            summary.push_str("\n");
+        }
+    }
+
+    // 4. Process concepts
+    let concepts_dir = okf_dir.join("concepts");
+    if concepts_dir.exists() {
+        let mut concepts_info = Vec::new();
+        if let Ok(entries) = fs::read_dir(concepts_dir) {
+            for entry in entries.flatten() {
+                if entry.path().extension().and_then(|e| e.to_str()) == Some("md") {
+                    let name = entry.path().file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                    if let Ok(content) = fs::read_to_string(entry.path()) {
+                        let title = parse_yaml_field(&content, "title").unwrap_or_else(|| name.clone());
+                        let desc = parse_yaml_field(&content, "description").unwrap_or_default();
+                        
+                        let mut concept_detail = format!("### 业务通用定义 `{}` (业务名称: {})\n", name, title);
+                        if !desc.is_empty() {
+                            concept_detail.push_str(&format!("> {}\n", desc));
+                        }
+                        
+                        let mut current_heading = String::new();
+                        let mut block_content = Vec::new();
+                        let mut intro_content = Vec::new();
+                        let mut in_yaml = false;
+                        
+                        for line in content.lines() {
+                            let trimmed = line.trim();
+                            if trimmed == "---" {
+                                in_yaml = !in_yaml;
+                                continue;
+                            }
+                            if in_yaml {
+                                continue;
+                            }
+                            if trimmed.starts_with('#') {
+                                let heading_text = trimmed.trim_start_matches('#').trim();
+                                if heading_text.eq_ignore_ascii_case(&title) || heading_text.eq_ignore_ascii_case(&name) {
+                                    continue;
+                                }
+                                if !current_heading.is_empty() {
+                                    if !block_content.is_empty() {
+                                        concept_detail.push_str(&format!("- **{}**:\n  {}\n", current_heading, block_content.join("\n  ")));
+                                    }
+                                } else {
+                                    if !intro_content.is_empty() && desc.is_empty() {
+                                        concept_detail.push_str(&format!("> {}\n", intro_content.join("\n> ")));
+                                    }
+                                }
+                                current_heading = heading_text.to_string();
+                                block_content.clear();
+                            } else {
+                                if !trimmed.is_empty() {
+                                    if current_heading.is_empty() {
+                                        intro_content.push(trimmed.to_string());
+                                    } else {
+                                        block_content.push(trimmed.to_string());
+                                    }
+                                }
+                            }
+                        }
+                        if !current_heading.is_empty() && !block_content.is_empty() {
+                            concept_detail.push_str(&format!("- **{}**:\n  {}\n", current_heading, block_content.join("\n  ")));
+                        } else if current_heading.is_empty() && !intro_content.is_empty() && desc.is_empty() {
+                            concept_detail.push_str(&format!("> {}\n", intro_content.join("\n> ")));
+                        }
+                        
+                        concepts_info.push(concept_detail);
+                    }
+                }
+            }
+        }
+        if !concepts_info.is_empty() {
+            summary.push_str("# 业务通用概念与全局定义 (concepts)\n");
+            summary.push_str(&concepts_info.join("\n"));
             summary.push_str("\n");
         }
     }
@@ -665,10 +806,51 @@ description: Important sales info
         let block_updated_fallback = read_okf_block(ws, "tables", "test_table", "关联关系").unwrap();
         assert_eq!(block_updated_fallback, "- 关联修改项2");
 
-        // Test auto creation of non-existent file
-        write_okf_block(ws, "concepts", "new_concept", "基本概念", "这是一个测试概念").unwrap();
-        let concept_block = read_okf_block(ws, "concepts", "new_concept", "基本概念").unwrap();
-        assert_eq!(concept_block, "这是一个测试概念");
+        // Test dynamic heading level detection
+        let level2_file = temp.join("okf").join("tables").join("l2_table.md");
+        let l2_content = "\
+---
+title: L2 Table
+type: DuckDB Table
+---
+# L2 Table
+## 业务描述
+说明
+";
+        let _ = fs::write(&level2_file, l2_content);
+        write_okf_block(ws, "tables", "l2_table", "新板块", "新内容").unwrap();
+        let l2_file_content = fs::read_to_string(&level2_file).unwrap();
+        assert!(l2_file_content.contains("## 新板块"));
+        assert!(!l2_file_content.lines().any(|l| l.trim() == "# 新板块"));
+
+        // Test business description parsing from markdown headers for sources
+        let _ = fs::create_dir_all(temp.join("okf").join("sources"));
+        let source_file = temp.join("okf").join("sources").join("test_source.md");
+        let source_content = "\
+---
+title: 原始销售数据
+type: Data Source
+---
+# 探索备注
+这是从销售系统中导出的2026年数据。
+";
+        let _ = fs::write(&source_file, source_content);
+
+        // Test concept intro and robust heading parsing
+        let _ = fs::create_dir_all(temp.join("okf").join("concepts"));
+        let concept_file_path = temp.join("okf").join("concepts").join("new_concept2.md");
+        let concept_content = "\
+---
+title: 测试概念2
+type: Business Concept
+---
+# 测试概念2
+这是测试概念的引言部分，说明了公司的主要愿景。
+
+## 详细板块
+这是板块内容。
+";
+        let _ = fs::write(&concept_file_path, concept_content);
 
         // Test memory summary parser
         let summary = get_okf_memory_summary(ws);
@@ -676,6 +858,14 @@ description: Important sales info
         assert!(summary.contains("Test Table"));
         assert!(summary.contains("Important sales info"));
         assert!(summary.contains("revenue"));
+        
+        // Assertions for raw source description parsing
+        assert!(summary.contains("这是从销售系统中导出的2026年数据。"));
+        
+        // Assertions for concept intro and sections parsing
+        assert!(summary.contains("这是测试概念的引言部分，说明了公司的主要愿景。"));
+        assert!(summary.contains("详细板块"));
+        assert!(summary.contains("这是板块内容。"));
 
         let _ = fs::remove_dir_all(temp);
     }
