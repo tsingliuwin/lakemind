@@ -292,14 +292,75 @@ export default function App() {
             // Parse usage data and merge into the task being returned below.
             try {
               const u = JSON.parse(payload.text);
-              t = {
-                ...t,
-                tokenUsage: u,
-              };
-              // Update messages reference for this updated t.
-              messages = [...(t.messages ?? [])];
-              lastMsg = messages[messages.length - 1];
-              segments = lastMsg.segments ? [...lastMsg.segments] : [];
+              const { isEstimate, ...usageData } = u;
+              const prevUsage = t.tokenUsage;
+
+              if (isEstimate) {
+                if (prevUsage) {
+                  // We already have a real FinalResponse baseline — freeze all
+                  // structural fields (inputTokens, messagesTokens, etc.) at
+                  // their last accurate value so the panel doesn't jump around
+                  // during streaming. Only let outputTokens / totalTokens
+                  // advance so the user can watch the response grow.
+                  // cachedInputTokens / cacheHitRate are always 0 in estimates
+                  // so we always keep the real values.
+                  const newOutput = Math.max(usageData.outputTokens, prevUsage.outputTokens);
+                  t = {
+                    ...t,
+                    tokenUsage: {
+                      ...prevUsage,
+                      outputTokens: newOutput,
+                      totalTokens:  prevUsage.inputTokens + newOutput,
+                    },
+                  };
+                } else {
+                  // First message ever — no baseline yet, use estimate as-is.
+                  t = {
+                    ...t,
+                    tokenUsage: {
+                      ...usageData,
+                      cachedInputTokens: 0,
+                      cacheHitRate:      0,
+                    },
+                  };
+                }
+              } else {
+                // FinalResponse carries exact per-turn token counts from the API.
+                // We accumulate across all turns so the panel reflects the whole
+                // conversation rather than only the most-recent LLM call.
+                //
+                // inputTokens  – take max: every turn re-sends the full history so
+                //   the largest value equals the peak context window load; it grows
+                //   monotonically as the conversation grows.
+                // outputTokens – accumulate: add this turn's generated tokens to
+                //   the running total so the user can see how much has been written.
+                // messagesTokens / toolsTokens / preambleTokens – from this turn:
+                //   they describe the composition of the most recent API call.
+                // cachedInputTokens / cacheHitRate – accumulate cached tokens and
+                //   recompute hit-rate against the accumulated input total.
+                const prevInput  = prevUsage?.inputTokens        ?? 0;
+                const prevOut    = prevUsage?.outputTokens        ?? 0;
+                const prevCached = prevUsage?.cachedInputTokens   ?? 0;
+
+                const maxInput       = Math.max(usageData.inputTokens, prevInput);
+                const cumulativeOut  = prevOut + usageData.outputTokens;
+                const cumulativeCached = prevCached + usageData.cachedInputTokens;
+                const hitRate = maxInput > 0
+                  ? Math.round(cumulativeCached / maxInput * 100)
+                  : 0;
+
+                t = {
+                  ...t,
+                  tokenUsage: {
+                    ...usageData,
+                    inputTokens:       maxInput,
+                    outputTokens:      cumulativeOut,
+                    totalTokens:       maxInput + cumulativeOut,
+                    cachedInputTokens: cumulativeCached,
+                    cacheHitRate:      hitRate,
+                  },
+                };
+              }
             } catch { /* ignore parse error */ }
           } else if (kind === "error") {
             segments = [
