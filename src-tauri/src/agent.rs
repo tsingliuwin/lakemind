@@ -61,6 +61,8 @@ pub enum Segment {
         table: Option<SqlResult>,
         #[serde(skip_serializing_if = "Option::is_none")]
         elapsed_ms: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        result: Option<String>,
     },
     /// Visible answer text (Markdown). Accumulated from text deltas.
     Text {
@@ -301,6 +303,7 @@ fn emit_tool_call(window: &tauri::Window, task_id: &str, id: &str, tool: &str, a
         sql: None,
         table: None,
         elapsed_ms: None,
+        result: None,
     }));
 }
 
@@ -315,6 +318,7 @@ fn emit_tool_result(
     sql: Option<String>,
     table: Option<SqlResult>,
     elapsed_ms: Option<u64>,
+    result: Option<String>,
 ) {
     emit_event(window, task_id, "tool_result", None, Some(Segment::Tool {
         id: id.to_string(),
@@ -325,6 +329,7 @@ fn emit_tool_result(
         sql,
         table,
         elapsed_ms,
+        result,
     }));
 }
 
@@ -347,6 +352,7 @@ fn emit_tool_awaiting(
         sql: Some(ddl),
         table: None,
         elapsed_ms: None,
+        result: None,
     }));
 }
 
@@ -447,14 +453,14 @@ impl Tool for ListTablesTool {
                 };
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "ok",
-                    summary, None, None, Some(elapsed),
+                    summary, None, None, Some(elapsed), None,
                 );
                 Ok(format!("当前可用的数据库表列表为: {}", tables.join(", ")))
             }
             Err(err) => {
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "error",
-                    err.0.clone(), None, None, Some(elapsed),
+                    err.0.clone(), None, None, Some(elapsed), None,
                 );
                 Err(err)
             }
@@ -542,14 +548,14 @@ impl Tool for DescribeTableTool {
                 let summary = format!("结构分析完成，{}{}, 共 {} 个字段", table_name, title_part, n);
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "ok",
-                    summary, None, Some(res), Some(elapsed),
+                    summary, None, Some(res), Some(elapsed), None,
                 );
                 Ok(format!("表 {}{} 的列结构如下:\n{}{}", table_name, title_part, col_lines.join("\n"), rels_part))
             }
             Err(err) => {
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "error",
-                    err.0.clone(), None, None, Some(elapsed),
+                    err.0.clone(), None, None, Some(elapsed), None,
                 );
                 Err(err)
             }
@@ -608,11 +614,11 @@ impl Tool for LoadOkfBlockTool {
         let elapsed = start.elapsed().as_millis() as u64;
         match res {
             Ok(content) => {
-                emit_tool_result(&self.window, &self.task_id, &call_id, "ok", format!("读取板块 {} 成功", args.heading), None, None, Some(elapsed));
+                emit_tool_result(&self.window, &self.task_id, &call_id, "ok", format!("读取板块 {} 成功", args.heading), None, None, Some(elapsed), Some(content.clone()));
                 Ok(content)
             }
             Err(e) => {
-                emit_tool_result(&self.window, &self.task_id, &call_id, "error", e.clone(), None, None, Some(elapsed));
+                emit_tool_result(&self.window, &self.task_id, &call_id, "error", e.clone(), None, None, Some(elapsed), None);
                 Err(ToolError(e))
             }
         }
@@ -669,11 +675,11 @@ impl Tool for WriteOkfBlockTool {
         match res {
             Ok(_) => {
                 let summary = format!("更新板块 {} 成功", args.heading);
-                emit_tool_result(&self.window, &self.task_id, &call_id, "ok", summary.clone(), None, None, Some(elapsed));
+                emit_tool_result(&self.window, &self.task_id, &call_id, "ok", summary.clone(), None, None, Some(elapsed), Some(args.content.clone()));
                 Ok(summary)
             }
             Err(e) => {
-                emit_tool_result(&self.window, &self.task_id, &call_id, "error", e.clone(), None, None, Some(elapsed));
+                emit_tool_result(&self.window, &self.task_id, &call_id, "error", e.clone(), None, None, Some(elapsed), None);
                 Err(ToolError(e))
             }
         }
@@ -754,10 +760,10 @@ impl Tool for SearchOkfRecipesTool {
         let elapsed = start.elapsed().as_millis() as u64;
         if search_res.is_empty() {
             let msg = "未找到匹配的配方或故障记录。".to_string();
-            emit_tool_result(&self.window, &self.task_id, &call_id, "ok", msg.clone(), None, None, Some(elapsed));
+            emit_tool_result(&self.window, &self.task_id, &call_id, "ok", msg.clone(), None, None, Some(elapsed), None);
             Ok(msg)
         } else {
-            emit_tool_result(&self.window, &self.task_id, &call_id, "ok", format!("检索出 {} 条记录", search_res.len()), None, None, Some(elapsed));
+            emit_tool_result(&self.window, &self.task_id, &call_id, "ok", format!("检索出 {} 条记录", search_res.len()), None, None, Some(elapsed), Some(search_res.join("\n\n")));
             Ok(format!("检索出以下相关经验配方:\n\n{}", search_res.join("\n\n")))
         }
     }
@@ -855,12 +861,12 @@ impl Tool for CheckSourceFingerprintTool {
         match match_res {
             Some(name) => {
                 let msg = format!("找到完全匹配的文件指纹！已有注册表名：`{}`。可直接通过查询操作它，跳过重新探索。", name);
-                emit_tool_result(&self.window, &self.task_id, &call_id, "ok", msg.clone(), None, None, Some(elapsed));
+                emit_tool_result(&self.window, &self.task_id, &call_id, "ok", msg.clone(), None, None, Some(elapsed), Some(name.clone()));
                 Ok(msg)
             }
             None => {
                 let msg = "未找到匹配的数据指纹，这是一个全新的数据源文件，请按常规方式导入并探索。".to_string();
-                emit_tool_result(&self.window, &self.task_id, &call_id, "ok", msg.clone(), None, None, Some(elapsed));
+                emit_tool_result(&self.window, &self.task_id, &call_id, "ok", msg.clone(), None, None, Some(elapsed), None);
                 Ok(msg)
             }
         }
@@ -943,14 +949,14 @@ impl Tool for ExecuteQueryTool {
                 }
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "ok",
-                    summary, Some(sql.to_string()), Some(res), Some(elapsed),
+                    summary, Some(sql.to_string()), Some(res), Some(elapsed), None,
                 );
                 Ok(out)
             }
             Err(err) => {
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "error",
-                    err.0.clone(), Some(sql.to_string()), None, Some(elapsed),
+                    err.0.clone(), Some(sql.to_string()), None, Some(elapsed), None,
                 );
                 Err(err)
             }
@@ -978,7 +984,7 @@ impl Tool for SampleDataTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: "sample_data".to_string(),
-            description: "获取指定数据表或视图的前 5 行样例数据。用于直观了解数据的具体内容和字段格式。".to_string(),
+            description: "获取指定数据表或视图的前 5 行样例数据。用于直观了解数据的具体内容 and 字段格式。".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -1026,14 +1032,14 @@ impl Tool for SampleDataTool {
                 }
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "ok",
-                    summary, None, Some(res), Some(elapsed),
+                    summary, None, Some(res), Some(elapsed), None,
                 );
                 Ok(out)
             }
             Err(err) => {
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "error",
-                    err.0.clone(), None, None, Some(elapsed),
+                    err.0.clone(), None, None, Some(elapsed), None,
                 );
                 Err(err)
             }
@@ -1094,7 +1100,7 @@ impl DdlToolShared {
                 let summary = format!("复用已有的{}（输入未变化）", summary_pending);
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "ok",
-                    summary.clone(), Some(ddl), None, None,
+                    summary.clone(), Some(ddl), None, None, None,
                 );
                 return Ok(summary);
             }
@@ -1121,7 +1127,7 @@ impl DdlToolShared {
                     let msg = "用户已取消此操作".to_string();
                     emit_tool_result(
                         &self.window, &self.task_id, &call_id, "error",
-                        msg.clone(), Some(ddl), None, None,
+                        msg.clone(), Some(ddl), None, None, None,
                     );
                     return Err(ToolError(msg));
                 }
@@ -1159,7 +1165,7 @@ impl DdlToolShared {
                 let summary = format!("{}成功", summary_pending);
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "ok",
-                    summary.clone(), Some(ddl), None, Some(elapsed),
+                    summary.clone(), Some(ddl), None, Some(elapsed), None,
                 );
                 Ok(summary)
             }
@@ -1167,14 +1173,14 @@ impl DdlToolShared {
                 let msg = format!("执行失败: {e}");
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "error",
-                    msg.clone(), Some(ddl), None, Some(elapsed),
+                    msg.clone(), Some(ddl), None, Some(elapsed), None,
                 );
                 Err(ToolError(msg))
             }
             Err(e) => {
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "error",
-                    e.0.clone(), Some(ddl), None, Some(elapsed),
+                    e.0.clone(), Some(ddl), None, Some(elapsed), None,
                 );
                 Err(e)
             }
@@ -1598,7 +1604,7 @@ impl Tool for RenderChartTool {
                 let summary = format!("已生成{}图，共 {} 个数据点", chart_type_cn(&args.chart_type), row_count);
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "ok",
-                    summary.clone(), None, None, Some(elapsed),
+                    summary.clone(), None, None, Some(elapsed), None,
                 );
                 Ok(summary)
             }
@@ -1606,7 +1612,7 @@ impl Tool for RenderChartTool {
                 let msg = format!("查询失败: {}", err.0);
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "error",
-                    msg.clone(), None, None, Some(elapsed),
+                    msg.clone(), None, None, Some(elapsed), None,
                 );
                 Err(err)
             }

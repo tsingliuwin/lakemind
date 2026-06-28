@@ -1,6 +1,6 @@
 import { For, Index, Show, Switch, Match, createSignal, createEffect, createMemo, onMount, onCleanup, untrack } from "solid-js";
 import type { ChatMessage, Segment, TokenUsage } from "../lib/types";
-import { derivePanelMetrics, fmtCap, fmtNum, fmtPct } from "../lib/metrics";
+import { derivePanelMetrics, fmtCap, fmtPct } from "../lib/metrics";
 import ToolSegment from "./ToolSegment";
 import ChartSegment from "./ChartSegment";
 import MarkdownRenderer from "./MarkdownRenderer";

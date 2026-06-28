@@ -120,9 +120,9 @@ export type Segment =
       summary?: string;
       /** execute_query 等：SQL 文本，可「在 SQL 面板打开」。awaiting 时为待确认 DDL。 */
       sql?: string;
-      /** 行返回类工具：完整结构化结果，内联渲染为表格。 */
       table?: SqlResult;
       elapsedMs?: number;
+      result?: string;
     }
   | {
       type: "chart";
