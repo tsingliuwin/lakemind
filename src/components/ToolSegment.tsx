@@ -15,7 +15,15 @@ const TOOL_LABELS: Record<string, string> = {
   write_okf_block: "更新业务知识",
   search_okf_recipes: "检索清洗配方",
   check_source_fingerprint: "校验数据指纹",
-  step: "步骤",
+};
+
+const ARG_KEY_LABELS: Record<string, string> = {
+  category: "归属目录",
+  name: "名称",
+  heading: "板块标题",
+  content: "写入内容",
+  query: "检索关键词",
+  file_path: "文件路径",
 };
 
 /**
@@ -251,7 +259,7 @@ export default function ToolSegment(props: {
                   <For each={Object.entries(t()!.args as Record<string, any>)}>
                     {([key, val]) => (
                       <div style="display: flex; gap: 6px; align-items: flex-start; font-family: monospace; line-height: 1.4;">
-                        <span style="color: var(--accent-blue, #60a5fa); font-weight: 500; min-width: 70px;">{key}:</span>
+                        <span style="color: var(--text-normal); font-weight: 500; min-width: 80px;">{ARG_KEY_LABELS[key] ?? key}:</span>
                         <Show when={key === "content" || key === "query" || key === "file_path"} fallback={<span style="color: var(--text-normal);">{String(val)}</span>}>
                           <pre style="margin: 0; background: var(--bg-active); padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-faint); font-family: inherit; font-size: 11.5px; white-space: pre-wrap; word-break: break-all; flex: 1;">{String(val)}</pre>
                         </Show>
