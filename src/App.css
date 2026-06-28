@@ -964,6 +964,18 @@ select:hover:not(:disabled) {
   background: rgba(100, 116, 139, 0.1);
   border: 1px solid rgba(100, 116, 139, 0.2);
 }
+.kind-badge--category-icon[data-category="TABLE"] {
+  color: #3b82f6;     /* blue */
+}
+.kind-badge--category-icon[data-category="TMP"] {
+  color: #6366f1;     /* indigo */
+}
+.kind-badge--category-icon[data-category="VIEW"] {
+  color: #0ea5e9;     /* sky */
+}
+.kind-badge--category-icon[data-category="TMPV"] {
+  color: #64748b;     /* slate */
+}
 .leaf-label {
   flex: 1;
   overflow: hidden;
