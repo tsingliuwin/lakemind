@@ -329,21 +329,32 @@ pub fn write_okf_block(
             okf_dir.join("views").join(format!("{}.md", name)),
             okf_dir.join("sources").join(format!("{}.md", name)),
         ];
-        let mut found = false;
         for c in &candidates {
             if c.exists() {
                 file_path = c.clone();
-                found = true;
                 break;
             }
         }
-        if !found {
-            return Err(format!("文件不存在: {:?}", file_path));
-        }
     }
 
-    let content = fs::read_to_string(&file_path)
-        .map_err(|e| format!("读取文件失败: {}", e))?;
+    let content = if file_path.exists() {
+        fs::read_to_string(&file_path).map_err(|e| format!("读取文件失败: {}", e))?
+    } else {
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+        }
+        let doc_type = match category {
+            "tables" => "DuckDB Table",
+            "views" => "DuckDB View",
+            "sources" => "Data Source",
+            "concepts" => "Business Concept",
+            _ => "Concept",
+        };
+        format!(
+            "---\ntype: {}\ntitle: {}\ndescription: 自动初始化的 OKF 文档\n---\n",
+            doc_type, name
+        )
+    };
 
     let lines: Vec<&str> = content.lines().collect();
     let mut new_lines: Vec<String> = Vec::new();
@@ -653,6 +664,11 @@ description: Important sales info
         write_okf_block(ws, "views", "test_table", "关联关系", "- 关联修改项2").unwrap();
         let block_updated_fallback = read_okf_block(ws, "tables", "test_table", "关联关系").unwrap();
         assert_eq!(block_updated_fallback, "- 关联修改项2");
+
+        // Test auto creation of non-existent file
+        write_okf_block(ws, "concepts", "new_concept", "基本概念", "这是一个测试概念").unwrap();
+        let concept_block = read_okf_block(ws, "concepts", "new_concept", "基本概念").unwrap();
+        assert_eq!(concept_block, "这是一个测试概念");
 
         // Test memory summary parser
         let summary = get_okf_memory_summary(ws);
