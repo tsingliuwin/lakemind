@@ -158,6 +158,17 @@ export interface ChatCard {
   rows?: number;
 }
 
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cachedInputTokens: number;
+  messagesTokens: number;
+  toolsTokens: number;
+  preambleTokens: number;
+  cacheHitRate: number;
+}
+
 export interface QueryTask {
   id: string;
   name: string;
@@ -172,6 +183,8 @@ export interface QueryTask {
   saved?: boolean;
   /** 使用的模型 ID */
   modelId?: string;
+  /** chat task 的累计 token 用量（持久化，伴随对话全生命周期）。 */
+  tokenUsage?: TokenUsage;
 }
 
 export interface Workspace {

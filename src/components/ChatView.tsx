@@ -51,6 +51,11 @@ export default function ChatView(props: {
   const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
   const [priorityDropdownOpen, setPriorityDropdownOpen] = createSignal(false);
   const [confirmDropdownOpen, setConfirmDropdownOpen] = createSignal(false);
+  // Memoized token usage so the panel re-renders reactively when props change.
+  const usage = createMemo(() => props.tokenUsage ?? {
+    inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedInputTokens: 0,
+    messagesTokens: 0, toolsTokens: 0, preambleTokens: 0, cacheHitRate: 0,
+  });
   let modelRef: HTMLDivElement | undefined;
   let priorityRef: HTMLDivElement | undefined;
   let confirmRef: HTMLDivElement | undefined;
@@ -650,7 +655,7 @@ export default function ChatView(props: {
                 </span>
                 <div class="token-usage-panel">
                   {(() => {
-                    const u = props.tokenUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedInputTokens: 0, messagesTokens: 0, toolsTokens: 0, preambleTokens: 0, cacheHitRate: 0 };
+                    const u = usage();
                     const input = u.inputTokens;
                     const ctxWindow = props.contextWindow ?? 128000;
                     const usedPct = input > 0 ? Math.min(100, (input / ctxWindow * 100)) : 0;

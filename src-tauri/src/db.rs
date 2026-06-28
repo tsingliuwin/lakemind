@@ -391,6 +391,7 @@ pub fn init_global_db() -> Result<(), String> {
             created_at INTEGER NOT NULL,
             saved INTEGER NOT NULL,
             model_id TEXT,
+            token_usage TEXT,
             FOREIGN KEY(workspace_path) REFERENCES workspaces(path) ON DELETE CASCADE
         )",
         [],
@@ -399,6 +400,8 @@ pub fn init_global_db() -> Result<(), String> {
 
     // Migrate tasks table to add model_id column if it doesn't exist
     let _ = conn.execute("ALTER TABLE tasks ADD COLUMN model_id TEXT;", []);
+    // Migrate tasks table to add token_usage column if it doesn't exist
+    let _ = conn.execute("ALTER TABLE tasks ADD COLUMN token_usage TEXT;", []);
 
     // sources: the file ↔ table ↔ storage mapping. file_mtime/file_size form
     // the source fingerprint; columns/row_count are cached DuckLake metadata

@@ -37,13 +37,6 @@ export default function App() {
   const [importStatus, setImportStatus] = createSignal<ImportProgress | null>(null);
   // Dependency info for the selected table (upstreams + downstreams).
   const [deps, setDeps] = createSignal<DepInfo | null>(null);
-  // Token usage for the current chat (from LLM API response).
-  const [tokenUsage, setTokenUsage] = createSignal<{
-    inputTokens: number; outputTokens: number; totalTokens: number;
-    cachedInputTokens: number; messagesTokens: number; toolsTokens: number;
-    preambleTokens: number; cacheHitRate: number;
-  } | null>(null);
-
   /** Fetch registration coverage for a workspace and update the status dot. */
   async function refreshRegisterStatus(wsPath: string) {
     try {
@@ -296,18 +289,29 @@ export default function App() {
               }
             }
           } else if (kind === "usage" && payload.text) {
+            // Parse usage data and merge into the task being returned below.
             try {
               const u = JSON.parse(payload.text);
-              setTokenUsage({
-                inputTokens: u.inputTokens ?? 0,
-                outputTokens: u.outputTokens ?? 0,
-                totalTokens: u.totalTokens ?? 0,
-                cachedInputTokens: u.cachedInputTokens ?? 0,
-                messagesTokens: u.messagesTokens ?? 0,
-                toolsTokens: u.toolsTokens ?? 0,
-                preambleTokens: u.preambleTokens ?? 0,
-                cacheHitRate: u.cacheHitRate ?? 0,
-              });
+              const prevUsage = t.tokenUsage;
+              const inputTokens = Math.max(prevUsage?.inputTokens ?? 0, u.inputTokens ?? 0);
+              const outputTokens = (prevUsage?.outputTokens ?? 0) + (u.outputTokens ?? 0);
+              t = {
+                ...t,
+                tokenUsage: {
+                  inputTokens,
+                  outputTokens,
+                  totalTokens: inputTokens + outputTokens,
+                  cachedInputTokens: Math.max(prevUsage?.cachedInputTokens ?? 0, u.cachedInputTokens ?? 0),
+                  messagesTokens: Math.max(prevUsage?.messagesTokens ?? 0, u.messagesTokens ?? 0),
+                  toolsTokens: Math.max(prevUsage?.toolsTokens ?? 0, u.toolsTokens ?? 0),
+                  preambleTokens: Math.max(prevUsage?.preambleTokens ?? 0, u.preambleTokens ?? 0),
+                  cacheHitRate: u.cacheHitRate ?? prevUsage?.cacheHitRate ?? 0,
+                },
+              };
+              // Update messages reference for this updated t.
+              messages = [...(t.messages ?? [])];
+              lastMsg = messages[messages.length - 1];
+              segments = lastMsg.segments ? [...lastMsg.segments] : [];
             } catch { /* ignore parse error */ }
           } else if (kind === "error") {
             segments = [
@@ -526,6 +530,7 @@ export default function App() {
     const task = tasks().find((t) => t.id === id);
     if (!task) return;
     setActiveTaskId(id);
+    setDeps(null);
     if ((task.kind ?? "sql") === "sql") {
       setSql(task.sql);
     }
@@ -543,12 +548,14 @@ export default function App() {
     try {
       const task = tasks().find((t) => t.id === taskId);
       const modelId = task?.modelId || null;
+      const tokenUsage = task?.tokenUsage ?? null;
       await invoke("save_chat_task", {
         workspacePath: currentWorkspace().path,
         taskId,
         name,
         messages,
         modelId,
+        tokenUsage,
       });
     } catch (err) {
       console.error("Failed to save chat task to backend:", err);
@@ -1420,7 +1427,7 @@ export default function App() {
                           streaming={streamingTaskId() === id()}
                           onSend={sendChatMessage}
                           onStop={() => void stopChat(id())}
-                          tokenUsage={tokenUsage()}
+                          tokenUsage={tasks().find((t) => t.id === id())?.tokenUsage ?? null}
                           contextWindow={modelCtxWindows()[selectedModel()] ?? 128000}
                           onOpenInSqlPanel={openInSqlPanel}
                           onDelete={() => deleteTask(id())}
