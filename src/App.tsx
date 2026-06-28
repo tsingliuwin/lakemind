@@ -37,6 +37,12 @@ export default function App() {
   const [importStatus, setImportStatus] = createSignal<ImportProgress | null>(null);
   // Dependency info for the selected table (upstreams + downstreams).
   const [deps, setDeps] = createSignal<DepInfo | null>(null);
+  // Token usage for the current chat (from LLM API response).
+  const [tokenUsage, setTokenUsage] = createSignal<{
+    inputTokens: number; outputTokens: number; totalTokens: number;
+    cachedInputTokens: number; messagesTokens: number; toolsTokens: number;
+    preambleTokens: number; cacheHitRate: number;
+  } | null>(null);
 
   /** Fetch registration coverage for a workspace and update the status dot. */
   async function refreshRegisterStatus(wsPath: string) {
@@ -97,6 +103,7 @@ export default function App() {
 
   // --- model settings sync ---
   const [availableModels, setAvailableModels] = createSignal<string[]>([]);
+  const [modelCtxWindows, setModelCtxWindows] = createSignal<Record<string, number>>({});
   const [selectedModel, setSelectedModel] = createSignal<string>("");
   const [selectedPriority, setSelectedPriority] = createSignal<string>("最高");
   const [selectedConfirm, setSelectedConfirm] = createSignal<string>("变更前确认");
@@ -145,16 +152,19 @@ export default function App() {
       if (json && json !== "{}") {
         const loaded = JSON.parse(json);
         const models: string[] = [];
+        const ctxMap: Record<string, number> = {};
         if (loaded.providers) {
           for (const prov of loaded.providers) {
             if (prov.enabled && prov.models) {
               for (const m of prov.models) {
                 models.push(m.id);
+                if (m.contextWindow) ctxMap[m.id] = m.contextWindow;
               }
             }
           }
         }
         setAvailableModels(models);
+        setModelCtxWindows(ctxMap);
         
         const savedDefault = localStorage.getItem("default_model");
         if (models.length > 0) {
@@ -285,6 +295,20 @@ export default function App() {
                   .catch((err) => console.error("Failed to refresh sources after DDL:", err));
               }
             }
+          } else if (kind === "usage" && payload.text) {
+            try {
+              const u = JSON.parse(payload.text);
+              setTokenUsage({
+                inputTokens: u.inputTokens ?? 0,
+                outputTokens: u.outputTokens ?? 0,
+                totalTokens: u.totalTokens ?? 0,
+                cachedInputTokens: u.cachedInputTokens ?? 0,
+                messagesTokens: u.messagesTokens ?? 0,
+                toolsTokens: u.toolsTokens ?? 0,
+                preambleTokens: u.preambleTokens ?? 0,
+                cacheHitRate: u.cacheHitRate ?? 0,
+              });
+            } catch { /* ignore parse error */ }
           } else if (kind === "error") {
             segments = [
               ...segments,
@@ -1396,6 +1420,8 @@ export default function App() {
                           streaming={streamingTaskId() === id()}
                           onSend={sendChatMessage}
                           onStop={() => void stopChat(id())}
+                          tokenUsage={tokenUsage()}
+                          contextWindow={modelCtxWindows()[selectedModel()] ?? 128000}
                           onOpenInSqlPanel={openInSqlPanel}
                           onDelete={() => deleteTask(id())}
                           availableModels={availableModels()}

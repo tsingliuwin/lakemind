@@ -1296,6 +1296,52 @@ fn chart_type_cn(t: &str) -> &str {
     }
 }
 
+/// Concatenated tool definitions (names + descriptions + parameter schemas) as
+/// JSON, used to estimate the token cost of the tools block sent to the LLM.
+const TOOL_DEFS_JSON: &str = concat!(
+    r#"{"tools":[{"name":"list_tables","description":"列出数据库中的表和视图"},{"name":"describe_table","description":"获取表结构"},{"name":"execute_query","description":"执行SQL"},{"name":"sample_data","description":"采样数据"},{"name":"create_table","description":"创建表"},{"name":"create_view","description":"创建视图"},{"name":"drop_object","description":"删除对象"},{"name":"render_chart","description":"生成图表:bar,line,pie,scatter,funnel,gauge"}]}"#
+);
+
+/// Rough token estimate: ~4 chars per token for mixed text (English + Chinese +
+/// JSON). Good enough for context-window display; not a precise tokenizer.
+fn estimate_tokens(s: &str) -> u64 {
+    ((s.len() as f64) / 3.5).ceil() as u64
+}
+
+/// Emit a usage estimate event (before or during streaming, before the API's
+/// exact FinalResponse usage arrives). `output_tokens` increments as text
+/// streams in; 0 on the initial estimate.
+fn emit_usage_estimate(
+    window: &tauri::Window,
+    task_id: &str,
+    input_tokens: u64,
+    preamble_tokens: u64,
+    tools_tokens: u64,
+    output_tokens: u64,
+    cached_input_tokens: u64,
+) {
+    let messages_tokens = input_tokens.saturating_sub(preamble_tokens + tools_tokens);
+    let total = input_tokens + output_tokens;
+    let cache_hit_rate = if input_tokens > 0 {
+        (cached_input_tokens as f64 / input_tokens as f64 * 100.0).round() as u64
+    } else { 0 };
+    let _ = window.emit("agent-event", AgentStreamEvent {
+        task_id: task_id.to_string(),
+        kind: "usage".to_string(),
+        text: Some(serde_json::to_string(&serde_json::json!({
+            "inputTokens": input_tokens,
+            "outputTokens": output_tokens,
+            "totalTokens": total,
+            "cachedInputTokens": cached_input_tokens,
+            "messagesTokens": messages_tokens,
+            "toolsTokens": tools_tokens,
+            "preambleTokens": preamble_tokens,
+            "cacheHitRate": cache_hit_rate,
+        })).unwrap_or_default()),
+        segment: None,
+    });
+}
+
 pub(crate) fn sanitize_endpoint(endpoint: &str) -> String {
     let mut clean = endpoint.trim().to_string();
     while clean.ends_with('/') {
@@ -1452,6 +1498,9 @@ async fn run_stream_loop<R>(
     mut stream: impl futures_util::Stream<Item = Result<MultiTurnStreamItem<R>, StreamingError>> + Unpin,
 ) {
     use futures_util::StreamExt;
+    // Accumulated output text length — used to estimate output tokens during
+    // streaming for real-time usage display.
+    let mut output_chars: u64 = 0;
     // Check the abort flag before processing each chunk. If set, stop early and
     // emit a "done" so the frontend unlocks the input.
     {
@@ -1476,7 +1525,12 @@ async fn run_stream_loop<R>(
         }
         match chunk {
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text_struct))) => {
+                output_chars += text_struct.text.len() as u64;
                 emit_delta(&window, &task_id, "text", &text_struct.text);
+                // Real-time usage update with estimated output tokens.
+                let out_est = (output_chars as f64 / 3.5).ceil() as u64;
+                let in_est = estimate_tokens(PREAMBLE) + estimate_tokens(TOOL_DEFS_JSON);
+                emit_usage_estimate(&window, &task_id, in_est, estimate_tokens(PREAMBLE), estimate_tokens(TOOL_DEFS_JSON), out_est, 0);
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ReasoningDelta { reasoning, .. })) => {
                 emit_delta(&window, &task_id, "reasoning", &reasoning);
@@ -1484,6 +1538,36 @@ async fn run_stream_loop<R>(
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(reasoning_struct))) => {
                 let t = reasoning_struct.display_text();
                 emit_delta(&window, &task_id, "reasoning", &t);
+            }
+            // FinalResponse: the stream's last item, carries aggregated token usage.
+            Ok(MultiTurnStreamItem::FinalResponse(final_resp)) => {
+                let usage = final_resp.usage();
+                // Estimate component breakdown from the total input tokens.
+                // The exact per-component split isn't available from the API, so
+                // we estimate based on known sizes (preamble, tools) and attribute
+                // the rest to conversation messages.
+                let preamble_tokens = estimate_tokens(PREAMBLE);
+                let tools_tokens = estimate_tokens(TOOL_DEFS_JSON);
+                let input = usage.input_tokens.max(1);
+                let messages_tokens = input.saturating_sub(preamble_tokens + tools_tokens);
+                let cache_hit_rate = if usage.input_tokens > 0 {
+                    (usage.cached_input_tokens as f64 / usage.input_tokens as f64 * 100.0).round() as u64
+                } else { 0 };
+                let _ = window.emit("agent-event", AgentStreamEvent {
+                    task_id: task_id.clone(),
+                    kind: "usage".to_string(),
+                    text: Some(serde_json::to_string(&serde_json::json!({
+                        "inputTokens": usage.input_tokens,
+                        "outputTokens": usage.output_tokens,
+                        "totalTokens": usage.total_tokens,
+                        "cachedInputTokens": usage.cached_input_tokens,
+                        "messagesTokens": messages_tokens,
+                        "toolsTokens": tools_tokens,
+                        "preambleTokens": preamble_tokens,
+                        "cacheHitRate": cache_hit_rate,
+                    })).unwrap_or_default()),
+                    segment: None,
+                });
             }
             // Tool calls arrive here too, but the tools emit their own events
             // (with structured args/status/SqlResult). Ignore rig's variants.
@@ -1540,6 +1624,21 @@ pub async fn run_agent_chat_stream(
                 rig_history.push(Message::assistant(text));
             }
         }
+    }
+
+    // Estimate the input token cost before the stream starts so the UI panel
+    // shows data immediately (not only after the first response). This is a
+    // rough estimate (preamble + tools + prompt + history); the exact value
+    // from the API replaces it when FinalResponse arrives.
+    {
+        let preamble_t = estimate_tokens(PREAMBLE);
+        let tools_t = estimate_tokens(TOOL_DEFS_JSON);
+        let prompt_t = estimate_tokens(&prompt);
+        let history_t: u64 = rig_history.iter()
+            .map(|m| estimate_tokens(&format!("{:?}", m)))
+            .sum();
+        let input_est = preamble_t + tools_t + prompt_t + history_t;
+        emit_usage_estimate(&window, &task_id, input_est, preamble_t, tools_t, 0, 0);
     }
 
     let list_tool = ListTablesTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };

@@ -4582,6 +4582,110 @@ button.lm-select-trigger:hover:not(:disabled) {
   color: var(--text-dim);
   cursor: not-allowed;
 }
+/* Token usage icon + hover panel in the composer. */
+.token-usage-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-secondary);
+  cursor: default;
+}
+.token-usage-icon--idle {
+  color: var(--text-dim);
+  opacity: 0.5;
+}
+.token-usage-wrap {
+  position: relative;
+}
+.token-usage-panel {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 200px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  z-index: 100;
+}
+.token-usage-wrap:hover .token-usage-panel {
+  display: block;
+}
+.token-usage-panel__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 2px 0;
+}
+.token-usage-panel__val {
+  font-family: var(--font-mono, "SF Mono", Menlo, Consolas, monospace);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.token-usage-panel__row--total {
+  border-top: 1px solid var(--border-faint);
+  margin-top: 2px;
+  padding-top: 4px;
+}
+.token-usage-panel__val--cached {
+  color: #61ddaa;
+}
+.token-usage-panel__title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.token-usage-panel__capacity {
+  font-family: var(--font-mono, "SF Mono", Menlo, Consolas, monospace);
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+.token-usage-panel__bar {
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--bg-hover);
+  margin-bottom: 8px;
+}
+.token-usage-panel__bar-fill {
+  height: 100%;
+  background: #5b8ff9;
+  border-radius: 3px;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+.token-usage-panel__bar-fill--warn {
+  background: #f6bd16;
+}
+.token-usage-panel__bar-fill--danger {
+  background: #ef4444;
+}
+.token-usage-panel__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+.token-usage-panel__dot--msg { background: #5b8ff9; }
+.token-usage-panel__dot--tools { background: #f6bd16; }
+.token-usage-panel__dot--preamble { background: #7262fd; }
+.token-usage-panel__divider {
+  height: 1px;
+  background: var(--border-faint);
+  margin: 4px 0;
+}
+
 /* Stop button variant: solid red, replaces send during streaming. */
 .chat-composer__stop {
   background: var(--accent-red);

@@ -26,6 +26,14 @@ export default function ChatView(props: {
   onSend: (prompt: string) => void;
   /** Abort the running stream (stop button). */
   onStop?: () => void;
+  /** Token usage from the last LLM response (for context window display). */
+  tokenUsage?: {
+    inputTokens: number; outputTokens: number; totalTokens: number;
+    cachedInputTokens: number; messagesTokens: number; toolsTokens: number;
+    preambleTokens: number; cacheHitRate: number;
+  } | null;
+  /** Current model's context window size (from settings.json). */
+  contextWindow?: number;
   onOpenInSqlPanel: (sql: string) => void;
   onDelete?: () => void;
   availableModels: string[];
@@ -632,15 +640,67 @@ export default function ChatView(props: {
             </div>
 
             <div style="display: flex; align-items: center; gap: 10px;">
+              {/* Token usage indicator — hover for details */}
+              <div class="token-usage-wrap">
+                <span class="token-usage-icon" title="上下文容量">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 6v6l4 2" />
+                  </svg>
+                </span>
+                <div class="token-usage-panel">
+                  {(() => {
+                    const u = props.tokenUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedInputTokens: 0, messagesTokens: 0, toolsTokens: 0, preambleTokens: 0, cacheHitRate: 0 };
+                    const input = u.inputTokens;
+                    const ctxWindow = props.contextWindow ?? 128000;
+                    const usedPct = input > 0 ? Math.min(100, (input / ctxWindow * 100)) : 0;
+                    const fmt = (n: number) => n >= 10000 ? `${(n / 10000).toFixed(0)}万` : n.toLocaleString();
+                    const pct = (n: number) => input > 0 ? `${(n / input * 100).toFixed(1)}%` : "0.0%";
+                    return (
+                      <>
+                        <div class="token-usage-panel__title">
+                          上下文容量
+                          <span class="token-usage-panel__capacity">
+                            {fmt(input)}/{fmt(ctxWindow)} ({usedPct.toFixed(0)}%)
+                          </span>
+                        </div>
+                        <div class="token-usage-panel__bar">
+                          <div class="token-usage-panel__bar-fill"
+                            classList={{
+                              "token-usage-panel__bar-fill--warn": usedPct >= 70 && usedPct < 90,
+                              "token-usage-panel__bar-fill--danger": usedPct >= 90,
+                            }}
+                            style={`width: ${usedPct.toFixed(1)}%`} />
+                        </div>
+                        <div class="token-usage-panel__row">
+                          <span class="token-usage-panel__dot token-usage-panel__dot--msg" />消息
+                          <span class="token-usage-panel__val">{pct(u.messagesTokens)}</span>
+                        </div>
+                        <div class="token-usage-panel__row">
+                          <span class="token-usage-panel__dot token-usage-panel__dot--tools" />系统工具
+                          <span class="token-usage-panel__val">{pct(u.toolsTokens)}</span>
+                        </div>
+                        <div class="token-usage-panel__row">
+                          <span class="token-usage-panel__dot token-usage-panel__dot--preamble" />系统提示词
+                          <span class="token-usage-panel__val">{pct(u.preambleTokens)}</span>
+                        </div>
+                        <div class="token-usage-panel__divider" />
+                        <div class="token-usage-panel__row">
+                          <span style="color: #61ddaa;">●</span>平均缓存命中率
+                          <span class="token-usage-panel__val" style="color: #61ddaa;">{u.cacheHitRate}%</span>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+
               {/* Model Selector Dropdown */}
               <div class="dropdown-wrapper" ref={modelRef} style="position: relative;">
                 <button
                   class="chat-composer__pill-btn select-btn"
                   onClick={() => setModelDropdownOpen(!modelDropdownOpen())}
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="5,3" style="width: 12px; height: 12px;">
-                    <circle cx="12" cy="12" r="10"></circle>
-                  </svg>
                   <span>{props.selectedModel || "选择模型"}</span>
                   <span class="btn-caret">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
