@@ -1,6 +1,7 @@
-import { onCleanup, onMount, createSignal, For, Show } from "solid-js";
+import { onCleanup, onMount, createSignal, For, Show, createEffect } from "solid-js";
 import * as echarts from "echarts";
 import type { Segment, SqlResult } from "../lib/types";
+import { currentTheme, Theme } from "../lib/theme";
 
 /**
  * Inline chart segment — renders an ECharts visualization from a SqlResult.
@@ -18,45 +19,59 @@ type ChartType = "bar" | "line" | "pie" | "scatter" | "funnel" | "gauge";
  * without a tab bar — the agent's chosen type is shown as-is. */
 const SWITCHABLE_TYPES: ChartType[] = ["bar", "line", "pie", "scatter"];
 
-/** High-contrast palette tuned for the app's dark theme. Each color has strong
- * separation from the dark background and from each other, ensuring multi-series
- * charts are readable at a glance. */
-const PALETTE = [
-  "#5b8ff9", // blue
-  "#61ddaa", // green
-  "#f6bd16", // amber
-  "#7262fd", // purple
-  "#ff9d4d", // orange
-  "#e86452", // red
-  "#6dc8ec", // cyan
-  "#945fb9", // violet
-];
-
-/** Shared ECharts theme fragments — axis lines, text colors, grid, tooltip —
- * so every chart type looks consistent and readable on the dark background. */
-const AXIS_STYLE = {
-  axisLine: { lineStyle: { color: "#3a3a3e" } },
-  axisTick: { lineStyle: { color: "#3a3a3e" } },
-  axisLabel: { color: "#9aa0a6", fontSize: 11 },
-  splitLine: { lineStyle: { color: "#1f1f22", type: "dashed" as const } },
-};
-const TOOLTIP_STYLE = {
-  backgroundColor: "#18181b",
-  borderColor: "#3a3a3e",
-  borderWidth: 1,
-  textStyle: { color: "#e6e7eb", fontSize: 12 },
-};
-const TITLE_STYLE = (text: string) => ({
-  text, left: "center",
-  textStyle: { color: "#e6e7eb", fontSize: 13, fontWeight: 500 },
-});
-
 const CHART_TYPES: { type: ChartType; label: string; svg: string }[] = [
   { type: "bar", label: "柱状图", svg: '<rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="4" width="4" height="17"/>' },
   { type: "line", label: "折线图", svg: '<polyline points="3 17 8 11 13 14 21 5" fill="none"/><circle cx="3" cy="17" r="1.5"/><circle cx="8" cy="11" r="1.5"/><circle cx="13" cy="14" r="1.5"/><circle cx="21" cy="5" r="1.5"/>' },
   { type: "pie", label: "饼图", svg: '<circle cx="12" cy="12" r="9"/><path d="M12 3 A9 9 0 0 1 21 12 L12 12 Z" fill="currentColor" stroke="none"/>' },
   { type: "scatter", label: "散点图", svg: '<circle cx="5" cy="18" r="1.8"/><circle cx="10" cy="8" r="1.8"/><circle cx="15" cy="14" r="1.8"/><circle cx="19" cy="5" r="1.8"/><circle cx="8" cy="16" r="1.8"/>' },
 ];
+
+/** Theme styles helper mapping palette colors, grids, tooltips, and fonts for Dark and Light modes. */
+function getThemeStyles(theme: Theme) {
+  const isLight = theme === "light";
+  return {
+    isLight,
+    palette: isLight
+      ? [
+          "#3b82f6", // blue
+          "#10b981", // green
+          "#f59e0b", // amber
+          "#8b5cf6", // purple
+          "#f97316", // orange
+          "#ef4444", // red
+          "#06b6d4", // cyan
+          "#d946ef", // pink
+        ]
+      : [
+          "#5b8ff9", // blue
+          "#61ddaa", // green
+          "#f6bd16", // amber
+          "#7262fd", // purple
+          "#ff9d4d", // orange
+          "#e86452", // red
+          "#6dc8ec", // cyan
+          "#945fb9", // violet
+        ],
+    axisLineColor: isLight ? "#d1d5db" : "#3a3a3e",
+    axisTickColor: isLight ? "#d1d5db" : "#3a3a3e",
+    axisLabelColor: isLight ? "#4b5563" : "#9aa0a6",
+    splitLineColor: isLight ? "#e5e7eb" : "#1f1f22",
+    tooltipBg: isLight ? "#ffffff" : "#18181b",
+    tooltipBorder: isLight ? "#e5e7eb" : "#3a3a3e",
+    tooltipText: isLight ? "#111827" : "#e6e7eb",
+    textColor: isLight ? "#111827" : "#e6e7eb",
+    legendColor: isLight ? "#4b5563" : "#9aa0a6",
+    lineStyleColor: isLight ? "#e5e7eb" : "#5c6066",
+    gaugeLineColor: isLight ? "#e5e7eb" : "#2a2a2e",
+  };
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 export default function ChartSegment(props: { seg: Extract<Segment, { type: "chart" }> }) {
   let container: HTMLDivElement | undefined;
@@ -69,6 +84,30 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
     // Determine column indices.
     const xIdx = xField ? cols.indexOf(xField) : findDimensionCol(table.columnTypes);
     const yCols = yFields && yFields.length > 0 ? yFields : findNumericCols(cols, table.columnTypes, xIdx);
+    const styles = getThemeStyles(currentTheme());
+
+    const AXIS_STYLE = {
+      axisLine: { lineStyle: { color: styles.axisLineColor } },
+      axisTick: { show: false, lineStyle: { color: styles.axisTickColor } },
+      axisLabel: { color: styles.axisLabelColor, fontSize: 11, fontFamily: "var(--font-sans)" },
+      splitLine: { lineStyle: { color: styles.splitLineColor, type: "dashed" as const } },
+    };
+
+    const TOOLTIP_STYLE = {
+      backgroundColor: styles.tooltipBg,
+      borderColor: styles.tooltipBorder,
+      borderWidth: 1,
+      padding: [8, 12],
+      borderRadius: 6,
+      shadowColor: "rgba(0, 0, 0, 0.12)",
+      shadowBlur: 8,
+      textStyle: { color: styles.tooltipText, fontSize: 12, fontFamily: "var(--font-sans)" },
+    };
+
+    const TITLE_STYLE = (text: string) => ({
+      text, left: "center",
+      textStyle: { color: styles.textColor, fontSize: 13, fontWeight: 500, fontFamily: "var(--font-sans)" },
+    });
 
     if (type === "pie") {
       const yIdx = yCols.length > 0 ? cols.indexOf(yCols[0]) : -1;
@@ -76,18 +115,18 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
         .filter((r) => r[xIdx] != null && r[yIdx] != null)
         .map((r) => ({ name: String(r[xIdx]), value: num(r[yIdx]) }));
       return {
-        color: PALETTE,
+        color: styles.palette,
         title: title ? { ...TITLE_STYLE(title), top: 8 } : undefined,
         tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)", ...TOOLTIP_STYLE },
-        legend: { bottom: 2, type: "scroll", textStyle: { color: "#9aa0a6", fontSize: 11 }, itemWidth: 10, itemHeight: 10 },
+        legend: { bottom: 2, type: "scroll", textStyle: { color: styles.legendColor, fontSize: 11 }, itemWidth: 8, itemHeight: 8, itemGap: 12 },
         series: [{
           type: "pie",
-          radius: ["30%", "52%"],
+          radius: ["42%", "68%"],
           center: ["50%", "50%"],
           data,
-          label: { color: "#e6e7eb", fontSize: 11, formatter: "{b}: {d}%" },
-          labelLine: { lineStyle: { color: "#5c6066" } },
-          itemStyle: { borderColor: "#18181b", borderWidth: 2 },
+          label: { color: styles.textColor, fontSize: 11, formatter: "{b}: {d}%", fontWeight: 500 },
+          labelLine: { lineStyle: { color: styles.lineStyleColor } },
+          itemStyle: { borderRadius: 6, borderColor: styles.tooltipBg, borderWidth: 2 },
         }],
       };
     }
@@ -98,13 +137,28 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
         .filter((r) => r[xIdx] != null && r[yIdx] != null)
         .map((r) => [num(r[xIdx]), num(r[yIdx])]);
       return {
-        color: PALETTE,
+        color: styles.palette,
         title: title ? TITLE_STYLE(title) : undefined,
         tooltip: { trigger: "item", ...TOOLTIP_STYLE },
-        grid: { left: 60, right: 24, top: title ? 44 : 20, bottom: 24 },
-        xAxis: { type: "value", name: xField ?? cols[xIdx] ?? "X", nameTextStyle: { color: "#9aa0a6", fontSize: 11 }, scale: true, ...AXIS_STYLE },
-        yAxis: { type: "value", name: yCols[0] ?? "Y", nameTextStyle: { color: "#9aa0a6", fontSize: 11 }, scale: true, ...AXIS_STYLE },
-        series: [{ type: "scatter", data, symbolSize: 7, itemStyle: { opacity: 0.85 } }],
+        grid: { left: 60, right: 24, top: title ? 44 : 20, bottom: 32 },
+        xAxis: { type: "value", name: xField ?? cols[xIdx] ?? "X", nameTextStyle: { color: styles.axisLabelColor, fontSize: 11 }, scale: true, ...AXIS_STYLE },
+        yAxis: { type: "value", name: yCols[0] ?? "Y", nameTextStyle: { color: styles.axisLabelColor, fontSize: 11 }, scale: true, ...AXIS_STYLE },
+        series: [{
+          type: "scatter",
+          data,
+          symbolSize: 8,
+          itemStyle: {
+            opacity: 0.8,
+            borderColor: styles.tooltipBg,
+            borderWidth: 1.5,
+            shadowBlur: 4,
+            shadowColor: "rgba(0, 0, 0, 0.15)"
+          },
+          emphasis: {
+            focus: "self",
+            itemStyle: { opacity: 1 }
+          }
+        }],
       };
     }
 
@@ -114,17 +168,17 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
         .filter((r) => r[xIdx] != null && r[yIdx] != null)
         .map((r) => ({ name: String(r[xIdx]), value: num(r[yIdx]) }));
       return {
-        color: PALETTE,
+        color: styles.palette,
         title: title ? { ...TITLE_STYLE(title), top: 8 } : undefined,
         tooltip: { trigger: "item", formatter: "{b}: {c}", ...TOOLTIP_STYLE },
-        legend: { bottom: 2, type: "scroll", textStyle: { color: "#9aa0a6", fontSize: 11 }, itemWidth: 10, itemHeight: 10 },
+        legend: { bottom: 2, type: "scroll", textStyle: { color: styles.legendColor, fontSize: 11 }, itemWidth: 8, itemHeight: 8, itemGap: 12 },
         series: [{
           type: "funnel",
           data,
           sort: "descending",
           gap: 2,
-          label: { color: "#e6e7eb", fontSize: 11, formatter: "{b}: {c}" },
-          itemStyle: { borderColor: "#18181b", borderWidth: 1 },
+          label: { color: styles.textColor, fontSize: 11, formatter: "{b}: {c}", fontWeight: 500 },
+          itemStyle: { borderRadius: 4, borderColor: styles.tooltipBg, borderWidth: 1.5 },
         }],
       };
     }
@@ -135,13 +189,13 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
       const label = yIdx >= 0 ? cols[yIdx] : (xField ?? "值");
       const value = yIdx >= 0 && table.rows.length > 0 ? num(table.rows[0][yIdx]) : 0;
       return {
-        color: PALETTE,
+        color: styles.palette,
         title: title ? { ...TITLE_STYLE(title), top: 8 } : undefined,
         tooltip: { ...TOOLTIP_STYLE },
         series: [{
           type: "gauge",
           center: ["50%", "58%"],
-          radius: "80%",
+          radius: "82%",
           min: 0,
           max: (() => {
             // Auto-scale max: round up to a nice number (×1, ×2, ×5 × 10^n).
@@ -151,13 +205,13 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
             const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
             return nice * mag;
           })(),
-          progress: { show: true, width: 14, itemStyle: { color: PALETTE[0] } },
-          axisLine: { lineStyle: { width: 14, color: [[1, "#2a2a2e"]] } },
-          pointer: { width: 4, itemStyle: { color: "#9aa0a6" } },
+          progress: { show: true, width: 12, itemStyle: { color: styles.palette[0] } },
+          axisLine: { lineStyle: { width: 12, color: [[1, styles.gaugeLineColor]] } },
+          pointer: { width: 4, itemStyle: { color: styles.axisLabelColor } },
           axisTick: { show: false },
-          splitLine: { length: 10, lineStyle: { color: "#3a3a3e", width: 2 } },
-          axisLabel: { color: "#5c6066", fontSize: 10, distance: 16 },
-          detail: { valueAnimation: true, color: "#e6e7eb", fontSize: 18, fontWeight: 600, offsetCenter: [0, "65%"], formatter: `{value}` },
+          splitLine: { length: 8, lineStyle: { color: styles.axisLineColor, width: 1.5 } },
+          axisLabel: { color: styles.legendColor, fontSize: 10, distance: 16 },
+          detail: { valueAnimation: true, color: styles.textColor, fontSize: 18, fontWeight: 600, offsetCenter: [0, "62%"], formatter: `{value}` },
           data: [{ value, name: label }],
         }],
       };
@@ -166,22 +220,52 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
     // bar / line
     const categoryData = table.rows.map((r) => String(r[xIdx >= 0 ? xIdx : 0] ?? ""));
     const rotated = categoryData.length > 8;
-    const series = yCols.map((yn) => {
+    const series = yCols.map((yn, colorOffset) => {
       const yi = cols.indexOf(yn);
+      const baseColor = styles.palette[colorOffset % styles.palette.length];
       return {
         name: yn,
         type,
         data: table.rows.map((r) => num(r[yi])),
         smooth: type === "line",
-        ...(type === "bar" ? { itemStyle: { borderRadius: [3, 3, 0, 0] }, barMaxWidth: 32 } : {}),
-        ...(type === "line" ? { symbol: "circle", symbolSize: 6, lineStyle: { width: 2.5 } } : {}),
+        ...(type === "bar"
+          ? {
+              itemStyle: {
+                borderRadius: [4, 4, 0, 0],
+                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                  { offset: 0, color: baseColor },
+                  { offset: 1, color: hexToRgba(baseColor, 0.35) }
+                ])
+              },
+              barMaxWidth: 24,
+            }
+          : {}),
+        ...(type === "line"
+          ? {
+              symbol: "circle",
+              symbolSize: 6,
+              lineStyle: {
+                width: 3,
+                shadowColor: hexToRgba(baseColor, 0.2),
+                shadowBlur: 6,
+                shadowOffsetY: 3
+              },
+              itemStyle: { color: baseColor },
+              areaStyle: {
+                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                  { offset: 0, color: hexToRgba(baseColor, 0.15) },
+                  { offset: 1, color: hexToRgba(baseColor, 0.01) }
+                ])
+              }
+            }
+          : {}),
       };
     });
     return {
-      color: PALETTE,
+      color: styles.palette,
       title: title ? TITLE_STYLE(title) : undefined,
       tooltip: { trigger: "axis", ...TOOLTIP_STYLE },
-      legend: { bottom: 2, type: "scroll", textStyle: { color: "#9aa0a6", fontSize: 11 }, itemWidth: 10, itemHeight: 10 },
+      legend: { bottom: 2, type: "scroll", textStyle: { color: styles.legendColor, fontSize: 11 }, itemWidth: 8, itemHeight: 8, itemGap: 12 },
       // bottom space: legend (~22px) + X axis label (~18px normal / ~40px rotated) + gaps
       grid: { left: 60, right: 24, top: title ? 44 : 20, bottom: rotated ? 72 : 52 },
       xAxis: { type: "category", data: categoryData, ...AXIS_STYLE, axisLabel: { ...AXIS_STYLE.axisLabel, rotate: rotated ? 30 : 0 } },
@@ -195,6 +279,12 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
     const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.title);
     chart.setOption(opt, true);
   }
+
+  createEffect(() => {
+    // Establish dependency on current theme for automatic re-rendering
+    currentTheme();
+    render();
+  });
 
   onMount(() => {
     if (!container) return;
