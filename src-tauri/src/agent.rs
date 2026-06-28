@@ -508,12 +508,12 @@ impl Tool for DescribeTableTool {
         let start = std::time::Instant::now();
         let conn = self.app_state.conn.clone();
         let table_name_string = table_name.to_string();
-        let ws_path = self.app_state.workspace_path.lock().await.clone();
+        let ws_dir = self.app_state.workspace_dir.lock().await.to_string_lossy().to_string();
         let desc_res = tokio::task::spawn_blocking(move || {
             let guard = conn.blocking_lock();
             let sql = format!("DESCRIBE \"{}\"", table_name_string.replace('"', "\"\""));
             let query_res = execute::run_query(&guard, &sql, None).map_err(|e| e.to_string())?;
-            let (okf_title, col_comments, relations) = crate::okf::parse_column_semantics(&ws_path, &table_name_string);
+            let (okf_title, col_comments, relations) = crate::okf::parse_column_semantics(&ws_dir, &table_name_string);
             Ok::<_, String>((query_res, okf_title, col_comments, relations))
         })
         .await
@@ -603,8 +603,8 @@ impl Tool for LoadOkfBlockTool {
             json!({ "category": args.category, "name": args.name, "heading": args.heading }),
         );
         let start = std::time::Instant::now();
-        let ws_path = self.app_state.workspace_path.lock().await.clone();
-        let res = crate::okf::read_okf_block(&ws_path, &args.category, &args.name, &args.heading);
+        let ws_dir = self.app_state.workspace_dir.lock().await.to_string_lossy().to_string();
+        let res = crate::okf::read_okf_block(&ws_dir, &args.category, &args.name, &args.heading);
         let elapsed = start.elapsed().as_millis() as u64;
         match res {
             Ok(content) => {
@@ -663,8 +663,8 @@ impl Tool for WriteOkfBlockTool {
             json!({ "category": args.category, "name": args.name, "heading": args.heading, "content": args.content }),
         );
         let start = std::time::Instant::now();
-        let ws_path = self.app_state.workspace_path.lock().await.clone();
-        let res = crate::okf::write_okf_block(&ws_path, &args.category, &args.name, &args.heading, &args.content);
+        let ws_dir = self.app_state.workspace_dir.lock().await.to_string_lossy().to_string();
+        let res = crate::okf::write_okf_block(&ws_dir, &args.category, &args.name, &args.heading, &args.content);
         let elapsed = start.elapsed().as_millis() as u64;
         match res {
             Ok(_) => {
@@ -718,10 +718,10 @@ impl Tool for SearchOkfRecipesTool {
             json!({ "query": args.query }),
         );
         let start = std::time::Instant::now();
-        let ws_path = self.app_state.workspace_path.lock().await.clone();
+        let ws_dir = self.app_state.workspace_dir.lock().await.to_string_lossy().to_string();
         
         let search_res = tokio::task::spawn_blocking(move || {
-            let okf_dir = crate::okf::get_okf_dir(&ws_path);
+            let okf_dir = crate::okf::get_okf_dir(&ws_dir);
             let mut matches = Vec::new();
             let query_lower = args.query.to_lowercase();
             
@@ -801,7 +801,7 @@ impl Tool for CheckSourceFingerprintTool {
             json!({ "file_path": args.file_path }),
         );
         let start = std::time::Instant::now();
-        let ws_path = self.app_state.workspace_path.lock().await.clone();
+        let ws_dir = self.app_state.workspace_dir.lock().await.to_string_lossy().to_string();
         let file_path_str = args.file_path.clone();
         
         let match_res = tokio::task::spawn_blocking(move || {
@@ -822,7 +822,7 @@ impl Tool for CheckSourceFingerprintTool {
             let target_fp = format!("{}:{}", mtime, size);
             
             // Search in OKF/sources
-            let okf_dir = crate::okf::get_okf_dir(&ws_path);
+            let okf_dir = crate::okf::get_okf_dir(&ws_dir);
             let sources_dir = okf_dir.join("sources");
             if sources_dir.exists() {
                 for entry in walkdir::WalkDir::new(&sources_dir) {
@@ -1210,6 +1210,7 @@ impl DdlToolShared {
     /// Persist (or refresh) the `object_defs` row for a freshly-built object.
     async fn persist_object_def(&self, name: &str, select_sql: &str, kind: &str) {
         let ws_path = self.app_state.workspace_path.lock().await.clone();
+        let ws_dir = self.app_state.workspace_dir.lock().await.to_string_lossy().to_string();
         let name = name.to_string();
         let select_sql = select_sql.to_string();
         let kind = kind.to_string();
@@ -1247,9 +1248,9 @@ impl DdlToolShared {
             };
             crate::db::upsert_object_def(&sqlite, &ws_path, &obj)?;
             if kind == "table" {
-                let _ = crate::okf::write_table_okf(&ws_path, &name, &columns, row_count);
+                let _ = crate::okf::write_table_okf(&ws_dir, &name, &columns, row_count);
             } else {
-                let _ = crate::okf::write_view_okf(&ws_path, &name, &select_sql, &columns);
+                let _ = crate::okf::write_view_okf(&ws_dir, &name, &select_sql, &columns);
             }
             Ok(())
         })
@@ -1261,12 +1262,13 @@ impl DdlToolShared {
     /// and t_/v_ views (in object_defs) are both cleaned up.
     async fn delete_object_def(&self, name: &str) {
         let ws_path = self.app_state.workspace_path.lock().await.clone();
+        let ws_dir = self.app_state.workspace_dir.lock().await.to_string_lossy().to_string();
         let name = name.to_string();
         let _ = tokio::task::spawn_blocking(move || -> Result<(), String> {
             let sqlite = crate::db::get_db_conn()?;
             let _ = crate::db::delete_object_def(&sqlite, &ws_path, &name);
             let _ = crate::db::delete_source_by_table(&sqlite, &ws_path, &name);
-            let _ = crate::okf::delete_okf_files(&ws_path, &name);
+            let _ = crate::okf::delete_okf_files(&ws_dir, &name);
             Ok(())
         })
         .await;
@@ -2035,8 +2037,8 @@ pub async fn run_agent_chat_stream(
         check_okf_1.definition(String::new()).await,
     ];
     let tools_json = serde_json::to_string(&tool_defs).unwrap_or_default();
-    let ws_path = app_state.workspace_path.lock().await.clone();
-    let memory_summary = crate::okf::get_okf_memory_summary(&ws_path);
+    let ws_dir = app_state.workspace_dir.lock().await.to_string_lossy().to_string();
+    let memory_summary = crate::okf::get_okf_memory_summary(&ws_dir);
     let combined_preamble = if memory_summary.is_empty() {
         PREAMBLE.to_string()
     } else {

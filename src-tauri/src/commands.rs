@@ -209,6 +209,7 @@ pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<Source
 #[tauri::command]
 pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
     let ws_path = state.workspace_path.lock().await.clone();
+    let ws_dir = state.workspace_dir.lock().await.to_string_lossy().to_string();
     let warmup_start = std::time::Instant::now();
 
     // Read source records from SQLite (no DuckDB lock needed).
@@ -226,6 +227,7 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
         let conn = state.conn.clone();
         let rec_clone = rec.clone();
         let ws_path_clone = ws_path.clone();
+        let ws_dir_clone = ws_dir.clone();
         let did_rebuild = tauri::async_runtime::spawn_blocking(move || -> bool {
             let guard = conn.blocking_lock();
             // LIMIT 0: metadata-only probe (cheap). Validates the lake object is
@@ -254,8 +256,8 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
                     let new_rec = source_record_from(&t, &entry, rec_clone.created_at, &rec_clone.name_source);
                     if let Ok(sqlite) = db::get_db_conn() {
                         let _ = db::upsert_source(&sqlite, &ws_path_clone, &new_rec);
-                        let _ = crate::okf::write_source_okf(&ws_path_clone, &rec_clone.table_name, &rec_clone.label, &rec_clone.file_path, rec_clone.file_size as i64, rec_clone.file_mtime, &t.columns, t.row_count_estimate);
-                        let _ = crate::okf::write_pipeline_okf(&ws_path_clone, &rec_clone.table_name, &rec_clone.label, &rec_clone.file_path, &new_rec.storage);
+                        let _ = crate::okf::write_source_okf(&ws_dir_clone, &rec_clone.table_name, &rec_clone.label, &rec_clone.file_path, rec_clone.file_size as i64, rec_clone.file_mtime, &t.columns, t.row_count_estimate);
+                        let _ = crate::okf::write_pipeline_okf(&ws_dir_clone, &rec_clone.table_name, &rec_clone.label, &rec_clone.file_path, &new_rec.storage);
                     }
                     true
                 }
@@ -749,6 +751,7 @@ async fn sync_entries(
         // Track whether any DuckLake mutation happened (rebuild/register/rename/
         // orphan-drop). If nothing changed, we skip the (2s+) checkpoint.
         let mut lake_mutated = false;
+        let ws_dir_str = ws_dir.to_string_lossy().to_string();
 
         // Present sources: rename to the target name if it changed, else hydrate
         // (rebuild the lake object if it vanished).
@@ -798,10 +801,10 @@ async fn sync_entries(
                     // under the old name is now stale — drop it.
                     if needs_rename {
                         let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
-                        let _ = crate::okf::delete_okf_files(&ws_path, &rec.table_name);
+                        let _ = crate::okf::delete_okf_files(&ws_dir_str, &rec.table_name);
                     }
-                    let _ = crate::okf::write_source_okf(&ws_path, target, &e.label, &e.path, e.file_size as i64, e.mtime, &rec.columns, rec.row_count);
-                    let _ = crate::okf::write_pipeline_okf(&ws_path, target, &e.label, &e.path, &updated.storage);
+                    let _ = crate::okf::write_source_okf(&ws_dir_str, target, &e.label, &e.path, e.file_size as i64, e.mtime, &rec.columns, rec.row_count);
+                    let _ = crate::okf::write_pipeline_okf(&ws_dir_str, target, &e.label, &e.path, &updated.storage);
                     result.push(build_source_table_from_record(&updated));
                 } else {
                     // Fingerprint changed → rebuild under the target name.
@@ -814,7 +817,7 @@ async fn sync_entries(
                     };
                     work.view_name = target.clone();
                     drop_lake_object(&guard, &rec.table_name);
-                    let _ = crate::okf::delete_okf_files(&ws_path, &rec.table_name);
+                    let _ = crate::okf::delete_okf_files(&ws_dir_str, &rec.table_name);
                     let prog = progress.as_ref().map(|p| p as &dyn Fn(&str));
                     if let Some(p) = prog { p(target); }
                     match register::register(&guard, &work, storage, prog) {
@@ -822,8 +825,8 @@ async fn sync_entries(
                             let new_rec = source_record_from(&t, e, rec.created_at, src);
                             let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
                             let _ = db::upsert_source(&sqlite, &ws_path, &new_rec);
-                            let _ = crate::okf::write_source_okf(&ws_path, target, &e.label, &e.path, e.file_size as i64, e.mtime, &t.columns, t.row_count_estimate);
-                            let _ = crate::okf::write_pipeline_okf(&ws_path, target, &e.label, &e.path, &new_rec.storage);
+                            let _ = crate::okf::write_source_okf(&ws_dir_str, target, &e.label, &e.path, e.file_size as i64, e.mtime, &t.columns, t.row_count_estimate);
+                            let _ = crate::okf::write_pipeline_okf(&ws_dir_str, target, &e.label, &e.path, &new_rec.storage);
                             result.push(t);
                         }
                         Err(err) => eprintln!("rebuild {} failed: {err}", e.label),
@@ -853,8 +856,8 @@ async fn sync_entries(
                     };
                     let rec = source_record_from(&t, e, now, src);
                     let _ = db::upsert_source(&sqlite, &ws_path, &rec);
-                    let _ = crate::okf::write_source_okf(&ws_path, target, &e.label, &e.path, e.file_size as i64, e.mtime, &t.columns, t.row_count_estimate);
-                    let _ = crate::okf::write_pipeline_okf(&ws_path, target, &e.label, &e.path, &rec.storage);
+                    let _ = crate::okf::write_source_okf(&ws_dir_str, target, &e.label, &e.path, e.file_size as i64, e.mtime, &t.columns, t.row_count_estimate);
+                    let _ = crate::okf::write_pipeline_okf(&ws_dir_str, target, &e.label, &e.path, &rec.storage);
                     result.push(t);
                 } else {
                     let mut work = if storage == StorageKind::Table {
@@ -871,8 +874,8 @@ async fn sync_entries(
                             lake_mutated = true;
                             let rec = source_record_from(&t, e, now, src);
                             let _ = db::upsert_source(&sqlite, &ws_path, &rec);
-                            let _ = crate::okf::write_source_okf(&ws_path, target, &e.label, &e.path, e.file_size as i64, e.mtime, &t.columns, t.row_count_estimate);
-                            let _ = crate::okf::write_pipeline_okf(&ws_path, target, &e.label, &e.path, &rec.storage);
+                            let _ = crate::okf::write_source_okf(&ws_dir_str, target, &e.label, &e.path, e.file_size as i64, e.mtime, &t.columns, t.row_count_estimate);
+                            let _ = crate::okf::write_pipeline_okf(&ws_dir_str, target, &e.label, &e.path, &rec.storage);
                             result.push(t);
                         }
                         Err(err) => eprintln!("register {} failed: {err}", e.label),
@@ -889,7 +892,7 @@ async fn sync_entries(
                 if !entry_scan_paths.contains(&rec.scan_path) {
                     drop_lake_object(&guard, &rec.table_name);
                     let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
-                    let _ = crate::okf::delete_okf_files(&ws_path, &rec.table_name);
+                    let _ = crate::okf::delete_okf_files(&ws_dir_str, &rec.table_name);
                     lake_mutated = true;
                 }
             }
