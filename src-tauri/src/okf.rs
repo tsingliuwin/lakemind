@@ -261,9 +261,24 @@ pub fn read_okf_block(
     heading: &str,
 ) -> Result<String, String> {
     let okf_dir = get_okf_dir(ws_path);
-    let file_path = okf_dir.join(category).join(format!("{}.md", name));
+    let mut file_path = okf_dir.join(category).join(format!("{}.md", name));
     if !file_path.exists() {
-        return Err(format!("文件不存在: {:?}", file_path));
+        let candidates = [
+            okf_dir.join("tables").join(format!("{}.md", name)),
+            okf_dir.join("views").join(format!("{}.md", name)),
+            okf_dir.join("sources").join(format!("{}.md", name)),
+        ];
+        let mut found = false;
+        for c in &candidates {
+            if c.exists() {
+                file_path = c.clone();
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return Err(format!("文件不存在: {:?}", file_path));
+        }
     }
 
     let content = fs::read_to_string(&file_path)
@@ -299,7 +314,6 @@ pub fn read_okf_block(
     }
 }
 
-/// Rewrite a specific block heading section in an OKF markdown document
 pub fn write_okf_block(
     ws_path: &str,
     category: &str,
@@ -308,9 +322,24 @@ pub fn write_okf_block(
     new_content: &str,
 ) -> Result<(), String> {
     let okf_dir = get_okf_dir(ws_path);
-    let file_path = okf_dir.join(category).join(format!("{}.md", name));
+    let mut file_path = okf_dir.join(category).join(format!("{}.md", name));
     if !file_path.exists() {
-        return Err(format!("文件不存在: {:?}", file_path));
+        let candidates = [
+            okf_dir.join("tables").join(format!("{}.md", name)),
+            okf_dir.join("views").join(format!("{}.md", name)),
+            okf_dir.join("sources").join(format!("{}.md", name)),
+        ];
+        let mut found = false;
+        for c in &candidates {
+            if c.exists() {
+                file_path = c.clone();
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return Err(format!("文件不存在: {:?}", file_path));
+        }
     }
 
     let content = fs::read_to_string(&file_path)
@@ -362,11 +391,14 @@ pub fn parse_column_semantics(
     let mut col_comments = HashMap::new();
     let mut relations = Vec::new();
 
-    // Check tables/ first, then views/
+    // Check tables/ first, then views/, then sources/
     let okf_dir = get_okf_dir(ws_path);
     let mut file_path = okf_dir.join("tables").join(format!("{}.md", table_name));
     if !file_path.exists() {
         file_path = okf_dir.join("views").join(format!("{}.md", table_name));
+    }
+    if !file_path.exists() {
+        file_path = okf_dir.join("sources").join(format!("{}.md", table_name));
     }
     if !file_path.exists() {
         return (desc, col_comments, relations);
@@ -613,6 +645,14 @@ description: Important sales info
         
         let block_updated = read_okf_block(ws, "tables", "test_table", "关联关系").unwrap();
         assert_eq!(block_updated, "- 关联修改项");
+
+        // Test fallback to find it when wrong category is passed (e.g. "views")
+        let block_fallback = read_okf_block(ws, "views", "test_table", "关联关系").unwrap();
+        assert_eq!(block_fallback, "- 关联修改项");
+
+        write_okf_block(ws, "views", "test_table", "关联关系", "- 关联修改项2").unwrap();
+        let block_updated_fallback = read_okf_block(ws, "tables", "test_table", "关联关系").unwrap();
+        assert_eq!(block_updated_fallback, "- 关联修改项2");
 
         // Test memory summary parser
         let summary = get_okf_memory_summary(ws);
