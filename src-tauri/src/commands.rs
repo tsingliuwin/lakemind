@@ -1182,6 +1182,19 @@ pub async fn save_chat_task(
 }
 
 #[tauri::command]
+pub async fn log_debug_info(info: String) -> Result<(), String> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/Users/liuyq/rustproject/lakemind/debug_log.txt")
+        .map_err(|e| e.to_string())?;
+    writeln!(file, "{}", info).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn delete_task(task_id: String) -> Result<(), String> {
     let conn = db::get_db_conn()?;
     let kind: Option<String> = conn

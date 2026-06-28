@@ -1337,6 +1337,7 @@ fn emit_usage_estimate(
             "toolsTokens": tools_tokens,
             "preambleTokens": preamble_tokens,
             "cacheHitRate": cache_hit_rate,
+            "isEstimate": true,
         })).unwrap_or_default()),
         segment: None,
     });
@@ -1465,7 +1466,7 @@ const PREAMBLE: &str = r#"# 角色
 /// Only visible text reaches the model — reasoning and tool steps are managed
 /// by rig within the turn and are not replayed as history (matches prior
 /// behavior, which only ever sent `content`).
-fn assistant_text(msg: &ChatMessageDto) -> String {
+fn get_message_text(msg: &ChatMessageDto) -> String {
     if let Some(c) = &msg.content {
         return c.clone();
     }
@@ -1575,6 +1576,7 @@ async fn run_stream_loop<R>(
                         "toolsTokens": tools_tokens,
                         "preambleTokens": preamble_tokens,
                         "cacheHitRate": cache_hit_rate,
+                        "isEstimate": false,
                     })).unwrap_or_default()),
                     segment: None,
                 });
@@ -1624,13 +1626,11 @@ pub async fn run_agent_chat_stream(
 
     let mut rig_history: Vec<Message> = Vec::new();
     for msg in history {
-        if msg.role == "user" {
-            if let Some(c) = &msg.content {
-                rig_history.push(Message::user(c.clone()));
-            }
-        } else if msg.role == "assistant" {
-            let text = assistant_text(&msg);
-            if !text.is_empty() {
+        let text = get_message_text(&msg);
+        if !text.is_empty() {
+            if msg.role == "user" {
+                rig_history.push(Message::user(text));
+            } else if msg.role == "assistant" {
                 rig_history.push(Message::assistant(text));
             }
         }
