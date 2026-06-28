@@ -330,22 +330,30 @@ export default function App() {
                 // Only outputTokens is accumulated across turns so the user can
                 // see the total tokens generated for the whole conversation.
                 //
-                // All input-related fields (inputTokens, cachedInputTokens,
-                // cacheHitRate, messagesTokens, …) come directly from the current
-                // turn because rig already re-sends the full conversation history
-                // every time — these values therefore reflect the full accumulated
-                // context naturally, without any manual summing.
-                // Mixing accumulation strategies (e.g. summing cached but maxing
-                // input) causes the hit rate to exceed 100 %, so we avoid it.
-                const prevOut       = prevUsage?.outputTokens ?? 0;
-                const cumulativeOut = prevOut + usageData.outputTokens;
+                // cacheHitRate is computed as a true weighted average across ALL
+                // FinalResponse events using the internal tracking fields
+                // (_totalInputAllTurns / _totalCachedAllTurns). This guarantees
+                // the rate is always ≤ 100 % and reflects the whole session.
+                const prevOut          = prevUsage?.outputTokens       ?? 0;
+                const prevTotalInput   = prevUsage?._totalInputAllTurns  ?? 0;
+                const prevTotalCached  = prevUsage?._totalCachedAllTurns ?? 0;
+
+                const cumulativeOut       = prevOut + usageData.outputTokens;
+                const totalInputAllTurns  = prevTotalInput  + usageData.inputTokens;
+                const totalCachedAllTurns = prevTotalCached + usageData.cachedInputTokens;
+                const avgCacheHitRate = totalInputAllTurns > 0
+                  ? Math.round(totalCachedAllTurns / totalInputAllTurns * 100)
+                  : 0;
 
                 t = {
                   ...t,
                   tokenUsage: {
                     ...usageData,
-                    outputTokens: cumulativeOut,
-                    totalTokens:  usageData.inputTokens + cumulativeOut,
+                    outputTokens:         cumulativeOut,
+                    totalTokens:          usageData.inputTokens + cumulativeOut,
+                    cacheHitRate:         avgCacheHitRate,
+                    _totalInputAllTurns:  totalInputAllTurns,
+                    _totalCachedAllTurns: totalCachedAllTurns,
                   },
                 };
               }

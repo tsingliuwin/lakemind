@@ -167,6 +167,15 @@ export interface TokenUsage {
   toolsTokens: number;
   preambleTokens: number;
   cacheHitRate: number;
+  /**
+   * Internal tracking fields — not displayed directly.
+   * Accumulate the sum of inputTokens / cachedInputTokens across every
+   * FinalResponse so we can compute a true weighted-average cache hit rate
+   * (totalCached / totalInput) instead of just the last turn's rate.
+   * Optional so persisted data that predates these fields still loads cleanly.
+   */
+  _totalInputAllTurns?: number;
+  _totalCachedAllTurns?: number;
 }
 
 export interface QueryTask {
