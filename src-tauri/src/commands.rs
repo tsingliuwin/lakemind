@@ -254,6 +254,8 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
                     let new_rec = source_record_from(&t, &entry, rec_clone.created_at, &rec_clone.name_source);
                     if let Ok(sqlite) = db::get_db_conn() {
                         let _ = db::upsert_source(&sqlite, &ws_path_clone, &new_rec);
+                        let _ = crate::okf::write_source_okf(&ws_path_clone, &rec_clone.table_name, &rec_clone.label, &rec_clone.file_path, rec_clone.file_size as i64, rec_clone.file_mtime, &t.columns, t.row_count_estimate);
+                        let _ = crate::okf::write_pipeline_okf(&ws_path_clone, &rec_clone.table_name, &rec_clone.label, &rec_clone.file_path, &new_rec.storage);
                     }
                     true
                 }
@@ -796,7 +798,10 @@ async fn sync_entries(
                     // under the old name is now stale — drop it.
                     if needs_rename {
                         let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
+                        let _ = crate::okf::delete_okf_files(&ws_path, &rec.table_name);
                     }
+                    let _ = crate::okf::write_source_okf(&ws_path, target, &e.label, &e.path, e.file_size as i64, e.mtime, &rec.columns, rec.row_count);
+                    let _ = crate::okf::write_pipeline_okf(&ws_path, target, &e.label, &e.path, &updated.storage);
                     result.push(build_source_table_from_record(&updated));
                 } else {
                     // Fingerprint changed → rebuild under the target name.
@@ -809,6 +814,7 @@ async fn sync_entries(
                     };
                     work.view_name = target.clone();
                     drop_lake_object(&guard, &rec.table_name);
+                    let _ = crate::okf::delete_okf_files(&ws_path, &rec.table_name);
                     let prog = progress.as_ref().map(|p| p as &dyn Fn(&str));
                     if let Some(p) = prog { p(target); }
                     match register::register(&guard, &work, storage, prog) {
@@ -816,6 +822,8 @@ async fn sync_entries(
                             let new_rec = source_record_from(&t, e, rec.created_at, src);
                             let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
                             let _ = db::upsert_source(&sqlite, &ws_path, &new_rec);
+                            let _ = crate::okf::write_source_okf(&ws_path, target, &e.label, &e.path, e.file_size as i64, e.mtime, &t.columns, t.row_count_estimate);
+                            let _ = crate::okf::write_pipeline_okf(&ws_path, target, &e.label, &e.path, &new_rec.storage);
                             result.push(t);
                         }
                         Err(err) => eprintln!("rebuild {} failed: {err}", e.label),
@@ -845,6 +853,8 @@ async fn sync_entries(
                     };
                     let rec = source_record_from(&t, e, now, src);
                     let _ = db::upsert_source(&sqlite, &ws_path, &rec);
+                    let _ = crate::okf::write_source_okf(&ws_path, target, &e.label, &e.path, e.file_size as i64, e.mtime, &t.columns, t.row_count_estimate);
+                    let _ = crate::okf::write_pipeline_okf(&ws_path, target, &e.label, &e.path, &rec.storage);
                     result.push(t);
                 } else {
                     let mut work = if storage == StorageKind::Table {
@@ -861,6 +871,8 @@ async fn sync_entries(
                             lake_mutated = true;
                             let rec = source_record_from(&t, e, now, src);
                             let _ = db::upsert_source(&sqlite, &ws_path, &rec);
+                            let _ = crate::okf::write_source_okf(&ws_path, target, &e.label, &e.path, e.file_size as i64, e.mtime, &t.columns, t.row_count_estimate);
+                            let _ = crate::okf::write_pipeline_okf(&ws_path, target, &e.label, &e.path, &rec.storage);
                             result.push(t);
                         }
                         Err(err) => eprintln!("register {} failed: {err}", e.label),
@@ -877,6 +889,7 @@ async fn sync_entries(
                 if !entry_scan_paths.contains(&rec.scan_path) {
                     drop_lake_object(&guard, &rec.table_name);
                     let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
+                    let _ = crate::okf::delete_okf_files(&ws_path, &rec.table_name);
                     lake_mutated = true;
                 }
             }

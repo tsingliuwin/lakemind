@@ -1,0 +1,7 @@
+# Ignore default project workspace folder and lakemind database changes
+src-tauri/DefaultProject/
+**/DefaultProject/**
+**/.lakemind/**
+*.db
+*.db-journal
+*.duckdb

@@ -1,0 +1,7 @@
+# Ignore default project workspace folder and lakemind database changes
+DefaultProject/
+**/DefaultProject/**
+**/.lakemind/**
+*.db
+*.db-journal
+*.duckdb

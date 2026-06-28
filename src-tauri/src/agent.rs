@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 use serde_json::json;
 use rig_core::{
     completion::Message,
@@ -506,10 +508,13 @@ impl Tool for DescribeTableTool {
         let start = std::time::Instant::now();
         let conn = self.app_state.conn.clone();
         let table_name_string = table_name.to_string();
+        let ws_path = self.app_state.workspace_path.lock().await.clone();
         let desc_res = tokio::task::spawn_blocking(move || {
             let guard = conn.blocking_lock();
-            let sql = format!("DESCRIBE {table_name_string}");
-            execute::run_query(&guard, &sql, None)
+            let sql = format!("DESCRIBE \"{}\"", table_name_string.replace('"', "\"\""));
+            let query_res = execute::run_query(&guard, &sql, None).map_err(|e| e.to_string())?;
+            let (okf_title, col_comments, relations) = crate::okf::parse_column_semantics(&ws_path, &table_name_string);
+            Ok::<_, String>((query_res, okf_title, col_comments, relations))
         })
         .await
         .map_err(|e| ToolError(format!("线程生成失败: {e}")))
@@ -517,20 +522,29 @@ impl Tool for DescribeTableTool {
 
         let elapsed = start.elapsed().as_millis() as u64;
         match desc_res {
-            Ok(res) => {
+            Ok((res, okf_title, col_comments, relations)) => {
                 let col_lines: Vec<String> = res.rows.iter().map(|r| {
                     let name = r.get(0).map(|v| v.to_string()).unwrap_or_default();
                     let ty = r.get(1).map(|v| v.to_string()).unwrap_or_default();
                     let null = r.get(2).map(|v| v.to_string()).unwrap_or_default();
-                    format!("{} (类型: {}, 允许空: {})", name, ty, null)
+                    let comment = col_comments.get(&name).map(|c| format!(", 释义: {}", c)).unwrap_or_default();
+                    format!("{} (类型: {}, 允许空: {}){}", name, ty, null, comment)
                 }).collect();
                 let n = res.rows.len();
-                let summary = format!("结构分析完成，{} 共 {} 个字段", table_name, n);
+                let mut title_part = String::new();
+                if let Some(t) = okf_title {
+                    title_part = format!(" (业务名称: {})", t);
+                }
+                let mut rels_part = String::new();
+                if !relations.is_empty() {
+                    rels_part = format!("\n\n关联关系:\n{}", relations.iter().map(|r| format!("- {}", r)).collect::<Vec<_>>().join("\n"));
+                }
+                let summary = format!("结构分析完成，{}{}, 共 {} 个字段", table_name, title_part, n);
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "ok",
                     summary, None, Some(res), Some(elapsed),
                 );
-                Ok(format!("表 {} 的列结构如下:\n{}", table_name, col_lines.join("\n")))
+                Ok(format!("表 {}{} 的列结构如下:\n{}{}", table_name, title_part, col_lines.join("\n"), rels_part))
             }
             Err(err) => {
                 emit_tool_result(
@@ -538,6 +552,316 @@ impl Tool for DescribeTableTool {
                     err.0.clone(), None, None, Some(elapsed),
                 );
                 Err(err)
+            }
+        }
+    }
+}
+
+// ===========================================================================
+// OKF Knowledge System Rig Tools
+// ===========================================================================
+
+#[derive(Deserialize, Serialize)]
+struct LoadOkfBlockArgs {
+    category: String,
+    name: String,
+    heading: String,
+}
+
+struct LoadOkfBlockTool {
+    app_state: AppState,
+    task_id: String,
+    window: tauri::Window,
+}
+
+impl Tool for LoadOkfBlockTool {
+    const NAME: &'static str = "load_okf_block";
+    type Error = ToolError;
+    type Args = LoadOkfBlockArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "load_okf_block".to_string(),
+            description: "读取本地 OKF 知识库中某概念文件下的特定二级标题板块（如：读取 tables 分类下订单表的 '关联关系' 或是 pipelines 分类下的 '异常排障记录'）。这样可以避免加载全文，节省 token。".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "category": { "type": "string", "description": "OKF 的目录类别，例如 tables, views, sources, pipelines/specific" },
+                    "name": { "type": "string", "description": "文件概念名，不带 .md 扩展名，例如 t_sales" },
+                    "heading": { "type": "string", "description": "要读取的二级标题，例如 关联关系, 物理画像, 异常排障记录" }
+                },
+                "required": ["category", "name", "heading"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let call_id = next_tool_id("okfr");
+        emit_tool_call(
+            &self.window, &self.task_id, &call_id, "load_okf_block",
+            json!({ "category": args.category, "name": args.name, "heading": args.heading }),
+        );
+        let start = std::time::Instant::now();
+        let ws_path = self.app_state.workspace_path.lock().await.clone();
+        let res = crate::okf::read_okf_block(&ws_path, &args.category, &args.name, &args.heading);
+        let elapsed = start.elapsed().as_millis() as u64;
+        match res {
+            Ok(content) => {
+                emit_tool_result(&self.window, &self.task_id, &call_id, "ok", format!("读取板块 {} 成功", args.heading), None, None, Some(elapsed));
+                Ok(content)
+            }
+            Err(e) => {
+                emit_tool_result(&self.window, &self.task_id, &call_id, "error", e.clone(), None, None, Some(elapsed));
+                Err(ToolError(e))
+            }
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+struct WriteOkfBlockArgs {
+    category: String,
+    name: String,
+    heading: String,
+    content: String,
+}
+
+struct WriteOkfBlockTool {
+    app_state: AppState,
+    task_id: String,
+    window: tauri::Window,
+}
+
+impl Tool for WriteOkfBlockTool {
+    const NAME: &'static str = "write_okf_block";
+    type Error = ToolError;
+    type Args = WriteOkfBlockArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "write_okf_block".to_string(),
+            description: "向本地 OKF 知识库中某概念文件里的指定二级标题下更新/写入内容（如更新表关联关系、记录业务定义或者添加异常排障记录）。".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "category": { "type": "string", "description": "OKF 目录，例如 tables, views, sources, pipelines/specific" },
+                    "name": { "type": "string", "description": "概念名，例如 t_sales" },
+                    "heading": { "type": "string", "description": "二级标题名，例如 关联关系, 探索备注, 异常排障记录" },
+                    "content": { "type": "string", "description": "要写入的纯文本或 Markdown 段落" }
+                },
+                "required": ["category", "name", "heading", "content"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let call_id = next_tool_id("okfw");
+        emit_tool_call(
+            &self.window, &self.task_id, &call_id, "write_okf_block",
+            json!({ "category": args.category, "name": args.name, "heading": args.heading, "content": args.content }),
+        );
+        let start = std::time::Instant::now();
+        let ws_path = self.app_state.workspace_path.lock().await.clone();
+        let res = crate::okf::write_okf_block(&ws_path, &args.category, &args.name, &args.heading, &args.content);
+        let elapsed = start.elapsed().as_millis() as u64;
+        match res {
+            Ok(_) => {
+                let summary = format!("更新板块 {} 成功", args.heading);
+                emit_tool_result(&self.window, &self.task_id, &call_id, "ok", summary.clone(), None, None, Some(elapsed));
+                Ok(summary)
+            }
+            Err(e) => {
+                emit_tool_result(&self.window, &self.task_id, &call_id, "error", e.clone(), None, None, Some(elapsed));
+                Err(ToolError(e))
+            }
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+struct SearchOkfRecipesArgs {
+    query: String,
+}
+
+struct SearchOkfRecipesTool {
+    app_state: AppState,
+    task_id: String,
+    window: tauri::Window,
+}
+
+impl Tool for SearchOkfRecipesTool {
+    const NAME: &'static str = "search_okf_recipes";
+    type Error = ToolError;
+    type Args = SearchOkfRecipesArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "search_okf_recipes".to_string(),
+            description: "在本地 OKF 知识库中（特别是 pipelines 目录下）搜索匹配的导入/清洗配方或排障经历。当面临导入报错或数据异常时，可以用此工具查找历史上相似的解决方案。".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "要检索的关键字或错误信息，如 'UTF-16', 'date format', 'delimiter'" }
+                },
+                "required": ["query"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let call_id = next_tool_id("okfs");
+        emit_tool_call(
+            &self.window, &self.task_id, &call_id, "search_okf_recipes",
+            json!({ "query": args.query }),
+        );
+        let start = std::time::Instant::now();
+        let ws_path = self.app_state.workspace_path.lock().await.clone();
+        
+        let search_res = tokio::task::spawn_blocking(move || {
+            let okf_dir = crate::okf::get_okf_dir(&ws_path);
+            let mut matches = Vec::new();
+            let query_lower = args.query.to_lowercase();
+            
+            // Walk only okf/pipelines
+            let pipelines_dir = okf_dir.join("pipelines");
+            if pipelines_dir.exists() {
+                for entry in walkdir::WalkDir::new(&pipelines_dir) {
+                    let Ok(entry) = entry else { continue };
+                    if entry.path().is_file() && entry.path().extension().and_then(|e| e.to_str()) == Some("md") {
+                        if let Ok(content) = fs::read_to_string(entry.path()) {
+                            let content_str: String = content.to_lowercase();
+                            if content_str.contains(query_lower.as_str()) {
+                                let rel_path = entry.path()
+                                    .strip_prefix(&okf_dir)
+                                    .map(|p| p.to_string_lossy().to_string())
+                                    .unwrap_or_else(|_| entry.path().to_string_lossy().to_string());
+                                // Just grab first 200 chars as preview
+                                let preview: String = content.lines().take(6).collect::<Vec<_>>().join("\n");
+                                matches.push(format!("文件: {}\n预览:\n{}\n---", rel_path, preview));
+                            }
+                        }
+                    }
+                }
+            }
+            matches
+        })
+        .await
+        .map_err(|e| ToolError(format!("线程池故障: {}", e)))?;
+        
+        let elapsed = start.elapsed().as_millis() as u64;
+        if search_res.is_empty() {
+            let msg = "未找到匹配的配方或故障记录。".to_string();
+            emit_tool_result(&self.window, &self.task_id, &call_id, "ok", msg.clone(), None, None, Some(elapsed));
+            Ok(msg)
+        } else {
+            emit_tool_result(&self.window, &self.task_id, &call_id, "ok", format!("检索出 {} 条记录", search_res.len()), None, None, Some(elapsed));
+            Ok(format!("检索出以下相关经验配方:\n\n{}", search_res.join("\n\n")))
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+struct CheckSourceFingerprintArgs {
+    file_path: String,
+}
+
+struct CheckSourceFingerprintTool {
+    app_state: AppState,
+    task_id: String,
+    window: tauri::Window,
+}
+
+impl Tool for CheckSourceFingerprintTool {
+    const NAME: &'static str = "check_source_fingerprint";
+    type Error = ToolError;
+    type Args = CheckSourceFingerprintArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "check_source_fingerprint".to_string(),
+            description: "计算物理文件的指纹（mtime + size）并检索 OKF 知识库中是否已有对应的注册源文件。如果有，返回其 table_name，可以直接重用而不需要重新探索表结构。".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string", "description": "文件的绝对路径，例如 /workspace/data/sales.csv" }
+                },
+                "required": ["file_path"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let call_id = next_tool_id("okff");
+        emit_tool_call(
+            &self.window, &self.task_id, &call_id, "check_source_fingerprint",
+            json!({ "file_path": args.file_path }),
+        );
+        let start = std::time::Instant::now();
+        let ws_path = self.app_state.workspace_path.lock().await.clone();
+        let file_path_str = args.file_path.clone();
+        
+        let match_res = tokio::task::spawn_blocking(move || {
+            let path = Path::new(&file_path_str);
+            if !path.exists() {
+                return Err(format!("文件不存在: {}", file_path_str));
+            }
+            let meta = fs::metadata(path).map_err(|e| format!("读取元数据失败: {}", e))?;
+            let size = meta.len() as i64;
+            let mtime = match meta.modified() {
+                Ok(t) => match t.duration_since(std::time::UNIX_EPOCH) {
+                    Ok(d) => d.as_millis() as i64,
+                    Err(_) => 0,
+                },
+                Err(_) => 0,
+            };
+                
+            let target_fp = format!("{}:{}", mtime, size);
+            
+            // Search in OKF/sources
+            let okf_dir = crate::okf::get_okf_dir(&ws_path);
+            let sources_dir = okf_dir.join("sources");
+            if sources_dir.exists() {
+                for entry in walkdir::WalkDir::new(&sources_dir) {
+                    let Ok(entry) = entry else { continue };
+                    if entry.path().is_file() && entry.path().extension().and_then(|e| e.to_str()) == Some("md") {
+                        if let Ok(content) = fs::read_to_string(entry.path()) {
+                            let content_str: String = content;
+                            let mut fp_line = String::new();
+                            for line in content_str.lines() {
+                                if line.starts_with("fingerprint:") {
+                                    fp_line = line.trim_start_matches("fingerprint:").trim().to_string();
+                                    break;
+                                }
+                            }
+                            if fp_line == target_fp {
+                                let name = entry.path().file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                                return Ok(Some(name));
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(None)
+        })
+        .await
+        .map_err(|e| ToolError(format!("线程池故障: {}", e)))?
+        .map_err(ToolError)?;
+        
+        let elapsed = start.elapsed().as_millis() as u64;
+        match match_res {
+            Some(name) => {
+                let msg = format!("找到完全匹配的文件指纹！已有注册表名：`{}`。可直接通过查询操作它，跳过重新探索。", name);
+                emit_tool_result(&self.window, &self.task_id, &call_id, "ok", msg.clone(), None, None, Some(elapsed));
+                Ok(msg)
+            }
+            None => {
+                let msg = "未找到匹配的数据指纹，这是一个全新的数据源文件，请按常规方式导入并探索。".to_string();
+                emit_tool_result(&self.window, &self.task_id, &call_id, "ok", msg.clone(), None, None, Some(elapsed));
+                Ok(msg)
             }
         }
     }
@@ -912,19 +1236,22 @@ impl DdlToolShared {
                     .ok();
                 (cols, cnt)
             };
-            crate::db::upsert_object_def(
-                &sqlite,
-                &ws_path,
-                &crate::db::ObjectDef {
-                    table_name: name,
-                    kind,
-                    select_sql,
-                    input_hash,
-                    created_at,
-                    columns,
-                    row_count,
-                },
-            )
+            let obj = crate::db::ObjectDef {
+                table_name: name.clone(),
+                kind: kind.clone(),
+                select_sql: select_sql.clone(),
+                input_hash,
+                created_at,
+                columns: columns.clone(),
+                row_count,
+            };
+            crate::db::upsert_object_def(&sqlite, &ws_path, &obj)?;
+            if kind == "table" {
+                let _ = crate::okf::write_table_okf(&ws_path, &name, &columns, row_count);
+            } else {
+                let _ = crate::okf::write_view_okf(&ws_path, &name, &select_sql, &columns);
+            }
+            Ok(())
         })
         .await;
     }
@@ -939,6 +1266,7 @@ impl DdlToolShared {
             let sqlite = crate::db::get_db_conn()?;
             let _ = crate::db::delete_object_def(&sqlite, &ws_path, &name);
             let _ = crate::db::delete_source_by_table(&sqlite, &ws_path, &name);
+            let _ = crate::okf::delete_okf_files(&ws_path, &name);
             Ok(())
         })
         .await;
@@ -1638,6 +1966,24 @@ pub async fn run_agent_chat_stream(
     let desc_tool = DescribeTableTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
     let exec_tool = ExecuteQueryTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
     let sample_tool = SampleDataTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    
+    // OKF Tools (Instantiated for each format branch due to rig's ownership rules)
+    let load_okf_1 = LoadOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    let load_okf_2 = LoadOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    let load_okf_3 = LoadOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    
+    let write_okf_1 = WriteOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    let write_okf_2 = WriteOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    let write_okf_3 = WriteOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    
+    let search_okf_1 = SearchOkfRecipesTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    let search_okf_2 = SearchOkfRecipesTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    let search_okf_3 = SearchOkfRecipesTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    
+    let check_okf_1 = CheckSourceFingerprintTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    let check_okf_2 = CheckSourceFingerprintTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    let check_okf_3 = CheckSourceFingerprintTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+
     let ddl_shared = DdlToolShared {
         app_state: app_state.clone(),
         task_id: task_id.clone(),
@@ -1683,9 +2029,20 @@ pub async fn run_agent_chat_stream(
         create_view_tool.definition(String::new()).await,
         drop_object_tool.definition(String::new()).await,
         render_chart_tool.definition(String::new()).await,
+        load_okf_1.definition(String::new()).await,
+        write_okf_1.definition(String::new()).await,
+        search_okf_1.definition(String::new()).await,
+        check_okf_1.definition(String::new()).await,
     ];
     let tools_json = serde_json::to_string(&tool_defs).unwrap_or_default();
-    let preamble_raw = usage::raw_preamble_tokens();
+    let ws_path = app_state.workspace_path.lock().await.clone();
+    let memory_summary = crate::okf::get_okf_memory_summary(&ws_path);
+    let combined_preamble = if memory_summary.is_empty() {
+        PREAMBLE.to_string()
+    } else {
+        format!("{}\n\n# 你的湖仓数据及业务“记忆”\n根据你之前与用户的对话和本地 OKF 知识库的积累，你已拥有以下数据与业务概念记忆。你在进行数据关联分析、回答提问时应**直接继承并使用**这些知识（包括业务释义与表关系），无需重复向用户澄清：\n\n{}", PREAMBLE, memory_summary)
+    };
+    let preamble_raw = usage::estimate_tokens(&combined_preamble);
     let tools_raw = usage::estimate_tokens(&tools_json);
     let prompt_t = usage::estimate_tokens(&prompt);
     let history_t: u64 = rig_history.iter()
@@ -1706,7 +2063,7 @@ pub async fn run_agent_chat_stream(
         let mut agent_builder = client
             .completions_api()
             .agent(&model_id)
-            .preamble(PREAMBLE)
+            .preamble(&combined_preamble)
             .max_tokens(max_tokens_limit)
             .tool(list_tool)
             .tool(desc_tool)
@@ -1715,7 +2072,11 @@ pub async fn run_agent_chat_stream(
             .tool(create_table_tool)
             .tool(create_view_tool)
             .tool(drop_object_tool)
-            .tool(render_chart_tool);
+            .tool(render_chart_tool)
+            .tool(load_okf_1)
+            .tool(write_okf_1)
+            .tool(search_okf_1)
+            .tool(check_okf_1);
 
         if model_id.starts_with("o1") || model_id.starts_with("o3") {
             agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
@@ -1746,7 +2107,7 @@ pub async fn run_agent_chat_stream(
 
         let mut agent_builder = client
             .agent(&model_id)
-            .preamble(PREAMBLE)
+            .preamble(&combined_preamble)
             .max_tokens(max_tokens_limit)
             .tool(list_tool)
             .tool(desc_tool)
@@ -1755,7 +2116,11 @@ pub async fn run_agent_chat_stream(
             .tool(create_table_tool)
             .tool(create_view_tool)
             .tool(drop_object_tool)
-            .tool(render_chart_tool_2);
+            .tool(render_chart_tool_2)
+            .tool(load_okf_2)
+            .tool(write_okf_2)
+            .tool(search_okf_2)
+            .tool(check_okf_2);
 
         if model_id.starts_with("o1") || model_id.starts_with("o3") {
             agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
@@ -1786,7 +2151,7 @@ pub async fn run_agent_chat_stream(
 
         let agent = client
             .agent(&model_id)
-            .preamble(PREAMBLE)
+            .preamble(&combined_preamble)
             .max_tokens(4096)
             .tool(list_tool)
             .tool(desc_tool)
@@ -1796,6 +2161,10 @@ pub async fn run_agent_chat_stream(
             .tool(create_view_tool)
             .tool(drop_object_tool)
             .tool(render_chart_tool_3)
+            .tool(load_okf_3)
+            .tool(write_okf_3)
+            .tool(search_okf_3)
+            .tool(check_okf_3)
             .build();
 
         let stream = agent.stream_chat(prompt.clone(), rig_history)
