@@ -407,8 +407,98 @@ pub fn write_okf_block(
         new_lines.push(new_content.to_string());
     }
 
-    fs::write(&file_path, new_lines.join("\n")).map_err(|e| format!("写入文件失败: {}", e))?;
+    let clean_content = deduplicate_markdown(&new_lines.join("\n"));
+    fs::write(&file_path, clean_content).map_err(|e| format!("写入文件失败: {}", e))?;
+    
+    run_git_commit(&okf_dir, &file_path, &format!("Update OKF: {}/{}", category, name));
+
     Ok(())
+}
+
+fn run_git_commit(okf_dir: &Path, file_path: &Path, commit_msg: &str) {
+    use std::process::Command;
+    let git_dir = okf_dir.join(".git");
+    if !git_dir.exists() {
+        let _ = Command::new("git")
+            .arg("init")
+            .current_dir(okf_dir)
+            .status();
+        let _ = fs::write(okf_dir.join(".gitignore"), ".DS_Store\n");
+    }
+    if let Ok(rel_path) = file_path.strip_prefix(okf_dir) {
+        let _ = Command::new("git")
+            .arg("add")
+            .arg(rel_path)
+            .current_dir(okf_dir)
+            .status();
+        let _ = Command::new("git")
+            .arg("commit")
+            .arg("-m")
+            .arg(commit_msg)
+            .current_dir(okf_dir)
+            .status();
+    }
+}
+
+pub fn deduplicate_markdown(content: &str) -> String {
+    let mut clean_lines = Vec::new();
+    let mut seen_headings = std::collections::HashSet::new();
+    let mut skipping = false;
+    let mut in_yaml = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "---" {
+            in_yaml = !in_yaml;
+            clean_lines.push(line.to_string());
+            continue;
+        }
+        if in_yaml {
+            clean_lines.push(line.to_string());
+            continue;
+        }
+
+        if trimmed.starts_with('#') {
+            let heading_text = trimmed.trim_start_matches('#').trim().to_lowercase();
+            if seen_headings.contains(&heading_text) {
+                skipping = true;
+            } else {
+                seen_headings.insert(heading_text);
+                skipping = false;
+                clean_lines.push(line.to_string());
+            }
+        } else if !skipping {
+            clean_lines.push(line.to_string());
+        }
+    }
+
+    clean_lines.join("\n")
+}
+
+pub fn clean_all_okf_files(ws_path: &str) {
+    let okf_dir = get_okf_dir(ws_path);
+    if !okf_dir.exists() {
+        return;
+    }
+    for entry in walkdir::WalkDir::new(&okf_dir) {
+        let Ok(entry) = entry else { continue };
+        if entry.path().is_file() && entry.path().extension().and_then(|e| e.to_str()) == Some("md") {
+            if let Ok(content) = fs::read_to_string(entry.path()) {
+                let cleaned = deduplicate_markdown(&content);
+                if cleaned.len() != content.len() {
+                    if let Ok(_) = fs::write(entry.path(), cleaned) {
+                        if let Ok(rel_path) = entry.path().strip_prefix(&okf_dir) {
+                            run_git_commit(
+                                &okf_dir,
+                                entry.path(),
+                                &format!("Auto-repair OKF: deduplicate {}", rel_path.to_string_lossy()),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Scan specific table/view OKF to parse comments and relations
@@ -500,6 +590,7 @@ pub fn parse_yaml_field(content: &str, field: &str) -> Option<String> {
 
 /// Retroactively generate OKF markdown files for existing SQLite object defs and sources.
 pub fn ensure_all_object_okf(ws_path: &str) {
+    clean_all_okf_files(ws_path);
     let Ok(sqlite) = crate::db::get_db_conn() else { return };
     
     // 1. Process sources
@@ -696,13 +787,9 @@ pub fn get_okf_memory_summary(ws_path: &str) -> String {
                         let desc = parse_yaml_field(&content, "description").unwrap_or_default();
                         
                         let mut concept_detail = format!("### 业务通用定义 `{}` (业务名称: {})\n", name, title);
-                        if !desc.is_empty() {
-                            concept_detail.push_str(&format!("> {}\n", desc));
-                        }
                         
-                        let mut current_heading = String::new();
-                        let mut block_content = Vec::new();
                         let mut intro_content = Vec::new();
+                        let mut headings = Vec::new();
                         let mut in_yaml = false;
                         
                         for line in content.lines() {
@@ -719,31 +806,27 @@ pub fn get_okf_memory_summary(ws_path: &str) -> String {
                                 if heading_text.eq_ignore_ascii_case(&title) || heading_text.eq_ignore_ascii_case(&name) {
                                     continue;
                                 }
-                                if !current_heading.is_empty() {
-                                    if !block_content.is_empty() {
-                                        concept_detail.push_str(&format!("- **{}**:\n  {}\n", current_heading, block_content.join("\n  ")));
-                                    }
-                                } else {
-                                    if !intro_content.is_empty() && desc.is_empty() {
-                                        concept_detail.push_str(&format!("> {}\n", intro_content.join("\n> ")));
-                                    }
+                                if trimmed.starts_with("##") {
+                                    headings.push(heading_text.to_string());
                                 }
-                                current_heading = heading_text.to_string();
-                                block_content.clear();
-                            } else {
-                                if !trimmed.is_empty() {
-                                    if current_heading.is_empty() {
-                                        intro_content.push(trimmed.to_string());
-                                    } else {
-                                        block_content.push(trimmed.to_string());
-                                    }
+                            } else if !trimmed.is_empty() && headings.is_empty() {
+                                if intro_content.len() < 3 {
+                                    intro_content.push(trimmed.to_string());
                                 }
                             }
                         }
-                        if !current_heading.is_empty() && !block_content.is_empty() {
-                            concept_detail.push_str(&format!("- **{}**:\n  {}\n", current_heading, block_content.join("\n  ")));
-                        } else if current_heading.is_empty() && !intro_content.is_empty() && desc.is_empty() {
+
+                        if !desc.is_empty() {
+                            concept_detail.push_str(&format!("> {}\n", desc));
+                        } else if !intro_content.is_empty() {
                             concept_detail.push_str(&format!("> {}\n", intro_content.join("\n> ")));
+                        }
+
+                        if !headings.is_empty() {
+                            concept_detail.push_str("- 包含的业务板块大纲 (按需使用 `load_okf_block` 工具读取详情):\n");
+                            for h in headings {
+                                concept_detail.push_str(&format!("  - {}\n", h));
+                            }
                         }
                         
                         concepts_info.push(concept_detail);
@@ -865,8 +948,37 @@ type: Business Concept
         // Assertions for concept intro and sections parsing
         assert!(summary.contains("这是测试概念的引言部分，说明了公司的主要愿景。"));
         assert!(summary.contains("详细板块"));
-        assert!(summary.contains("这是板块内容。"));
 
         let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn test_deduplicate_markdown() {
+        let dirty_content = "\
+---
+title: 公司背景
+type: Business Concept
+---
+# 公司背景
+业务介绍文字。
+
+## 公司信息
+苏州研途教育。
+
+# 公司信息
+这是重复的公司信息。
+
+## 详细板块
+详细内容。
+
+## 详细板块
+重复的详细内容。
+";
+        let cleaned = deduplicate_markdown(dirty_content);
+        assert!(cleaned.contains("苏州研途教育。"));
+        assert!(cleaned.contains("详细内容。"));
+        assert!(!cleaned.contains("这是重复的公司信息。"));
+        assert!(!cleaned.contains("重复的详细内容。"));
+        assert!(cleaned.contains("title: 公司背景"));
     }
 }

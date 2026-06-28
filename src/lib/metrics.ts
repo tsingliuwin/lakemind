@@ -253,15 +253,15 @@ export function derivePanelMetrics(
   };
 
   // Cumulative.
-  const totalPrompt = u._totalPrompt ?? 0;
-  const totalCompletion = u._totalCompletion ?? 0;
+  const totalPrompt = (u._totalPrompt ?? 0) + (u.isEstimate ? perTurn.prompt : 0);
+  const totalCompletion = (u._totalCompletion ?? 0) + (u.isEstimate ? perTurn.completion : 0);
   const totalCacheRead = u._totalCacheRead ?? 0;
   const turnCount = u._turnCount ?? 0;
   const hitRate = totalPrompt > 0 ? (totalCacheRead / totalPrompt) * 100 : 0;
 
   // Composition (cumulative). preamble/tools sent on every LLM call.
   const k = u._calibK ?? 1;
-  const calls = u._llmCallCount ?? 0;
+  const calls = (u._llmCallCount ?? 0) + (u.isEstimate ? 1 : 0);
   const perCallPreamble = Math.round(k * (u.estPreambleRaw ?? 0));
   const perCallTools = Math.round(k * (u.estToolsRaw ?? 0));
   const cumPreamble = perCallPreamble * calls;
