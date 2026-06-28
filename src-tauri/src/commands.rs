@@ -998,6 +998,7 @@ pub async fn read_directory(path: String) -> Result<Vec<FileItem>, String> {
                 || name == "lake.duckdb"
                 || name == "lake.ducklake"
                 || name == "lake_data"
+                || name == "okf"
                 || name.ends_with(".ducklake.wal")
             {
                 continue;
