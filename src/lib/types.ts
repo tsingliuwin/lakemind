@@ -159,30 +159,61 @@ export interface ChatCard {
 }
 
 export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  cachedInputTokens: number;
-  messagesTokens: number;
-  toolsTokens: number;
-  preambleTokens: number;
-  cacheHitRate: number;
-  /**
-   * Internal tracking fields — not displayed directly.
-   * Accumulate the sum of inputTokens / cachedInputTokens across every
-   * FinalResponse so we can compute a true weighted-average cache hit rate
-   * (totalCached / totalInput) instead of just the last turn's rate.
-   * Optional so persisted data that predates these fields still loads cleanly.
-   */
+  // ── Legacy fields (kept for backward-compat with persisted data written
+  //    before the metrics refactor). `derivePanelMetrics` falls back to these
+  //    when the new real fields are absent; `mergeUsage` no longer writes them. ──
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  cachedInputTokens?: number;
+  messagesTokens?: number;
+  toolsTokens?: number;
+  preambleTokens?: number;
+  cacheHitRate?: number;
   _totalInputAllTurns?: number;
   _totalCachedAllTurns?: number;
-  /**
-   * Peak inputTokens ever seen across all FinalResponse events in this
-   * conversation. Only increases — used to display the context window bar so
-   * it never shrinks when a new user turn starts with a smaller context
-   * (rig re-sends only text history, not tool results, between turns).
-   */
   _peakInputTokens?: number;
+
+  // ── New real fields (provider-normalized by the backend). ──
+  /** True total prompt tokens this call (cache read + creation + fresh). */
+  promptTokens?: number;
+  /** Completion (output) tokens this call. */
+  completionTokens?: number;
+  /** Tokens served from the provider cache (cheap). */
+  cacheReadTokens?: number;
+  /** Tokens written to the provider cache this call. */
+  cacheCreationTokens?: number;
+  /** Full-price input tokens (neither cached nor newly-cached). */
+  freshInputTokens?: number;
+  /** `k = 1` (uncalibrated) token estimate of the fixed system prompt. */
+  estPreambleRaw?: number;
+  /** `k = 1` (uncalibrated) token estimate of the tool definitions block. */
+  estToolsRaw?: number;
+  /**
+   * Per-model calibration factor (EMA of real/estimated prompt). Applied to
+   * `estPreambleRaw` / `estToolsRaw` so the composition estimate converges
+   * toward reality over turns. Defaults to 1.0 when no sample exists.
+   */
+  _calibK?: number;
+  /** True when the current values are a pre-FinalResponse estimate (internal
+   *  only — never displayed as a label; drives the "freeze real, advance
+   *  output" merge behavior). */
+  isEstimate?: boolean;
+
+  // ── Cumulative across the whole conversation (real, per LLM call). ──
+  _totalPrompt?: number;
+  _totalCompletion?: number;
+  _totalCacheRead?: number;
+  _totalCacheCreation?: number;
+  /** Number of LLM calls that produced a real FinalResponse. Drives the
+   *  composition multiplier (preamble/tools are sent on every call). */
+  _llmCallCount?: number;
+  /** Number of completed user turns (one per finished agent run). Displayed. */
+  _turnCount?: number;
+  /** Peak `promptTokens` ever seen — the context-window bar never shrinks. */
+  _peakPromptTokens?: number;
+  /** Generation speed (tok/s) of the most recently completed run. */
+  _lastTokPerSec?: number;
 }
 
 export interface QueryTask {

@@ -14,6 +14,7 @@ mod model;
 mod state;
 mod agent;
 mod fingerprint;
+mod usage;
 
 use state::AppState;
 

@@ -95,7 +95,7 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].kind, SourceKind::Csv);
 
-        let table = register::register(&conn, &entries[0], StorageKind::Table).unwrap();
+        let table = register::register(&conn, &entries[0], StorageKind::Table, None).unwrap();
         assert!(table.columns.iter().any(|c| c.name == "name"), "columns: {:?}", table.columns);
         assert_eq!(table.storage, StorageKind::Table);
 
@@ -116,7 +116,7 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].kind, SourceKind::Parquet);
 
-        let table = register::register(&conn, &entries[0], StorageKind::Table).unwrap();
+        let table = register::register(&conn, &entries[0], StorageKind::Table, None).unwrap();
         assert!(table.row_count_estimate.is_some());
         // write_parquet produced 5 rows; the fast path must report the true count.
         assert_eq!(table.row_count_estimate.unwrap(), 5);
@@ -170,7 +170,7 @@ mod tests {
         std::fs::write(&csv, "id,name\n1,alice\n2,bob\n").unwrap();
         let entries = scan::scan_path(&csv, false);
         assert_eq!(entries.len(), 1);
-        register::register(&conn, &entries[0], StorageKind::Table).unwrap();
+        register::register(&conn, &entries[0], StorageKind::Table, None).unwrap();
         let n: i64 = conn.query_row("SELECT count(*) FROM s_people", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 2);
         assert!(ws.join(".lake").join("lake.sqlite").exists(), "catalog file must exist");
@@ -201,8 +201,9 @@ mod tests {
             scan_path: pq.to_string_lossy().to_string(),
             partition_keys: Vec::new(),
             file_size: u64::MAX,
+            mtime: 0,
         };
-        let vt = register::register(&conn2, &view_entry, StorageKind::View).unwrap();
+        let vt = register::register(&conn2, &view_entry, StorageKind::View, None).unwrap();
         let vn: i64 = conn2.query_row("SELECT count(*) FROM s_ext", [], |r| r.get(0)).unwrap();
         assert_eq!(vn, 5);
         assert_eq!(vt.storage, StorageKind::View);
@@ -229,7 +230,7 @@ mod tests {
         for e in &entries {
             let t_reg = std::time::Instant::now();
             // Large sharded lake → zero-copy view
-            let table = register::register(&conn, e, StorageKind::View).unwrap();
+            let table = register::register(&conn, e, StorageKind::View, None).unwrap();
             let truth: i64 = conn
                 .query_row(&format!("SELECT count(*) FROM \"{}\"", table.name), [], |r| r.get(0))
                 .unwrap();

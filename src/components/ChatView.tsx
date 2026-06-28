@@ -1,5 +1,6 @@
 import { For, Index, Show, Switch, Match, createSignal, createEffect, createMemo, onMount, onCleanup, untrack } from "solid-js";
 import type { ChatMessage, Segment, TokenUsage } from "../lib/types";
+import { derivePanelMetrics, fmtCap, fmtNum, fmtPct } from "../lib/metrics";
 import ToolSegment from "./ToolSegment";
 import ChartSegment from "./ChartSegment";
 import MarkdownRenderer from "./MarkdownRenderer";
@@ -47,22 +48,7 @@ export default function ChatView(props: {
   const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
   const [priorityDropdownOpen, setPriorityDropdownOpen] = createSignal(false);
   const [confirmDropdownOpen, setConfirmDropdownOpen] = createSignal(false);
-  // Memoized token usage so the panel re-renders reactively when props change.
-  const usage = createMemo(() => props.tokenUsage ?? {
-    inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedInputTokens: 0,
-    messagesTokens: 0, toolsTokens: 0, preambleTokens: 0, cacheHitRate: 0,
-    _peakInputTokens: 0, _totalInputAllTurns: 0, _totalCachedAllTurns: 0,
-  });
-  // Use peak input for the bar so it never shrinks between turns.
-  const peakInput = createMemo(() => {
-    const u = usage();
-    return u._peakInputTokens ?? u.inputTokens;
-  });
-  const usedPct = createMemo(() => {
-    const ctxWindow = props.contextWindow ?? 128000;
-    const peak = peakInput();
-    return peak > 0 ? Math.min(100, (peak / ctxWindow * 100)) : 0;
-  });
+  // Panel metrics memo is defined after `now`/`streamStart`/`isStreaming` below.
   let modelRef: HTMLDivElement | undefined;
   let priorityRef: HTMLDivElement | undefined;
   let confirmRef: HTMLDivElement | undefined;
@@ -185,6 +171,20 @@ export default function ChatView(props: {
       streamStart = 0;
     }
   });
+
+  // Panel metrics — single source of truth for every number/bars the data
+  // panel renders. Re-derives reactively when tokenUsage, contextWindow, the
+  // 100ms clock (live tok/s while streaming), or streaming state changes.
+  const metrics = createMemo(() =>
+    derivePanelMetrics(props.tokenUsage ?? null, {
+      contextWindow: props.contextWindow ?? 128000,
+      nowMs: now(),
+      runStartMs: streamStart > 0 ? streamStart : undefined,
+      streaming: isStreaming(),
+    }),
+  );
+  // Capacity percentage for the always-visible pill (0 when no usage yet).
+  const capPct = createMemo(() => metrics()?.capacity.pct ?? 0);
 
   onMount(() => {
     const handle = setInterval(() => {
@@ -657,8 +657,8 @@ export default function ChatView(props: {
                 <div
                   class="token-usage-pill"
                   classList={{
-                    "token-usage-pill--warn": usedPct() >= 70 && usedPct() < 90,
-                    "token-usage-pill--danger": usedPct() >= 90,
+                    "token-usage-pill--warn": capPct() >= 70 && capPct() < 90,
+                    "token-usage-pill--danger": capPct() >= 90,
                   }}
                   title="上下文容量"
                 >
@@ -666,11 +666,11 @@ export default function ChatView(props: {
                     <svg class="battery-icon" viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1.5">
                       <rect x="1" y="1" width="18" height="10" rx="2" />
                       <path d="M20 4v4" stroke-linecap="round" />
-                      <Show when={usedPct() > 0}>
+                      <Show when={capPct() > 0}>
                         <rect
                           x="2.5"
                           y="2.5"
-                          width={15 * (usedPct() / 100)}
+                          width={15 * (capPct() / 100)}
                           height="7"
                           rx="1"
                           fill="currentColor"
@@ -679,53 +679,67 @@ export default function ChatView(props: {
                       </Show>
                     </svg>
                   </span>
-                  <span class="token-usage-pct">{usedPct().toFixed(0)}%</span>
+                  <span class="token-usage-pct">{capPct().toFixed(0)}%</span>
                 </div>
                 <div class="token-usage-panel">
-                  {(() => {
-                    const u = usage();
-                    const input = u.inputTokens;     // latest turn — used for breakdown %
-                    const peak  = peakInput();         // historical max — used for bar & capacity
-                    const ctxWindow = props.contextWindow ?? 128000;
-                    const pctVal = usedPct();
-                    const fmt = (n: number) => n >= 10000 ? `${(n / 10000).toFixed(0)}万` : n.toLocaleString();
-                    const pct = (n: number) => input > 0 ? `${(n / input * 100).toFixed(1)}%` : "0.0%";
-                    return (
+                  <Show
+                    when={metrics()}
+                    fallback={<div class="token-usage-panel__empty">暂无用量数据</div>}
+                  >
+                    {(m) => (
                       <>
-                        <div class="token-usage-panel__title">
-                          上下文容量
+                        {/* Header: 上下文容量 and value */}
+                        <div class="token-usage-panel__header">
+                          <span class="token-usage-panel__title">上下文容量</span>
                           <span class="token-usage-panel__capacity">
-                            {fmt(peak)}/{fmt(ctxWindow)} ({pctVal.toFixed(0)}%)
+                            {fmtCap(m().capacity.peak)}/{fmtCap(m().capacity.ctx)} ({fmtPct(m().capacity.pct)})
                           </span>
                         </div>
+
+                        {/* Progress Bar */}
                         <div class="token-usage-panel__bar">
-                          <div class="token-usage-panel__bar-fill"
-                            classList={{
-                              "token-usage-panel__bar-fill--warn": pctVal >= 70 && pctVal < 90,
-                              "token-usage-panel__bar-fill--danger": pctVal >= 90,
+                          <div
+                            class="token-usage-panel__bar-fill"
+                            style={{
+                              width: `${Math.max(0, Math.min(100, m().capacity.pct))}%`,
+                              background: m().capacity.pct >= 90 ? "#ef4444" : m().capacity.pct >= 70 ? "#f6bd16" : "#5b8ff9",
                             }}
-                            style={`width: ${pctVal.toFixed(1)}%`} />
+                          />
                         </div>
-                        <div class="token-usage-panel__row">
-                          <span class="token-usage-panel__dot token-usage-panel__dot--msg" />消息
-                          <span class="token-usage-panel__val">{pct(u.messagesTokens)}</span>
+
+                        {/* Composition List */}
+                        <div class="token-usage-panel__list">
+                          <div class="token-usage-panel__item">
+                            <span class="token-usage-panel__dot token-usage-panel__dot--msg" />
+                            <span class="token-usage-panel__label">消息</span>
+                            <span class="token-usage-panel__value">{fmtPct(m().composition.messages.pct)}</span>
+                          </div>
+                          <div class="token-usage-panel__item">
+                            <span class="token-usage-panel__dot token-usage-panel__dot--tools" />
+                            <span class="token-usage-panel__label">系统工具</span>
+                            <span class="token-usage-panel__value">{fmtPct(m().composition.tools.pct)}</span>
+                          </div>
+                          <div class="token-usage-panel__item">
+                            <span class="token-usage-panel__dot token-usage-panel__dot--preamble" />
+                            <span class="token-usage-panel__label">系统提示词</span>
+                            <span class="token-usage-panel__value">{fmtPct(m().composition.preamble.pct)}</span>
+                          </div>
                         </div>
-                        <div class="token-usage-panel__row">
-                          <span class="token-usage-panel__dot token-usage-panel__dot--tools" />系统工具
-                          <span class="token-usage-panel__val">{pct(u.toolsTokens)}</span>
-                        </div>
-                        <div class="token-usage-panel__row">
-                          <span class="token-usage-panel__dot token-usage-panel__dot--preamble" />系统提示词
-                          <span class="token-usage-panel__val">{pct(u.preambleTokens)}</span>
-                        </div>
-                        <div class="token-usage-panel__divider" />
-                        <div class="token-usage-panel__row">
-                          <span style="color: #61ddaa;">●</span>平均缓存命中率
-                          <span class="token-usage-panel__val" style="color: #61ddaa;">{u.cacheHitRate}%</span>
+
+                        {/* Gap/Spacer */}
+                        <div class="token-usage-panel__spacer" />
+
+                        {/* Average Cache Hit Rate */}
+                        <div class="token-usage-panel__item token-usage-panel__item--highlight">
+                          <span class="token-usage-panel__dot token-usage-panel__dot--hitrate" />
+                          <span class="token-usage-panel__label">平均缓存命中率</span>
+                          <span class="token-usage-panel__value token-usage-panel__value--green">
+                            {fmtPct(m().cumulative.hitRate)}
+                          </span>
                         </div>
                       </>
-                    );
-                  })()}
+                    )}
+                  </Show>
                 </div>
               </div>
 
@@ -927,6 +941,7 @@ function fmtMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }
+
 
 function formatTime(ts: number): string {
   const d = new Date(ts);

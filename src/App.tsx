@@ -15,6 +15,7 @@ import { tryFormatDuckdbSql } from "./lib/sqlFormat";
 import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage, RegisterStatus, ImportProgress, DepInfo } from "./lib/types";
 import ChatView from "./components/ChatView";
 import { appendDelta, pushToolCall, pushChart, mergeToolResult, normalizeMessage } from "./lib/chat";
+import { mergeUsage } from "./lib/metrics";
 import "./App.css";
 
 /**
@@ -289,81 +290,12 @@ export default function App() {
               }
             }
           } else if (kind === "usage" && payload.text) {
-            // Parse usage data and merge into the task being returned below.
+            // Fold the usage event into the task's persisted TokenUsage via the
+            // pure `mergeUsage` (handles estimate / real / run-summary events,
+            // calibration, cumulative accumulation, peak, turn counting).
             try {
-              const u = JSON.parse(payload.text);
-              const { isEstimate, ...usageData } = u;
-              const prevUsage = t.tokenUsage;
-
-              if (isEstimate) {
-                if (prevUsage) {
-                  // We already have a real FinalResponse baseline — freeze all
-                  // structural fields (inputTokens, messagesTokens, etc.) at
-                  // their last accurate value so the panel doesn't jump around
-                  // during streaming. Only let outputTokens / totalTokens
-                  // advance so the user can watch the response grow.
-                  // cachedInputTokens / cacheHitRate are always 0 in estimates
-                  // so we always keep the real values.
-                  const newOutput = Math.max(usageData.outputTokens, prevUsage.outputTokens);
-                  t = {
-                    ...t,
-                    tokenUsage: {
-                      ...prevUsage,
-                      outputTokens: newOutput,
-                      totalTokens:  prevUsage.inputTokens + newOutput,
-                    },
-                  };
-                } else {
-                  // First message ever — no baseline yet, use estimate as-is.
-                  t = {
-                    ...t,
-                    tokenUsage: {
-                      ...usageData,
-                      cachedInputTokens: 0,
-                      cacheHitRate:      0,
-                    },
-                  };
-                }
-              } else {
-                // FinalResponse carries exact per-turn token counts from the API.
-                //
-                // Only outputTokens is accumulated across turns so the user can
-                // see the total tokens generated for the whole conversation.
-                //
-                // cacheHitRate is computed as a true weighted average across ALL
-                // FinalResponse events using the internal tracking fields
-                // (_totalInputAllTurns / _totalCachedAllTurns). This guarantees
-                // the rate is always ≤ 100 % and reflects the whole session.
-                //
-                // _peakInputTokens tracks the maximum inputTokens ever seen so
-                // the context window bar never shrinks when a new turn starts
-                // with a smaller context (rig re-sends only text history).
-                const prevOut          = prevUsage?.outputTokens       ?? 0;
-                const prevTotalInput   = prevUsage?._totalInputAllTurns  ?? 0;
-                const prevTotalCached  = prevUsage?._totalCachedAllTurns ?? 0;
-                const prevPeak         = prevUsage?._peakInputTokens     ?? 0;
-
-                const cumulativeOut       = prevOut + usageData.outputTokens;
-                const totalInputAllTurns  = prevTotalInput  + usageData.inputTokens;
-                const totalCachedAllTurns = prevTotalCached + usageData.cachedInputTokens;
-                const avgCacheHitRate = totalInputAllTurns > 0
-                  ? Math.round(totalCachedAllTurns / totalInputAllTurns * 100)
-                  : 0;
-                const peakInputTokens = Math.max(usageData.inputTokens, prevPeak);
-
-                t = {
-                  ...t,
-                  tokenUsage: {
-                    ...usageData,
-                    outputTokens:         cumulativeOut,
-                    totalTokens:          usageData.inputTokens + cumulativeOut,
-                    cacheHitRate:         avgCacheHitRate,
-                    _totalInputAllTurns:  totalInputAllTurns,
-                    _totalCachedAllTurns: totalCachedAllTurns,
-                    _peakInputTokens:     peakInputTokens,
-                  },
-                };
-              }
+              const evt = JSON.parse(payload.text);
+              t = { ...t, tokenUsage: mergeUsage(t.tokenUsage ?? null, evt) };
             } catch { /* ignore parse error */ }
           } else if (kind === "error") {
             segments = [

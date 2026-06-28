@@ -13,6 +13,7 @@ use tokio::sync::oneshot;
 use crate::state::AppState;
 use crate::duckdb::execute;
 use crate::model::SqlResult;
+use crate::usage::{self, PREAMBLE};
 
 // Define ToolError
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1296,48 +1297,102 @@ fn chart_type_cn(t: &str) -> &str {
     }
 }
 
-/// Concatenated tool definitions (names + descriptions + parameter schemas) as
-/// JSON, used to estimate the token cost of the tools block sent to the LLM.
-const TOOL_DEFS_JSON: &str = concat!(
-    r#"{"tools":[{"name":"list_tables","description":"列出数据库中的表和视图"},{"name":"describe_table","description":"获取表结构"},{"name":"execute_query","description":"执行SQL"},{"name":"sample_data","description":"采样数据"},{"name":"create_table","description":"创建表"},{"name":"create_view","description":"创建视图"},{"name":"drop_object","description":"删除对象"},{"name":"render_chart","description":"生成图表:bar,line,pie,scatter,funnel,gauge"}]}"#
-);
-
-/// Rough token estimate: ~4 chars per token for mixed text (English + Chinese +
-/// JSON). Good enough for context-window display; not a precise tokenizer.
-fn estimate_tokens(s: &str) -> u64 {
-    ((s.len() as f64) / 3.5).ceil() as u64
-}
-
-/// Emit a usage estimate event (before or during streaming, before the API's
-/// exact FinalResponse usage arrives). `output_tokens` increments as text
-/// streams in; 0 on the initial estimate.
+/// Emit a usage *estimate* event — sent before/during streaming, before the
+/// API's exact FinalResponse usage arrives. `prompt_tokens_est` is our
+/// `k = 1` estimate of the upcoming call's prompt; `output_tokens_est` grows
+/// as text streams in (0 on the initial pre-stream estimate).
+///
+/// The raw (uncalibrated) preamble/tools estimates are always attached so the
+/// frontend can render the composition breakdown even mid-stream. Cache fields
+/// are intentionally omitted: they are unknown until FinalResponse, and the
+/// frontend freezes the last real cache values instead of showing a fake 0.
 fn emit_usage_estimate(
     window: &tauri::Window,
     task_id: &str,
-    input_tokens: u64,
-    preamble_tokens: u64,
-    tools_tokens: u64,
-    output_tokens: u64,
-    cached_input_tokens: u64,
+    prompt_tokens_est: u64,
+    output_tokens_est: u64,
+    preamble_raw: u64,
+    tools_raw: u64,
 ) {
-    let messages_tokens = input_tokens.saturating_sub(preamble_tokens + tools_tokens);
-    let total = input_tokens + output_tokens;
-    let cache_hit_rate = if input_tokens > 0 {
-        (cached_input_tokens as f64 / input_tokens as f64 * 100.0).round() as u64
-    } else { 0 };
     let _ = window.emit("agent-event", AgentStreamEvent {
         task_id: task_id.to_string(),
         kind: "usage".to_string(),
         text: Some(serde_json::to_string(&serde_json::json!({
-            "inputTokens": input_tokens,
-            "outputTokens": output_tokens,
-            "totalTokens": total,
-            "cachedInputTokens": cached_input_tokens,
-            "messagesTokens": messages_tokens,
-            "toolsTokens": tools_tokens,
-            "preambleTokens": preamble_tokens,
-            "cacheHitRate": cache_hit_rate,
             "isEstimate": true,
+            "promptTokens": prompt_tokens_est,
+            "completionTokens": output_tokens_est,
+            "estPreambleRaw": preamble_raw,
+            "estToolsRaw": tools_raw,
+        })).unwrap_or_default()),
+        segment: None,
+    });
+}
+
+/// Emit a *real* usage event from a FinalResponse (one per LLM call within the
+/// multi-turn run). [`usage::normalize`] collapses provider-specific fields
+/// into one honest shape; `k_sample` is attached only for the **first** call of
+/// each run (the only call whose prompt we can locally estimate — subsequent
+/// calls include rig-internal tool results we don't tokenize) so the frontend
+/// can refit its per-model calibration factor.
+///
+/// `run_completion_tokens` is the cumulative real output across all calls in
+/// this run so far (prior + this one); the frontend displays it as "本轮输出"
+/// so the value never drops between calls of a multi-turn (tool-using) run.
+fn emit_usage_real(
+    window: &tauri::Window,
+    task_id: &str,
+    n: usage::NormalizedUsage,
+    k_sample: Option<f64>,
+    run_completion_tokens: u64,
+    preamble_raw: u64,
+    tools_raw: u64,
+) {
+    let mut payload = serde_json::json!({
+        "isEstimate": false,
+        "promptTokens": n.prompt_tokens,
+        "completionTokens": n.completion_tokens,
+        "runCompletionTokens": run_completion_tokens,
+        "cacheReadTokens": n.cache_read_tokens,
+        "cacheCreationTokens": n.cache_creation_tokens,
+        "freshInputTokens": n.fresh_input_tokens,
+        "estPreambleRaw": preamble_raw,
+        "estToolsRaw": tools_raw,
+    });
+    if let Some(k) = k_sample {
+        payload["kSample"] = serde_json::json!(k);
+    }
+    let _ = window.emit("agent-event", AgentStreamEvent {
+        task_id: task_id.to_string(),
+        kind: "usage".to_string(),
+        text: Some(serde_json::to_string(&payload).unwrap_or_default()),
+        segment: None,
+    });
+}
+
+/// Emit a run *summary* at the end of one agent run (one user turn, possibly
+/// many LLM calls). The frontend uses this to increment the turn counter and
+/// record the final generation speed (tok/s = total output / wall-clock).
+fn emit_usage_run_summary(
+    window: &tauri::Window,
+    task_id: &str,
+    run_output_tokens: u64,
+    run_elapsed_ms: u64,
+) {
+    let tok_per_sec = if run_elapsed_ms > 0 {
+        let secs = (run_elapsed_ms as f64) / 1000.0;
+        (run_output_tokens as f64 / secs.max(0.001)).round() as u64
+    } else {
+        0
+    };
+    let _ = window.emit("agent-event", AgentStreamEvent {
+        task_id: task_id.to_string(),
+        kind: "usage".to_string(),
+        text: Some(serde_json::to_string(&serde_json::json!({
+            "isEstimate": false,
+            "turnComplete": true,
+            "runOutputTokens": run_output_tokens,
+            "runElapsedMs": run_elapsed_ms,
+            "tokPerSec": tok_per_sec,
         })).unwrap_or_default()),
         segment: None,
     });
@@ -1367,99 +1422,8 @@ pub(crate) fn sanitize_endpoint(endpoint: &str) -> String {
 // Core Streaming Runner
 // ===========================================================================
 
-const PREAMBLE: &str = r#"# 角色
-你是 LakeMind 数据分析助手——一个严谨的数据分析师。你不猜测、不假设，用数据说话。你不只是回答问题，还能主动加工数据、沉淀结果。
-
-# 工作流程（严格按顺序执行）
-
-## 第一步：探索
-调用 `list_tables` 了解数据库中有哪些表。
-
-## 第二步：理解
-对与问题相关的表，调用 `describe_table` 获取结构，调用 `sample_data` 查看样例数据。
-
-## 第三步：查询或加工
-基于理解，判断接下来该做什么——
-
-### A. 只需要查询
-如果用一次 SELECT 就能回答，直接调用 `execute_query` 执行即可。
-
-### B. 需要加工数据（主动判断，不要等用户指令）
-当出现以下情况时，**你应该立即用 DDL 工具把结果沉淀下来，而不是只在回答里贴一段 SQL**：
-- 任务涉及多步清洗（去重、过滤脏数据、类型转换、派生字段），且结果会被后续分析复用。
-- 需要把多张表关联（JOIN）成一个清晰的结果集。
-- 用户明确要求"建表/落表/保存结果/整理成一张表/做成视图"。
-- 数据源是只读的 `s_` 视图，需要产出一份可重复使用的干净数据。
-
-此时按用途选择工具：
-- **`create_table`**：结果需要物化存储、或源数据很大需要避免重复扫描 → 用 `t_` 前缀（最终表）或 `tmp_` 前缀（中间表）。
-- **`create_view`**：只是封装一段查询逻辑、源数据不大、希望随源更新 → 用 `v_` 前缀（最终视图）或 `tmp_v_` 前缀（中间视图）。
-- **`drop_object`**：仅当用户明确要求删除，或你创建的中间 `tmp_` 表已用完且想清理时使用。
-
-操作准则：
-- 建表/视图的 `select_sql` 必须先用 `execute_query` 验证能跑通、字段正确，再调用 `create_table`/`create_view`。
-- 一次只创建一个对象；创建后用 `describe_table` 确认结构符合预期。
-- 如果是多步加工，先用 `tmp_`/`tmp_v_` 搭中间结果，最后产出 `t_`/`v_`。
-
-### C. 可视化（主动判断）
-查询出结果后，判断用什么方式呈现最清楚——**表格还是图表，不是每次都画图**。
-
-**什么时候用表格（execute_query 已足够）：**
-- 用户要查具体数值（如"张三的销售额是多少"）→ 表格精确。
-- 结果行数少（≤5 行）且需要精确数字 → 表格更直接。
-- 结果列数多或列含义复杂（需要逐列对照）→ 表格更清楚。
-- 用户在做数据核对、排查问题 → 表格能精确定位。
-
-**什么时候用图表（render_chart）：**
-- 结果有**趋势**（如各月销售额变化）→ 折线图 line，一眼看出升降拐点。
-- 结果有**对比**（如各部门业绩排名）→ 柱状图 bar，长短一眼可辨。
-- 结果有**占比**（如各渠道占比）→ 饼图 pie，比例直观。
-- 结果有**相关性**（如价格与销量关系）→ 散点图 scatter，发现规律。
-- 结果是**转化漏斗**（如各环节转化率）→ 漏斗图 funnel。
-- 结果是**单值指标**（如达成率、KPI）→ 仪表盘 gauge。
-- 数据行数多（>8 行）且有排序/趋势 → 图表比表格更易读。
-
-**判断准则：**
-1. 如果用户明确说"画图/可视化/趋势/对比/占比"→ 用图表。
-2. 如果数据适合可视化（趋势/对比/占比/相关）且行数 ≥3 → 画图 + 文字总结，不需要再单独 execute_query（render_chart 内部会执行查询）。
-3. 如果只是查数、核对、行数少 → 用 execute_query 表格，不画图。
-4. **不要每次都画图**——图表是为了"一眼看清规律"，不是为了好看。查精确数值时画图反而不如表格。
-
-调用 `render_chart` 时传入 SELECT 语句 + 图表类型 + X 轴/Y 轴列名。图表会展示在对话中，用户可切换基础类型（柱/线/饼/散点）。
-
-## 第四步：总结
-基于查询或加工的结果，用中文给出清晰的结论。结论必须引用具体数据。若创建了表/视图，说明它叫什么、用途是什么。
-
-# 输出格式要求
-- 用 Markdown 格式回复
-- 用 `##` 标题分隔每个步骤
-- 数据结论用表格或列表呈现
-- 关键数值用 **粗体** 标注
-
-# 禁止行为
-- 不要在没有数据支撑时反复猜测
-- 不要写"等等"、"不对"、"让我重新想"这类自我纠正的文字
-- 不要推翻自己的结论后又得出相同结论
-- 不要在一段话中混杂猜测和结论
-- 每个结论都必须基于查询结果
-- 如果数据不足以回答问题，直接说明需要什么数据
-- 不要只给出 SQL 文本让用户自己跑——需要加工时就主动用工具创建对象
-
-# 数据库命名规范（创建表/视图时必须遵循）
-- `s_`：源文件映射的原始只读视图（如 `s_sales`），可能包含头部备注等脏数据。**只读，不要创建 s_ 开头的对象。**
-- `tmp_`：中间过渡物理表（如 `tmp_sales_joined`）。
-- `tmp_v_`：中间过渡虚拟视图（如 `tmp_v_order_filtered`）。
-- `t_`：最终清洗加工后的可用物理表（如 `t_sales`）。
-- `v_`：最终清洗加工后的可用虚拟视图（如 `v_sales`）。
-
-# 思考语言
-你的思考过程（reasoning）也必须用中文进行。不要用英文思考，即使问题用英文提出。思考内容应保持与中文回复一致的语言风格。
-
-# 安全约束
-- `execute_query` 工具仅用于只读查询（SELECT），禁止通过它执行任何写操作（DELETE, DROP, UPDATE, INSERT, ALTER 等）。
-- 所有创建/删除表/视图的操作，只能通过专用工具：`create_table`、`create_view`、`drop_object`。
-- 删除操作不可恢复，仅当用户明确要求时才调用 `drop_object`。"#;
-
+/// The system prompt lives in `usage::PREAMBLE` so the token estimator can
+/// tokenize the exact text the model receives (kept faithful to the real call).
 /// Rebuild the LLM chat history from persisted messages.
 ///
 /// Legacy messages carry a flat `content` string; new messages carry `segments`.
@@ -1498,13 +1462,27 @@ async fn run_stream_loop<R>(
     state: &AppState,
     mut stream: impl futures_util::Stream<Item = Result<MultiTurnStreamItem<R>, StreamingError>> + Unpin,
     input_tokens_est: u64,
-    preamble_tokens_est: u64,
-    tools_tokens_est: u64,
+    api_format: &str,
+    preamble_raw: u64,
+    tools_raw: u64,
 ) {
     use futures_util::StreamExt;
-    // Accumulated output text length — used to estimate output tokens during
-    // streaming for real-time usage display.
-    let mut output_chars: u64 = 0;
+    // Wall-clock start of this run (one user turn, possibly many LLM calls) —
+    // used at run end to compute the generation speed (tok/s).
+    let run_start = std::time::Instant::now();
+    // Accumulated completion tokens across every FinalResponse in this run, for
+    // the final tok/s = total_output / run_elapsed.
+    let mut run_output_tokens: u64 = 0;
+    // The first FinalResponse of a run is the only call whose prompt we can
+    // locally estimate (subsequent calls include rig-internal tool results we
+    // don't tokenize), so only it contributes a calibration sample.
+    let mut first_final = true;
+    // Accumulated model output (reasoning + visible text) — fed to the
+    // char-aware estimator for a live output-token estimate during streaming.
+    // Reasoning is included because the API's `output_tokens` counts it too,
+    // so the live tok/s and "本轮输出" stay consistent with the final real
+    // usage that arrives at FinalResponse.
+    let mut output_buf = String::new();
     // Check the abort flag before processing each chunk. If set, stop early and
     // emit a "done" so the frontend unlocks the input.
     {
@@ -1529,57 +1507,62 @@ async fn run_stream_loop<R>(
         }
         match chunk {
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text_struct))) => {
-                output_chars += text_struct.text.len() as u64;
+                output_buf.push_str(&text_struct.text);
                 emit_delta(&window, &task_id, "text", &text_struct.text);
-                // Real-time usage update with estimated output tokens.
-                let out_est = (output_chars as f64 / 3.5).ceil() as u64;
-                emit_usage_estimate(
-                    &window,
-                    &task_id,
-                    input_tokens_est,
-                    preamble_tokens_est,
-                    tools_tokens_est,
-                    out_est,
-                    0,
-                );
+                // Live output estimate = prior calls' real completion + this
+                // call's streaming estimate (reasoning + text). Cumulative for
+                // the whole run so the bar never drops between calls.
+                let completion_est = run_output_tokens + usage::estimate_tokens(&output_buf);
+                emit_usage_estimate(&window, &task_id, input_tokens_est, completion_est, preamble_raw, tools_raw);
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ReasoningDelta { reasoning, .. })) => {
+                // Reasoning counts toward output tokens (the API bills it as
+                // output), so feed it into the same accumulator as text.
+                output_buf.push_str(&reasoning);
                 emit_delta(&window, &task_id, "reasoning", &reasoning);
+                let completion_est = run_output_tokens + usage::estimate_tokens(&output_buf);
+                emit_usage_estimate(&window, &task_id, input_tokens_est, completion_est, preamble_raw, tools_raw);
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(reasoning_struct))) => {
                 let t = reasoning_struct.display_text();
+                output_buf.push_str(&t);
                 emit_delta(&window, &task_id, "reasoning", &t);
+                let completion_est = run_output_tokens + usage::estimate_tokens(&output_buf);
+                emit_usage_estimate(&window, &task_id, input_tokens_est, completion_est, preamble_raw, tools_raw);
             }
-            // FinalResponse: the stream's last item, carries aggregated token usage.
+            // FinalResponse: carries the API's exact per-call token usage.
             Ok(MultiTurnStreamItem::FinalResponse(final_resp)) => {
-                let usage = final_resp.usage();
-                // Estimate component breakdown from the total input tokens.
-                // The exact per-component split isn't available from the API, so
-                // we estimate based on known sizes (preamble, tools) and attribute
-                // the rest to conversation messages.
-                let preamble_tokens = estimate_tokens(PREAMBLE);
-                let tools_tokens = estimate_tokens(TOOL_DEFS_JSON);
-                let input = usage.input_tokens.max(1);
-                let messages_tokens = input.saturating_sub(preamble_tokens + tools_tokens);
-                let cache_hit_rate = if usage.input_tokens > 0 {
-                    (usage.cached_input_tokens as f64 / usage.input_tokens as f64 * 100.0).round() as u64
-                } else { 0 };
-                let _ = window.emit("agent-event", AgentStreamEvent {
-                    task_id: task_id.clone(),
-                    kind: "usage".to_string(),
-                    text: Some(serde_json::to_string(&serde_json::json!({
-                        "inputTokens": usage.input_tokens,
-                        "outputTokens": usage.output_tokens,
-                        "totalTokens": usage.total_tokens,
-                        "cachedInputTokens": usage.cached_input_tokens,
-                        "messagesTokens": messages_tokens,
-                        "toolsTokens": tools_tokens,
-                        "preambleTokens": preamble_tokens,
-                        "cacheHitRate": cache_hit_rate,
-                        "isEstimate": false,
-                    })).unwrap_or_default()),
-                    segment: None,
-                });
+                let rig_usage = final_resp.usage();
+                // Collapse provider-specific fields into one honest shape
+                // (Anthropic's input_tokens excludes cache, OpenAI's includes
+                // it). This makes the cache-hit rate ≤ 100 % across providers.
+                let n = usage::normalize(
+                    rig_usage.input_tokens,
+                    rig_usage.output_tokens,
+                    rig_usage.cached_input_tokens,
+                    rig_usage.cache_creation_input_tokens,
+                    api_format,
+                );
+                run_output_tokens += n.completion_tokens;
+                // Only the first call of the run has a locally-estimable
+                // prompt (= preamble + tools + prompt + history, computed as
+                // `input_tokens_est` before the stream). Its real/estimated
+                // ratio refits the per-model calibration factor `k` in the
+                // frontend so future estimates converge toward reality.
+                let k_sample = if first_final && input_tokens_est > 0 {
+                    first_final = false;
+                    Some(n.prompt_tokens as f64 / input_tokens_est as f64)
+                } else {
+                    None
+                };
+                // `run_completion_tokens` is the cumulative real output for
+                // the whole run so far (prior calls + this one); the frontend
+                // shows it as "本轮输出" so it never drops between calls.
+                emit_usage_real(&window, &task_id, n, k_sample, run_output_tokens, preamble_raw, tools_raw);
+                // Reset the streaming accumulator so the next call's live
+                // estimate starts from this call's text only (added on top of
+                // the real `run_output_tokens`).
+                output_buf.clear();
             }
             // Tool calls arrive here too, but the tools emit their own events
             // (with structured args/status/SqlResult). Ignore rig's variants.
@@ -1591,6 +1574,17 @@ async fn run_stream_loop<R>(
             }
         }
     }
+
+    // Normal run completion (no abort/error): emit a run summary so the
+    // frontend can count this as a finished turn and show the generation
+    // speed (tok/s = total output / wall-clock). Aborted/errored runs return
+    // early above and intentionally do not count as a completed turn.
+    emit_usage_run_summary(
+        &window,
+        &task_id,
+        run_output_tokens,
+        run_start.elapsed().as_millis() as u64,
+    );
 }
 
 pub async fn run_agent_chat_stream(
@@ -1636,18 +1630,9 @@ pub async fn run_agent_chat_stream(
         }
     }
 
-    // Estimate the input token cost before the stream starts so the UI panel
-    // shows data immediately (not only after the first response). This is a
-    // rough estimate (preamble + tools + prompt + history); the exact value
-    // from the API replaces it when FinalResponse arrives.
-    let preamble_t = estimate_tokens(PREAMBLE);
-    let tools_t = estimate_tokens(TOOL_DEFS_JSON);
-    let prompt_t = estimate_tokens(&prompt);
-    let history_t: u64 = rig_history.iter()
-        .map(|m| estimate_tokens(&format!("{:?}", m)))
-        .sum();
-    let input_est = preamble_t + tools_t + prompt_t + history_t;
-    emit_usage_estimate(&window, &task_id, input_est, preamble_t, tools_t, 0, 0);
+    // The pre-stream usage estimate is emitted AFTER the tool instances are
+    // created below, so the tool-definition token cost uses rig's real
+    // `ToolDefinition`s (not a hardcoded approximation).
 
     let list_tool = ListTablesTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
     let desc_tool = DescribeTableTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
@@ -1677,6 +1662,37 @@ pub async fn run_agent_chat_stream(
         task_id: task_id.clone(),
         window: window.clone(),
     };
+
+    // Estimate the input token cost before the stream starts so the UI panel
+    // shows data immediately (not only after the first response). This is a
+    // rough `k = 1` estimate (preamble + tools + prompt + history); the exact
+    // value from the API replaces it when FinalResponse arrives, and the
+    // first-call real/estimated ratio refits the calibration factor `k`.
+    //
+    // The tool cost is estimated from rig's *actual* `ToolDefinition`s
+    // (name + full description + JSON-Schema parameters), serialized to JSON —
+    // not a minimal hardcoded approximation — so the "系统工具" slice reflects
+    // what the model really receives. (`render_chart_tool_2`/`_3` are identical
+    // duplicates for the other provider branches, so one definition suffices.)
+    let tool_defs = vec![
+        list_tool.definition(String::new()).await,
+        desc_tool.definition(String::new()).await,
+        exec_tool.definition(String::new()).await,
+        sample_tool.definition(String::new()).await,
+        create_table_tool.definition(String::new()).await,
+        create_view_tool.definition(String::new()).await,
+        drop_object_tool.definition(String::new()).await,
+        render_chart_tool.definition(String::new()).await,
+    ];
+    let tools_json = serde_json::to_string(&tool_defs).unwrap_or_default();
+    let preamble_raw = usage::raw_preamble_tokens();
+    let tools_raw = usage::estimate_tokens(&tools_json);
+    let prompt_t = usage::estimate_tokens(&prompt);
+    let history_t: u64 = rig_history.iter()
+        .map(|m| usage::estimate_tokens(&format!("{:?}", m)))
+        .sum();
+    let input_est = preamble_raw + tools_raw + prompt_t + history_t;
+    emit_usage_estimate(&window, &task_id, input_est, 0, preamble_raw, tools_raw);
 
     let format = provider.api_format.to_lowercase();
     if format == "openai" {
@@ -1715,8 +1731,9 @@ pub async fn run_agent_chat_stream(
             &app_state,
             stream,
             input_est,
-            preamble_t,
-            tools_t,
+            &provider.api_format,
+            preamble_raw,
+            tools_raw,
         )
         .await;
     } else if format == "responses" {
@@ -1754,8 +1771,9 @@ pub async fn run_agent_chat_stream(
             &app_state,
             stream,
             input_est,
-            preamble_t,
-            tools_t,
+            &provider.api_format,
+            preamble_raw,
+            tools_raw,
         )
         .await;
     } else if format == "anthropic" {
@@ -1789,8 +1807,9 @@ pub async fn run_agent_chat_stream(
             &app_state,
             stream,
             input_est,
-            preamble_t,
-            tools_t,
+            &provider.api_format,
+            preamble_raw,
+            tools_raw,
         )
         .await;
     } else {
