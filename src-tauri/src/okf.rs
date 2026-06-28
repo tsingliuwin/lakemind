@@ -3,9 +3,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use crate::model::ColumnInfo;
 
-/// Get the root OKF directory: `<ws_path>/.lakemind/okf`
+/// Get the root OKF directory: `<ws_path>/okf`
 pub fn get_okf_dir(ws_path: &str) -> PathBuf {
-    Path::new(ws_path).join(".lakemind").join("okf")
+    Path::new(ws_path).join("okf")
 }
 
 /// Ensure that all standard OKF subdirectories exist
@@ -585,9 +585,9 @@ mod tests {
     fn test_okf_block_read_write() {
         let temp = std::env::temp_dir().join("okf_test_ws");
         let ws = temp.to_str().unwrap();
-        let _ = fs::create_dir_all(temp.join(".lakemind").join("okf").join("tables"));
+        let _ = fs::create_dir_all(temp.join("okf").join("tables"));
         
-        let file_path = temp.join(".lakemind").join("okf").join("tables").join("test_table.md");
+        let file_path = temp.join("okf").join("tables").join("test_table.md");
         let content = "\
 ---
 type: DuckDB Table
