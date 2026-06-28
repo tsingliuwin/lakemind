@@ -326,38 +326,26 @@ export default function App() {
                 }
               } else {
                 // FinalResponse carries exact per-turn token counts from the API.
-                // We accumulate across all turns so the panel reflects the whole
-                // conversation rather than only the most-recent LLM call.
                 //
-                // inputTokens  – take max: every turn re-sends the full history so
-                //   the largest value equals the peak context window load; it grows
-                //   monotonically as the conversation grows.
-                // outputTokens – accumulate: add this turn's generated tokens to
-                //   the running total so the user can see how much has been written.
-                // messagesTokens / toolsTokens / preambleTokens – from this turn:
-                //   they describe the composition of the most recent API call.
-                // cachedInputTokens / cacheHitRate – accumulate cached tokens and
-                //   recompute hit-rate against the accumulated input total.
-                const prevInput  = prevUsage?.inputTokens        ?? 0;
-                const prevOut    = prevUsage?.outputTokens        ?? 0;
-                const prevCached = prevUsage?.cachedInputTokens   ?? 0;
-
-                const maxInput       = Math.max(usageData.inputTokens, prevInput);
-                const cumulativeOut  = prevOut + usageData.outputTokens;
-                const cumulativeCached = prevCached + usageData.cachedInputTokens;
-                const hitRate = maxInput > 0
-                  ? Math.round(cumulativeCached / maxInput * 100)
-                  : 0;
+                // Only outputTokens is accumulated across turns so the user can
+                // see the total tokens generated for the whole conversation.
+                //
+                // All input-related fields (inputTokens, cachedInputTokens,
+                // cacheHitRate, messagesTokens, …) come directly from the current
+                // turn because rig already re-sends the full conversation history
+                // every time — these values therefore reflect the full accumulated
+                // context naturally, without any manual summing.
+                // Mixing accumulation strategies (e.g. summing cached but maxing
+                // input) causes the hit rate to exceed 100 %, so we avoid it.
+                const prevOut       = prevUsage?.outputTokens ?? 0;
+                const cumulativeOut = prevOut + usageData.outputTokens;
 
                 t = {
                   ...t,
                   tokenUsage: {
                     ...usageData,
-                    inputTokens:       maxInput,
-                    outputTokens:      cumulativeOut,
-                    totalTokens:       maxInput + cumulativeOut,
-                    cachedInputTokens: cumulativeCached,
-                    cacheHitRate:      hitRate,
+                    outputTokens: cumulativeOut,
+                    totalTokens:  usageData.inputTokens + cumulativeOut,
                   },
                 };
               }
