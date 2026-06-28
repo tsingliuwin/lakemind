@@ -56,6 +56,12 @@ export default function ChatView(props: {
     inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedInputTokens: 0,
     messagesTokens: 0, toolsTokens: 0, preambleTokens: 0, cacheHitRate: 0,
   });
+  const usedPct = createMemo(() => {
+    const u = usage();
+    const input = u.inputTokens;
+    const ctxWindow = props.contextWindow ?? 128000;
+    return input > 0 ? Math.min(100, (input / ctxWindow * 100)) : 0;
+  });
   let modelRef: HTMLDivElement | undefined;
   let priorityRef: HTMLDivElement | undefined;
   let confirmRef: HTMLDivElement | undefined;
@@ -647,18 +653,39 @@ export default function ChatView(props: {
             <div style="display: flex; align-items: center; gap: 10px;">
               {/* Token usage indicator — hover for details */}
               <div class="token-usage-wrap">
-                <span class="token-usage-icon" title="上下文容量">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;">
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M12 6v6l4 2" />
-                  </svg>
-                </span>
+                <div
+                  class="token-usage-pill"
+                  classList={{
+                    "token-usage-pill--warn": usedPct() >= 70 && usedPct() < 90,
+                    "token-usage-pill--danger": usedPct() >= 90,
+                  }}
+                  title="上下文容量"
+                >
+                  <span class="battery-icon-wrapper">
+                    <svg class="battery-icon" viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <rect x="1" y="1" width="18" height="10" rx="2" />
+                      <path d="M20 4v4" stroke-linecap="round" />
+                      <Show when={usedPct() > 0}>
+                        <rect
+                          x="2.5"
+                          y="2.5"
+                          width={15 * (usedPct() / 100)}
+                          height="7"
+                          rx="1"
+                          fill="currentColor"
+                          stroke="none"
+                        />
+                      </Show>
+                    </svg>
+                  </span>
+                  <span class="token-usage-pct">{usedPct().toFixed(0)}%</span>
+                </div>
                 <div class="token-usage-panel">
                   {(() => {
                     const u = usage();
                     const input = u.inputTokens;
                     const ctxWindow = props.contextWindow ?? 128000;
-                    const usedPct = input > 0 ? Math.min(100, (input / ctxWindow * 100)) : 0;
+                    const pctVal = usedPct();
                     const fmt = (n: number) => n >= 10000 ? `${(n / 10000).toFixed(0)}万` : n.toLocaleString();
                     const pct = (n: number) => input > 0 ? `${(n / input * 100).toFixed(1)}%` : "0.0%";
                     return (
@@ -666,16 +693,16 @@ export default function ChatView(props: {
                         <div class="token-usage-panel__title">
                           上下文容量
                           <span class="token-usage-panel__capacity">
-                            {fmt(input)}/{fmt(ctxWindow)} ({usedPct.toFixed(0)}%)
+                            {fmt(input)}/{fmt(ctxWindow)} ({pctVal.toFixed(0)}%)
                           </span>
                         </div>
                         <div class="token-usage-panel__bar">
                           <div class="token-usage-panel__bar-fill"
                             classList={{
-                              "token-usage-panel__bar-fill--warn": usedPct >= 70 && usedPct < 90,
-                              "token-usage-panel__bar-fill--danger": usedPct >= 90,
+                              "token-usage-panel__bar-fill--warn": pctVal >= 70 && pctVal < 90,
+                              "token-usage-panel__bar-fill--danger": pctVal >= 90,
                             }}
-                            style={`width: ${usedPct.toFixed(1)}%`} />
+                            style={`width: ${pctVal.toFixed(1)}%`} />
                         </div>
                         <div class="token-usage-panel__row">
                           <span class="token-usage-panel__dot token-usage-panel__dot--msg" />消息

@@ -292,21 +292,9 @@ export default function App() {
             // Parse usage data and merge into the task being returned below.
             try {
               const u = JSON.parse(payload.text);
-              const prevUsage = t.tokenUsage;
-              const inputTokens = Math.max(prevUsage?.inputTokens ?? 0, u.inputTokens ?? 0);
-              const outputTokens = (prevUsage?.outputTokens ?? 0) + (u.outputTokens ?? 0);
               t = {
                 ...t,
-                tokenUsage: {
-                  inputTokens,
-                  outputTokens,
-                  totalTokens: inputTokens + outputTokens,
-                  cachedInputTokens: Math.max(prevUsage?.cachedInputTokens ?? 0, u.cachedInputTokens ?? 0),
-                  messagesTokens: Math.max(prevUsage?.messagesTokens ?? 0, u.messagesTokens ?? 0),
-                  toolsTokens: Math.max(prevUsage?.toolsTokens ?? 0, u.toolsTokens ?? 0),
-                  preambleTokens: Math.max(prevUsage?.preambleTokens ?? 0, u.preambleTokens ?? 0),
-                  cacheHitRate: u.cacheHitRate ?? prevUsage?.cacheHitRate ?? 0,
-                },
+                tokenUsage: u,
               };
               // Update messages reference for this updated t.
               messages = [...(t.messages ?? [])];

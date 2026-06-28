@@ -1496,6 +1496,9 @@ async fn run_stream_loop<R>(
     task_id: String,
     state: &AppState,
     mut stream: impl futures_util::Stream<Item = Result<MultiTurnStreamItem<R>, StreamingError>> + Unpin,
+    input_tokens_est: u64,
+    preamble_tokens_est: u64,
+    tools_tokens_est: u64,
 ) {
     use futures_util::StreamExt;
     // Accumulated output text length — used to estimate output tokens during
@@ -1529,8 +1532,15 @@ async fn run_stream_loop<R>(
                 emit_delta(&window, &task_id, "text", &text_struct.text);
                 // Real-time usage update with estimated output tokens.
                 let out_est = (output_chars as f64 / 3.5).ceil() as u64;
-                let in_est = estimate_tokens(PREAMBLE) + estimate_tokens(TOOL_DEFS_JSON);
-                emit_usage_estimate(&window, &task_id, in_est, estimate_tokens(PREAMBLE), estimate_tokens(TOOL_DEFS_JSON), out_est, 0);
+                emit_usage_estimate(
+                    &window,
+                    &task_id,
+                    input_tokens_est,
+                    preamble_tokens_est,
+                    tools_tokens_est,
+                    out_est,
+                    0,
+                );
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ReasoningDelta { reasoning, .. })) => {
                 emit_delta(&window, &task_id, "reasoning", &reasoning);
@@ -1630,16 +1640,14 @@ pub async fn run_agent_chat_stream(
     // shows data immediately (not only after the first response). This is a
     // rough estimate (preamble + tools + prompt + history); the exact value
     // from the API replaces it when FinalResponse arrives.
-    {
-        let preamble_t = estimate_tokens(PREAMBLE);
-        let tools_t = estimate_tokens(TOOL_DEFS_JSON);
-        let prompt_t = estimate_tokens(&prompt);
-        let history_t: u64 = rig_history.iter()
-            .map(|m| estimate_tokens(&format!("{:?}", m)))
-            .sum();
-        let input_est = preamble_t + tools_t + prompt_t + history_t;
-        emit_usage_estimate(&window, &task_id, input_est, preamble_t, tools_t, 0, 0);
-    }
+    let preamble_t = estimate_tokens(PREAMBLE);
+    let tools_t = estimate_tokens(TOOL_DEFS_JSON);
+    let prompt_t = estimate_tokens(&prompt);
+    let history_t: u64 = rig_history.iter()
+        .map(|m| estimate_tokens(&format!("{:?}", m)))
+        .sum();
+    let input_est = preamble_t + tools_t + prompt_t + history_t;
+    emit_usage_estimate(&window, &task_id, input_est, preamble_t, tools_t, 0, 0);
 
     let list_tool = ListTablesTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
     let desc_tool = DescribeTableTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
@@ -1701,7 +1709,16 @@ pub async fn run_agent_chat_stream(
         let stream = agent.stream_chat(prompt.clone(), rig_history)
             .multi_turn(100)
             .await;
-        run_stream_loop(window.clone(), task_id.clone(), &app_state, stream).await;
+        run_stream_loop(
+            window.clone(),
+            task_id.clone(),
+            &app_state,
+            stream,
+            input_est,
+            preamble_t,
+            tools_t,
+        )
+        .await;
     } else if format == "responses" {
         let base_url = sanitize_endpoint(&provider.endpoint);
         let client: rig_core::providers::openai::Client = rig_core::providers::openai::Client::builder()
@@ -1731,7 +1748,16 @@ pub async fn run_agent_chat_stream(
         let stream = agent.stream_chat(prompt.clone(), rig_history)
             .multi_turn(100)
             .await;
-        run_stream_loop(window.clone(), task_id.clone(), &app_state, stream).await;
+        run_stream_loop(
+            window.clone(),
+            task_id.clone(),
+            &app_state,
+            stream,
+            input_est,
+            preamble_t,
+            tools_t,
+        )
+        .await;
     } else if format == "anthropic" {
         let base_url = sanitize_endpoint(&provider.endpoint);
         let client: rig_core::providers::anthropic::Client = rig_core::providers::anthropic::Client::builder()
@@ -1757,7 +1783,16 @@ pub async fn run_agent_chat_stream(
         let stream = agent.stream_chat(prompt.clone(), rig_history)
             .multi_turn(100)
             .await;
-        run_stream_loop(window.clone(), task_id.clone(), &app_state, stream).await;
+        run_stream_loop(
+            window.clone(),
+            task_id.clone(),
+            &app_state,
+            stream,
+            input_est,
+            preamble_t,
+            tools_t,
+        )
+        .await;
     } else {
         return Err(format!("不支持的 API 格式: {}", provider.api_format));
     }

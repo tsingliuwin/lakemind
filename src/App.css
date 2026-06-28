@@ -4582,19 +4582,60 @@ button.lm-select-trigger:hover:not(:disabled) {
   color: var(--text-dim);
   cursor: not-allowed;
 }
-/* Token usage icon + hover panel in the composer. */
-.token-usage-icon {
-  display: inline-flex;
+/* Token usage pill (capsule button style) in the composer. */
+.token-usage-pill {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-faint);
+  padding: 4px 8px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-pill, 100px);
+  transition: all 0.12s ease;
+  user-select: none;
+}
+.token-usage-pill:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+/* Color states for capacity warning */
+.token-usage-pill--warn {
+  color: #f6bd16;
+  border-color: rgba(246, 189, 22, 0.3);
+  background: rgba(246, 189, 22, 0.03);
+}
+.token-usage-pill--warn:hover {
+  background: rgba(246, 189, 22, 0.06);
+  border-color: rgba(246, 189, 22, 0.6);
+  color: #f6bd16;
+}
+
+.token-usage-pill--danger {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.03);
+}
+.token-usage-pill--danger:hover {
+  background: rgba(239, 68, 68, 0.06);
+  border-color: rgba(239, 68, 68, 0.6);
+  color: #ef4444;
+}
+
+/* Battery icon inside the pill */
+.battery-icon-wrapper {
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  color: var(--text-secondary);
-  cursor: default;
 }
-.token-usage-icon--idle {
-  color: var(--text-dim);
-  opacity: 0.5;
+.battery-icon {
+  width: 18px;
+  height: 9px;
+  display: block;
 }
 .token-usage-wrap {
   position: relative;
