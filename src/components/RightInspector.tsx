@@ -1,4 +1,5 @@
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createSignal, createEffect } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
 import { typeFamily, type SourceTable, type DepInfo } from "../lib/types";
 import { t } from "../lib/i18n";
 
@@ -28,6 +29,35 @@ export default function RightInspector(props: {
   onSelectDep?: (name: string) => void;
 }) {
   const [copied, setCopied] = createSignal(false);
+  const [copiedDdl, setCopiedDdl] = createSignal(false);
+  const [ddl, setDdl] = createSignal<string | null>(null);
+  const [ddlLoading, setDdlLoading] = createSignal(false);
+  const [ddlOpen, setDdlOpen] = createSignal(false);
+
+  createEffect(() => {
+    const table = props.table;
+    if (!table) {
+      setDdl(null);
+      setDdlOpen(false);
+      return;
+    }
+    setDdlLoading(true);
+    setDdl(null);
+    setDdlOpen(false);
+
+    invoke<string>("get_table_ddl", { tableName: table.name })
+      .then((res) => {
+        setDdl(res);
+      })
+      .catch((err) => {
+        console.error("Failed to load DDL:", err);
+        setDdl(null);
+      })
+      .finally(() => {
+        setDdlLoading(false);
+      });
+  });
+
   return (
     <aside class="right">
       <Show
@@ -145,6 +175,39 @@ export default function RightInspector(props: {
                         )}
                       </For>
                     </div>
+                  </div>
+                </Show>
+              </div>
+            </Show>
+
+            {/* Collapsible SQL Definition */}
+            <Show when={ddl()}>
+              <div class="ri-ddl-section">
+                <button
+                  class="ri-ddl-toggle-btn"
+                  onClick={() => setDdlOpen(!ddlOpen())}
+                >
+                  <span class="ri-ddl-toggle-arrow">{ddlOpen() ? "▼" : "▶"}</span>
+                  <span>SQL 定义</span>
+                </button>
+                <Show when={ddlOpen()}>
+                  <div class="ri-ddl-content">
+                    <pre class="ri-ddl-code">
+                      <code>{ddl()}</code>
+                    </pre>
+                    <button
+                      class="ri-ddl-copy-btn"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          await navigator.clipboard.writeText(ddl() || "");
+                          setCopiedDdl(true);
+                          setTimeout(() => setCopiedDdl(false), 1500);
+                        } catch {}
+                      }}
+                    >
+                      {copiedDdl() ? "已复制" : "复制 SQL"}
+                    </button>
                   </div>
                 </Show>
               </div>

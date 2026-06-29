@@ -2345,6 +2345,80 @@ pub async fn register_database_table(
     
     Ok(res)
 }
+#[tauri::command]
+pub async fn get_table_ddl(
+    table_name: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let ws_path = state.workspace_path.lock().await.clone();
+    let sqlite = db::get_db_conn()?;
+
+    // 1. Try to get it from object_defs first (for custom views/tables t_/v_)
+    if let Ok(Some(def)) = db::get_object_def(&sqlite, &ws_path, &table_name) {
+        if !def.select_sql.is_empty() {
+            let sql = def.select_sql.trim();
+            if sql.to_uppercase().starts_with("CREATE ") || sql.to_uppercase().starts_with("WITH ") {
+                return Ok(sql.to_string());
+            } else {
+                let kind_str = if def.kind == "table" { "TABLE" } else { "VIEW" };
+                return Ok(format!("CREATE OR REPLACE {} \"{}\" AS\n{}", kind_str, table_name, sql));
+            }
+        }
+    }
+
+    // 2. Otherwise query DuckDB for its SQL definition (duckdb_views or duckdb_tables)
+    let table_name_clone = table_name.clone();
+    run_blocking(state, move |conn| {
+        // Query duckdb_views first
+        if let Ok(sql) = conn.query_row(
+            "SELECT sql FROM duckdb_views() WHERE database_name='lake' AND schema_name='main' AND view_name=?",
+            [&table_name_clone],
+            |r| r.get::<_, String>(0),
+        ) {
+            if !sql.is_empty() {
+                return Ok(sql);
+            }
+        }
+
+        // If not a view, check if it's a base table in duckdb
+        let is_table = conn.query_row(
+            "SELECT count(*) FROM duckdb_tables() WHERE database_name='lake' AND schema_name='main' AND table_name=?",
+            [&table_name_clone],
+            |r| r.get::<_, i64>(0),
+        ).unwrap_or(0) > 0;
+
+        if is_table {
+            let show_sql = format!("SHOW CREATE TABLE \"{}\"", table_name_clone.replace('"', "\"\""));
+            if let Ok(ddl) = conn.query_row(&show_sql, [], |r| r.get::<_, String>(0)) {
+                return Ok(ddl);
+            }
+        }
+
+        // If not found in duckdb tables/views either, check if there's a source record we can describe
+        if let Ok(Some(rec)) = db::get_source_by_table(&sqlite, &ws_path, &table_name_clone) {
+            // For registered files, we can generate a mock SELECT read_* DDL
+            if !rec.scan_path.is_empty() {
+                let lower = rec.scan_path.to_lowercase();
+                let reader = if lower.contains(".parquet") {
+                    "read_parquet"
+                } else if lower.contains(".csv") || lower.contains(".txt") {
+                    "read_csv_auto"
+                } else if lower.contains(".json") {
+                    "read_json_auto"
+                } else {
+                    "read_parquet"
+                };
+                return Ok(format!(
+                    "CREATE OR REPLACE VIEW \"{}\" AS\nSELECT * FROM {}('{}');",
+                    table_name_clone, reader, rec.scan_path
+                ));
+            }
+        }
+
+        Err(AppError::new(format!("未找到表或视图 \"{}\" 的 DDL 定义", table_name_clone)))
+    })
+    .await
+}
 
 #[cfg(test)]
 mod tests {

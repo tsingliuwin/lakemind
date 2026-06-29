@@ -78,6 +78,7 @@ pub fn run() {
             commands::list_workspace_connections,
             commands::list_db_connection_tables,
             commands::register_database_table,
+            commands::get_table_ddl,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
