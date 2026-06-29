@@ -310,17 +310,30 @@ export default function SettingsPage(props: {
     setTestStatus({ status: "idle" });
   };
 
-  const parseConnectionString = (str: string) => {
+  const parseConnectionString = (str: string): { success: true; data: any } | { success: false; error: string } => {
     try {
       const clean = str.trim();
-      const url = new URL(clean);
+      if (!clean.includes("://")) {
+        return { success: false, error: "缺失协议头，请以 postgresql:// 或 mysql:// 开头" };
+      }
+      
+      let url: URL;
+      try {
+        url = new URL(clean);
+      } catch (e) {
+        return { success: false, error: "格式不正确，请检查语法（例如特殊字符未进行 URL 编码）" };
+      }
+      
       const protocol = url.protocol.toLowerCase();
       if (protocol !== "postgresql:" && protocol !== "postgres:" && protocol !== "mysql:") {
-        return null;
+        return { success: false, error: "仅支持 postgresql:// 或 mysql:// 协议" };
       }
+      
       const dbType = protocol === "mysql:" ? "mysql" : "postgres";
       const host = url.hostname;
-      if (!host) return null;
+      if (!host) {
+        return { success: false, error: "连接串中缺失主机名 (Host)" };
+      }
       
       const port = url.port ? parseInt(url.port) : (dbType === "mysql" ? 3306 : 5432);
       const username = decodeURIComponent(url.username || "");
@@ -338,16 +351,19 @@ export default function SettingsPage(props: {
       }
       
       return {
-        dbType,
-        host,
-        port,
-        databaseName,
-        username,
-        password,
-        sslMode
+        success: true,
+        data: {
+          dbType,
+          host,
+          port,
+          databaseName,
+          username,
+          password,
+          sslMode
+        }
       };
-    } catch (err) {
-      return null;
+    } catch (err: any) {
+      return { success: false, error: err.message || "未知解析错误" };
     }
   };
 
@@ -357,8 +373,9 @@ export default function SettingsPage(props: {
       setUriStatus({ status: "idle" });
       return;
     }
-    const parsed = parseConnectionString(val);
-    if (parsed) {
+    const result = parseConnectionString(val);
+    if (result.success) {
+      const parsed = result.data;
       setFormType(parsed.dbType);
       setFormHost(parsed.host);
       setFormPort(parsed.port);
@@ -375,7 +392,7 @@ export default function SettingsPage(props: {
       
       setUriStatus({ status: "success" });
     } else {
-      setUriStatus({ status: "error" });
+      setUriStatus({ status: "error", errorMsg: result.error });
     }
   };
 
@@ -855,30 +872,43 @@ export default function SettingsPage(props: {
 
               {/* Connection URI Import */}
               <div style="display: flex; flex-direction: column; gap: 6px;">
-                <div style="display: flex; align-items: center; justify-content: space-between;">
-                  <label style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">连接串 (Connection URI)</label>
+                <label style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">连接串 (Connection URI)</label>
+                <div style="position: relative; display: flex; align-items: center; width: 100%;">
+                  <input
+                    type="text"
+                    class="sp-input"
+                    style="padding-right: 32px; width: 100%;"
+                    value={formUri()}
+                    placeholder="例: postgresql://username:password@host:port/database"
+                    onInput={(e) => {
+                      setFormUri(e.currentTarget.value);
+                      handleUriInput(e);
+                    }}
+                  />
                   <Show when={uriStatus().status !== "idle"}>
-                    <span 
-                      style={`font-size: 10px; font-weight: 500; padding: 2px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; line-height: 1; transition: all 0.15s ease; ${
-                        uriStatus().status === "success" 
-                          ? "background: rgba(80, 200, 120, 0.12); color: var(--text-success);" 
-                          : "background: rgba(255, 80, 80, 0.12); color: var(--text-danger);"
-                      }`}
-                    >
-                      {uriStatus().status === "success" ? "✓ 已智能解析并填充" : "✕ 格式无法解析"}
-                    </span>
+                    <div style="position: absolute; right: 10px; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+                      <Show when={uriStatus().status === "success"} fallback={
+                        <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-danger)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                          <circle cx="12" cy="12" r="10"/>
+                          <line x1="12" y1="8" x2="12" y2="12"/>
+                          <line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                      }>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                          <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                      </Show>
+                    </div>
                   </Show>
                 </div>
-                <input
-                  type="text"
-                  class="sp-input"
-                  value={formUri()}
-                  placeholder="例: postgresql://username:password@host:port/database"
-                  onInput={(e) => {
-                    setFormUri(e.currentTarget.value);
-                    handleUriInput(e);
-                  }}
-                />
+                
+                {/* Specific Error message under the input */}
+                <Show when={uriStatus().status === "error" && uriStatus().errorMsg}>
+                  <span style="font-size: 10px; color: var(--text-danger); display: flex; align-items: center; gap: 4px; margin-top: 2px;">
+                    {uriStatus().errorMsg}
+                  </span>
+                </Show>
               </div>
 
               {/* Database Type Card Selector */}
