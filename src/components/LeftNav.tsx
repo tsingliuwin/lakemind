@@ -751,7 +751,7 @@ export default function LeftNav(props: {
                     <span class="tree-section-arrow">{dbSectionExpanded() ? "▼" : "▶"}</span>
                   </div>
                   <Show when={dbSectionExpanded()}>
-                    <div class="tree-section-content" style="display: flex; flex-direction: column; gap: 1px; margin-left: 8px;">
+                    <div class="tree-section-content" style="display: flex; flex-direction: column; gap: 1px;">
                       <For each={workspaceConns()}>
                         {(conn) => {
                           const connId = conn.id;
@@ -778,10 +778,9 @@ export default function LeftNav(props: {
                               >
                                 <div style="display: flex; align-items: center; gap: 6px;">
                                   <span style="color: var(--brand); display: inline-flex; align-items: center;">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="width: 12px; height: 12px;">
-                                      <ellipse cx="12" cy="6" rx="8" ry="3" />
-                                      <path d="M4 6v5c0 1.66 3.58 3 8 3s8-1.34 8-3V6" />
-                                      <path d="M4 11v5c0 1.66 3.58 3 8 3s8-1.34 8-3v-5" />
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
                                     </svg>
                                   </span>
                                   <span style="font-weight: 500; font-size: 12px;">{conn.name}</span>
