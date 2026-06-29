@@ -984,7 +984,7 @@ export default function SettingsPage(props: {
                           <Show when={props.workspacePath}>
                             <button 
                               class="ss-btn ss-btn-secondary" 
-                              style={`padding: 6px 10px; font-size: 12px; border-radius: 6px; transition: all 0.2s ease; ${linkedConns()[c.id] ? 'background: rgba(80, 160, 255, 0.15); color: var(--brand); border-color: rgba(80, 160, 255, 0.35);' : ''}`}
+                              style={`padding: 6px 10px; font-size: 12px; border-radius: 6px; transition: all 0.2s ease; ${linkedConns()[c.id] ? 'background: rgba(80, 160, 255, 0.15); color: var(--brand); border-color: transparent;' : ''}`}
                               onClick={() => handleToggleLink(c.id)}
                               title={linkedConns()[c.id] ? t("unlinkFromWorkspaceTooltip") : t("linkToWorkspaceTooltip")}
                             >
