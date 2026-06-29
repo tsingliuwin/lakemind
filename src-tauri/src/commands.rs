@@ -2140,6 +2140,11 @@ pub async fn register_database_table(
                 .unwrap_or((0, 0))
         };
         
+        // Postgres reports reltuples = -1 (or 0) when a table has no planner
+        // statistics yet (never ANALYZE'd / freshly created / truncated). Treat
+        // those as "unknown" so the UI doesn't render a meaningless "-1".
+        let row_count_opt = if approx_rows > 0 { Some(approx_rows) } else { None };
+
         let now = now_ms();
         let record = db::SourceRecord {
             table_name: local_table_name.clone(),
@@ -2152,13 +2157,13 @@ pub async fn register_database_table(
             created_at: now,
             name_source: "llm".to_string(),
             file_mtime: write_count,
-            file_size: approx_rows,
+            file_size: row_count_opt.unwrap_or(0),
             columns: columns.clone(),
-            row_count: Some(approx_rows),
+            row_count: row_count_opt,
         };
         
         db::upsert_source(&sqlite, &ws_path_clone, &record)?;
-        let _ = crate::okf::write_source_okf(&ws_dir_str, &local_table_name, &record.label, &record.file_path, approx_rows, write_count, &columns, Some(approx_rows));
+        let _ = crate::okf::write_source_okf(&ws_dir_str, &local_table_name, &record.label, &record.file_path, row_count_opt.unwrap_or(0), write_count, &columns, row_count_opt);
         let _ = crate::okf::write_pipeline_okf(&ws_dir_str, &local_table_name, &record.label, &record.file_path, "view");
         
         let records = db::list_sources(&sqlite, &ws_path_clone)?;

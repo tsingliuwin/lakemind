@@ -1016,7 +1016,7 @@ export default function LeftNav(props: {
                                   const tail = schema ? `.${schema}.${table}` : `.${table}`;
                                   const conn = t.label.endsWith(tail) ? t.label.slice(0, -tail.length) : t.label;
                                   const origin = schema ? `${dbKind} · ${conn} · ${schema}.${table}` : `${dbKind} · ${conn} · ${table}`;
-                                  const rows = t.rowCountEstimate != null ? `\n约 ${formatCount(t.rowCountEstimate!)} 行` : "";
+                                  const rows = t.rowCountEstimate != null && t.rowCountEstimate > 0 ? `\n约 ${formatCount(t.rowCountEstimate!)} 行` : "";
                                   return `${origin}${rows}`;
                                 };
                                 return (
@@ -1059,7 +1059,7 @@ export default function LeftNav(props: {
                                     </span>
                                   </Show>
                                   <span class="leaf-label">{t.name}</span>
-                                  <Show when={t.rowCountEstimate != null}>
+                                  <Show when={t.rowCountEstimate != null && t.rowCountEstimate! > 0}>
                                     <span class="leaf-count">{formatCount(t.rowCountEstimate!)}</span>
                                   </Show>
                                   <Show when={t.partitionKeys.length > 0}>
