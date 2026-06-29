@@ -539,8 +539,9 @@ export default function SettingsPage(props: {
           border-color: var(--border-strong) !important;
         }
         .sp-input:focus {
-          border-color: var(--text-dim) !important;
+          border-color: var(--border-strong) !important;
           background: var(--bg-active) !important;
+          outline: none !important;
           box-shadow: none !important;
         }
       `}</style>
