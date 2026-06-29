@@ -544,6 +544,14 @@ export default function SettingsPage(props: {
           outline: none !important;
           box-shadow: none !important;
         }
+        .btn-cancel {
+          border: 1px solid var(--border-strong) !important;
+          transition: all 0.15s ease;
+        }
+        .btn-cancel:hover {
+          border-color: var(--border-strong) !important;
+          background: var(--bg-hover) !important;
+        }
       `}</style>
       {/* Settings Sidebar */}
       <aside class="settings-sidebar">
@@ -765,7 +773,7 @@ export default function SettingsPage(props: {
                 <h3 style="margin: 0; font-size: 15px; font-weight: 600; color: var(--text-primary);">
                   {editingConn()?.id ? t("editConnTitle") : t("addConnTitle")}
                 </h3>
-                <button class="ss-btn ss-btn-secondary" style="padding: 4px 12px; font-size: 12.5px; border-radius: 6px;" onClick={() => setEditingConn(null)}>
+                <button class="ss-btn ss-btn-secondary btn-cancel" style="padding: 4px 12px; font-size: 12.5px; border-radius: 6px;" onClick={() => setEditingConn(null)}>
                   {t("cancelBtn")}
                 </button>
               </div>
