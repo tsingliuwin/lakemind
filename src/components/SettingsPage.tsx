@@ -874,7 +874,18 @@ export default function SettingsPage(props: {
               <div style="display: flex; flex-direction: column; gap: 6px;">
                 <label style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">连接串 (Connection URI)</label>
                 <div style="position: relative; display: flex; align-items: center; width: 100%;">
-                  <div style="position: absolute; left: 10px; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+                  <input
+                    type="text"
+                    class="sp-input"
+                    style="padding-left: 30px; width: 100%;"
+                    value={formUri()}
+                    placeholder="例: postgresql://username:password@host:port/database"
+                    onInput={(e) => {
+                      setFormUri(e.currentTarget.value);
+                      handleUriInput(e);
+                    }}
+                  />
+                  <div style="position: absolute; left: 10px; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 2;">
                     <Show when={uriStatus().status !== "idle"} fallback={
                       <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px; opacity: 0.6;">
                         <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
@@ -895,17 +906,6 @@ export default function SettingsPage(props: {
                       </Show>
                     </Show>
                   </div>
-                  <input
-                    type="text"
-                    class="sp-input"
-                    style="padding-left: 30px; width: 100%;"
-                    value={formUri()}
-                    placeholder="例: postgresql://username:password@host:port/database"
-                    onInput={(e) => {
-                      setFormUri(e.currentTarget.value);
-                      handleUriInput(e);
-                    }}
-                  />
                 </div>
                 
                 {/* Specific Error message under the input */}
