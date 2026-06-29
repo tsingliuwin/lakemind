@@ -885,7 +885,7 @@ export default function SettingsPage(props: {
                       handleUriInput(e);
                     }}
                   />
-                  <div style="position: absolute; left: 10px; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 2;">
+                  <div style="position: absolute; left: 10px; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 10;">
                     <Show when={uriStatus().status !== "idle"} fallback={
                       <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px; opacity: 0.6;">
                         <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
