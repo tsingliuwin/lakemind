@@ -880,7 +880,7 @@ export default function SettingsPage(props: {
               </div>
 
               {/* Group 2: Auth & DB info */}
-              <div style="display: flex; flex-direction: column; gap: 14px; border: 1px solid var(--border-strong); padding: 16px; border-radius: 10px; background: rgba(255, 255, 255, 0.005);">
+              <div style="display: flex; flex-direction: column; gap: 14px; border: 1px solid var(--border-strong); padding: 16px; border-radius: 10px; background: rgba(255, 255, 255, 0.005); min-height: 262px;">
                 <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 4px;">{t("authPermissions")}</div>
 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
@@ -939,30 +939,26 @@ export default function SettingsPage(props: {
                 </div>
 
                 {/* SSL Mode (Postgres Only) */}
-                <div 
-                  style={`display: flex; flex-direction: column; gap: 6px; margin-top: 4px; transition: opacity 0.2s ease-in-out; ${
-                    formType() === "postgres" ? "" : "opacity: 0.35; pointer-events: none;"
-                  }`}
-                >
-                  <div style="display: flex; align-items: center; justify-content: space-between;">
-                    <label style="font-size: 11.5px; color: var(--text-dim);">{t("sslModeLabel")}</label>
-                    <span style="font-size: 10px; color: var(--text-dim); opacity: 0.7;">
-                      {formType() === "postgres" ? t("sslModeTip") : "（仅适用于 PostgreSQL）"}
-                    </span>
+                <Show when={formType() === "postgres"}>
+                  <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                      <label style="font-size: 11.5px; color: var(--text-dim);">{t("sslModeLabel")}</label>
+                      <span style="font-size: 10px; color: var(--text-dim); opacity: 0.7;">{t("sslModeTip")}</span>
+                    </div>
+                    <Select
+                      options={[
+                        { label: "disable", value: "disable" },
+                        { label: "require", value: "require" },
+                        { label: "verify-ca", value: "verify-ca" },
+                        { label: "verify-full", value: "verify-full" }
+                      ]}
+                      value={formSslMode()}
+                      onChange={(v) => setFormSslMode(v)}
+                      width="100%"
+                    />
                   </div>
-                  <Select
-                    options={[
-                      { label: "disable", value: "disable" },
-                      { label: "require", value: "require" },
-                      { label: "verify-ca", value: "verify-ca" },
-                      { label: "verify-full", value: "verify-full" }
-                    ]}
-                    value={formType() === "postgres" ? formSslMode() : "disable"}
-                    onChange={(v) => { if (formType() === "postgres") setFormSslMode(v); }}
-                    width="100%"
-                    disabled={formType() !== "postgres"}
-                  />
-                </div>
+                </Show>
+              </div>
               </div>
 
               {/* Bottom Test & Action Footer */}
