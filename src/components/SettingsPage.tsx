@@ -493,6 +493,41 @@ export default function SettingsPage(props: {
 
   return (
     <div class="settings-layout-wrapper">
+      <style>{`
+        .db-icon-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 32px;
+          height: 32px;
+          padding: 0 !important;
+          border: 1px solid transparent !important;
+          border-radius: 6px;
+          background: transparent;
+          color: var(--text-dim);
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .db-icon-btn:hover {
+          background: rgba(255, 255, 255, 0.06);
+          color: var(--text-primary);
+          border-color: transparent !important;
+        }
+        .db-icon-btn.active {
+          background: rgba(80, 160, 255, 0.12);
+          color: var(--brand);
+        }
+        .db-icon-btn.active:hover {
+          background: rgba(80, 160, 255, 0.18);
+          color: var(--brand);
+          border-color: transparent !important;
+        }
+        .db-icon-btn.btn-delete:hover {
+          background: rgba(255, 80, 80, 0.12);
+          color: var(--text-danger);
+          border-color: transparent !important;
+        }
+      `}</style>
       {/* Settings Sidebar */}
       <aside class="settings-sidebar">
         <div class="ss-logo-area" classList={{ "mac-nav": isMac }}>
@@ -983,8 +1018,8 @@ export default function SettingsPage(props: {
                         <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0; margin-left: 12px;">
                           <Show when={props.workspacePath}>
                             <button 
-                              class="ss-btn ss-btn-secondary" 
-                              style={`padding: 6px 10px; font-size: 12px; border-radius: 6px; transition: all 0.2s ease; ${linkedConns()[c.id] ? 'background: rgba(80, 160, 255, 0.15); color: var(--brand); border-color: transparent;' : ''}`}
+                              class="db-icon-btn" 
+                              classList={{ active: !!linkedConns()[c.id] }}
                               onClick={() => handleToggleLink(c.id)}
                               title={linkedConns()[c.id] ? t("unlinkFromWorkspaceTooltip") : t("linkToWorkspaceTooltip")}
                             >
@@ -995,8 +1030,7 @@ export default function SettingsPage(props: {
                             </button>
                           </Show>
                           <button 
-                            class="ss-btn ss-btn-secondary" 
-                            style="padding: 6px 10px; font-size: 12px; border-radius: 6px;" 
+                            class="db-icon-btn" 
                             onClick={() => startEditConnection(c)}
                             title="编辑"
                           >
@@ -1006,8 +1040,7 @@ export default function SettingsPage(props: {
                             </svg>
                           </button>
                           <button 
-                            class="ss-btn ss-btn-danger" 
-                            style="padding: 6px 10px; font-size: 12px; border-radius: 6px; background: rgba(255, 80, 80, 0.08); color: var(--text-danger); border-color: rgba(255, 80, 80, 0.15);" 
+                            class="db-icon-btn btn-delete" 
                             onClick={() => handleDeleteConnection(c.id)}
                             title="删除"
                           >
