@@ -151,12 +151,14 @@ pub async fn list_tables_fast(
 #[tauri::command]
 pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
     let ws_path = state.workspace_path.lock().await.clone();
+    eprintln!("[diag] list_duckdb_tables called with workspace_path = {:?}", ws_path);
     // Registered sources come straight from the SQLite cache (columns + row
     // count stored), so only custom tables/views need a live DuckLake catalog
     // query here. Used to refresh after DDL/import.
     run_blocking(state, move |conn| {
         let sqlite = db::get_db_conn()?;
         let records = db::list_sources(&sqlite, &ws_path)?;
+        eprintln!("[diag] list_duckdb_tables ws={:?} sources from sqlite = {} ({})", ws_path, records.len(), records.iter().map(|r| r.table_name.clone()).collect::<Vec<_>>().join(", "));
 
         // 1. Registered sources (authoritative). Pure SQLite cache.
         let mut result = Vec::new();
@@ -376,6 +378,7 @@ pub async fn drop_table_safe(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let ws_path = state.workspace_path.lock().await.clone();
+    eprintln!("[diag] drop_table_safe called: table={:?} workspace_path={:?}", table_name, ws_path);
 
     // Compute the cascade deletion order (downstreams first, target last).
     let sqlite = db::get_db_conn()?;
@@ -595,6 +598,7 @@ pub async fn register_workspace_sources_inner(
     // back. An explicit workspace switch still re-attaches here.
     {
         let current = state.workspace_path.lock().await.clone();
+        eprintln!("[diag] register_workspace_sources: requested={:?} current={:?} will_switch={}", workspace_path, current, current != workspace_path);
         if current != workspace_path {
             switch_workspace_lake(state, workspace_path.clone(), ws_dir.clone()).await?;
         }
@@ -1338,6 +1342,7 @@ where
 /// Rebuild the session connection and attach `ws_dir`'s DuckLake as the default
 /// catalog. Also records the active workspace key on the state.
 async fn switch_workspace_lake(state: &AppState, workspace_path: String, ws_dir: PathBuf) -> Result<(), String> {
+    eprintln!("[diag] switch_workspace_lake ENTER: -> workspace_path={:?} ws_dir={:?}", workspace_path, ws_dir);
     let dir_for_conn = ws_dir.clone();
     let new_conn = tauri::async_runtime::spawn_blocking(move || AppState::open_workspace(&dir_for_conn))
         .await
@@ -1354,6 +1359,7 @@ async fn switch_workspace_lake(state: &AppState, workspace_path: String, ws_dir:
     *state.workspace_dir.lock().await = ws_dir;
     *state.workspace_path.lock().await = workspace_path;
     state.sources.lock().await.clear();
+    eprintln!("[diag] switch_workspace_lake DONE: connection replaced");
     Ok(())
 }
 
