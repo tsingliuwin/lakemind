@@ -535,6 +535,9 @@ export default function SettingsPage(props: {
           border-color: transparent !important;
           opacity: 0.9;
         }
+        .sp-input:hover:not(:focus) {
+          border-color: var(--border-strong) !important;
+        }
       `}</style>
       {/* Settings Sidebar */}
       <aside class="settings-sidebar">
