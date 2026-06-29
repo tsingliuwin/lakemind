@@ -877,12 +877,18 @@ export default function LeftNav(props: {
                                         const [schemaExpanded, setSchemaExpanded] = createSignal(schemaName === "public");
                                         return (
                                           <div style="display: flex; flex-direction: column; gap: 1px;">
-                                            <div 
+                                            <div
                                               style="display: flex; align-items: center; gap: 4px; padding: 2px 4px; cursor: pointer; color: var(--text-dim);"
                                               onClick={() => setSchemaExpanded(!schemaExpanded())}
                                             >
                                               <span style="font-size: 10px;">{schemaExpanded() ? "▼" : "▶"}</span>
-                                              <span style="font-size: 11px; font-weight: 500;">📁 {schemaName}</span>
+                                              <span style="display: inline-flex; align-items: center; color: var(--text-secondary);">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
+                                                  <rect x="3" y="3" width="14" height="14" rx="1.5" ry="1.5"></rect>
+                                                  <path d="M7 7h14v14H7"></path>
+                                                </svg>
+                                              </span>
+                                              <span style="font-size: 11px; font-weight: 500;">{schemaName}</span>
                                             </div>
                                             <Show when={schemaExpanded()}>
                                               <div style="margin-left: 10px; display: flex; flex-direction: column; gap: 1px;">
