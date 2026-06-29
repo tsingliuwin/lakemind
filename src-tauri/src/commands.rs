@@ -2115,19 +2115,49 @@ pub async fn register_database_table(
         
         let columns = schema::describe_view(&guard, &local_table_name)?;
         
+        // Estimate the row count for the external table. Postgres' planner
+        // statistics (pg_class.reltuples / pg_stat_all_tables.n_live_tup) are
+        // instant, but return -1/0 for tables never ANALYZE'd. When both are
+        // missing, fall back to a real SELECT COUNT(*) so the user still sees a
+        // number instead of "unknown". MySQL's information_schema.table_rows is
+        // an estimate that's effectively always present, so no fallback there.
         let (write_count, approx_rows) = if conn_record.db_type == "postgres" {
             let stats_sql = format!(
-                "SELECT reltuples::BIGINT, 
-                       (SELECT COALESCE(MAX(n_tup_ins + n_tup_upd + n_tup_del), 0) 
-                        FROM {catalog_name}.pg_catalog.pg_stat_all_tables 
-                        WHERE schemaname = '{}' AND relname = '{}') 
-                 FROM {catalog_name}.pg_catalog.pg_class 
-                 JOIN {catalog_name}.pg_catalog.pg_namespace ON pg_namespace.oid = pg_class.relnamespace 
+                "SELECT reltuples::BIGINT,
+                       COALESCE((SELECT n_live_tup
+                                 FROM {catalog_name}.pg_catalog.pg_stat_all_tables
+                                 WHERE schemaname = '{}' AND relname = '{}'), 0)::BIGINT,
+                       (SELECT COALESCE(MAX(n_tup_ins + n_tup_upd + n_tup_del), 0)
+                        FROM {catalog_name}.pg_catalog.pg_stat_all_tables
+                        WHERE schemaname = '{}' AND relname = '{}')
+                 FROM {catalog_name}.pg_catalog.pg_class
+                 JOIN {catalog_name}.pg_catalog.pg_namespace ON pg_namespace.oid = pg_class.relnamespace
                  WHERE pg_namespace.nspname = '{}' AND pg_class.relname = '{}';",
-                schema_name, table_name, schema_name, table_name
+                schema_name, table_name, schema_name, table_name, schema_name, table_name
             );
-            guard.query_row(&stats_sql, [], |row| Ok((row.get::<_, i64>(1).unwrap_or(0), row.get::<_, i64>(0).unwrap_or(0))))
-                .unwrap_or((0, 0))
+            let (reltuples, n_live_tup, writes) = guard
+                .query_row(&stats_sql, [], |row| {
+                    Ok((
+                        row.get::<_, i64>(0).unwrap_or(0),
+                        row.get::<_, i64>(1).unwrap_or(0),
+                        row.get::<_, i64>(2).unwrap_or(0),
+                    ))
+                })
+                .unwrap_or((0, 0, 0));
+            // Prefer the planner estimate, then the live-tuple counter.
+            let mut rows = reltuples;
+            if rows <= 0 {
+                rows = n_live_tup;
+            }
+            // Statistics unavailable — fall back to an exact count.
+            if rows <= 0 {
+                let count_sql = format!(
+                    "SELECT COUNT(*)::BIGINT FROM {catalog_name}.\"{}\".\"{}\";",
+                    schema_name, table_name
+                );
+                rows = guard.query_row(&count_sql, [], |row| row.get::<_, i64>(0)).unwrap_or(0);
+            }
+            (writes, rows)
         } else {
             let stats_sql = format!(
                 "SELECT COALESCE(table_rows, 0)::BIGINT, 
@@ -2140,9 +2170,7 @@ pub async fn register_database_table(
                 .unwrap_or((0, 0))
         };
         
-        // Postgres reports reltuples = -1 (or 0) when a table has no planner
-        // statistics yet (never ANALYZE'd / freshly created / truncated). Treat
-        // those as "unknown" so the UI doesn't render a meaningless "-1".
+        // A non-positive estimate still means "unknown" (e.g. MySQL returned 0).
         let row_count_opt = if approx_rows > 0 { Some(approx_rows) } else { None };
 
         let now = now_ms();
