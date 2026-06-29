@@ -689,9 +689,20 @@ export default function SettingsPage(props: {
         
         {/* Tab: Databases Settings (数据库) */}
         <Show when={activeTab() === "databases"}>
-          <div class="settings-view-header">
-            <h2>{t("settingsDatabases")}</h2>
-            <p class="settings-view-subtitle">{t("settingsDatabasesDesc")}</p>
+          <div class="settings-view-header" style="display: flex; justify-content: space-between; align-items: flex-start; max-width: 680px; margin-bottom: 24px;">
+            <div>
+              <h2>{t("settingsDatabases")}</h2>
+              <p class="settings-view-subtitle" style="margin-top: 4px;">{t("settingsDatabasesDesc")}</p>
+            </div>
+            <Show when={!editingConn()}>
+              <button 
+                class="ss-btn" 
+                style="padding: 6px 16px; font-size: 13px; font-weight: 500; border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);" 
+                onClick={startAddConnection}
+              >
+                {t("newConnectionBtn")}
+              </button>
+            </Show>
           </div>
 
           <Show when={!editingConn()} fallback={
@@ -932,13 +943,7 @@ export default function SettingsPage(props: {
               </div>
             </div>
           }>
-            <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 14px; max-width: 680px;">
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">{t("savedConnectionsTitle")}</div>
-                <button class="ss-btn" style="padding: 5px 12px; font-size: 12.5px; font-weight: 500;" onClick={startAddConnection}>
-                  {t("newConnectionBtn")}
-                </button>
-              </div>
+            <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 14px; max-width: 680px;">
 
               <Show when={connections().length > 0} fallback={
                 <div style="padding: 48px 24px; text-align: center; color: var(--text-dim); border: 1px dashed var(--border-strong); border-radius: 10px; background: rgba(255,255,255,0.015); font-style: italic; font-size: 12.5px; display: flex; flex-direction: column; align-items: center; gap: 8px;">
