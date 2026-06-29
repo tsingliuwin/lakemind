@@ -826,7 +826,7 @@ export default function SettingsPage(props: {
                     <label style="font-size: 11.5px; color: var(--text-dim);">{t("connNameLabel")}</label>
                     <input
                       type="text"
-                      class="ss-input"
+                      class="sp-input"
                       value={formName()}
                       placeholder="neon_prod"
                       onInput={(e) => setFormName(e.currentTarget.value)}
@@ -837,7 +837,7 @@ export default function SettingsPage(props: {
                     <label style="font-size: 11.5px; color: var(--text-dim);">{t("hostLabel")}</label>
                     <input
                       type="text"
-                      class="ss-input"
+                      class="sp-input"
                       value={formHost()}
                       placeholder="Host / IP"
                       onInput={(e) => setFormHost(e.currentTarget.value)}
@@ -848,7 +848,7 @@ export default function SettingsPage(props: {
                     <label style="font-size: 11.5px; color: var(--text-dim);">{t("portLabel")}</label>
                     <input
                       type="number"
-                      class="ss-input"
+                      class="sp-input"
                       value={formPort()}
                       onInput={(e) => setFormPort(parseInt(e.currentTarget.value) || 0)}
                     />
@@ -865,7 +865,7 @@ export default function SettingsPage(props: {
                     <label style="font-size: 11.5px; color: var(--text-dim);">{t("databaseLabel")}</label>
                     <input
                       type="text"
-                      class="ss-input"
+                      class="sp-input"
                       value={formDatabase()}
                       placeholder="neondb"
                       onInput={(e) => setFormDatabase(e.currentTarget.value)}
@@ -876,7 +876,7 @@ export default function SettingsPage(props: {
                     <label style="font-size: 11.5px; color: var(--text-dim);">{t("usernameLabel")}</label>
                     <input
                       type="text"
-                      class="ss-input"
+                      class="sp-input"
                       value={formUsername()}
                       placeholder="Username"
                       onInput={(e) => setFormUsername(e.currentTarget.value)}
@@ -889,7 +889,7 @@ export default function SettingsPage(props: {
                   <div style="position: relative; display: flex; align-items: center; width: 100%;">
                     <input
                       type={showPassword() ? "text" : "password"}
-                      class="ss-input"
+                      class="sp-input"
                       style="padding-right: 40px; width: 100%;"
                       value={formPassword()}
                       placeholder="••••••••"
