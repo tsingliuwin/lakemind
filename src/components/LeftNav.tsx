@@ -129,10 +129,18 @@ export default function LeftNav(props: {
     const wsName = props.workspace;
     const map = new Map<string, SourceTable[]>();
     for (const t of props.sources) {
-      const slash = Math.max(t.path.lastIndexOf("/"), t.path.lastIndexOf("\\"));
-      let group = slash >= 0 ? t.path.slice(0, slash) : t.path;
-      // Files directly under the workspace root collapse into the flat group.
-      if (group && wsName && shortDir(group) === wsName) group = "";
+      // Registered database tables (path "db://<id>/<schema>/<table>") are
+      // flattened into the top level — the schema segment (e.g. "public")
+      // would otherwise render as a redundant directory group.
+      let group: string;
+      if (t.path.startsWith("db://")) {
+        group = "";
+      } else {
+        const slash = Math.max(t.path.lastIndexOf("/"), t.path.lastIndexOf("\\"));
+        group = slash >= 0 ? t.path.slice(0, slash) : t.path;
+        // Files directly under the workspace root collapse into the flat group.
+        if (group && wsName && shortDir(group) === wsName) group = "";
+      }
       const arr = map.get(group) ?? [];
       arr.push(t);
       map.set(group, arr);
@@ -1023,9 +1031,6 @@ export default function LeftNav(props: {
                                     )}
                                   </Show>
                                   <span class="leaf-label">{t.name}</span>
-                                  <Show when={t.storage === "view"}>
-                                    <span class="leaf-storage" title="零拷贝视图(直接读源文件,不复制)">👁</span>
-                                  </Show>
                                   <Show when={t.rowCountEstimate != null}>
                                     <span class="leaf-count">{formatCount(t.rowCountEstimate!)}</span>
                                   </Show>
