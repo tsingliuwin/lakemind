@@ -527,6 +527,14 @@ export default function SettingsPage(props: {
           color: var(--text-danger);
           border-color: transparent !important;
         }
+        .btn-new-conn {
+          border: 1px solid transparent !important;
+          transition: all 0.15s ease;
+        }
+        .btn-new-conn:hover {
+          border-color: transparent !important;
+          opacity: 0.9;
+        }
       `}</style>
       {/* Settings Sidebar */}
       <aside class="settings-sidebar">
@@ -731,7 +739,7 @@ export default function SettingsPage(props: {
             </div>
             <Show when={!editingConn()}>
               <button 
-                class="ss-btn" 
+                class="ss-btn btn-new-conn" 
                 style="padding: 6px 16px; font-size: 13px; font-weight: 500; border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);" 
                 onClick={startAddConnection}
               >
