@@ -856,7 +856,7 @@ export default function SettingsPage(props: {
               {/* Connection URI Import */}
               <div style="display: flex; flex-direction: column; gap: 6px;">
                 <div style="display: flex; align-items: center; justify-content: space-between;">
-                  <label style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">一键导入连接串 (Connection URI)</label>
+                  <label style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">连接串 (Connection URI)</label>
                   <Show when={uriStatus().status !== "idle"}>
                     <span 
                       style={`font-size: 10.5px; font-weight: 600; transition: all 0.15s ease; ${
