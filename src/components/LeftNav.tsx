@@ -745,7 +745,7 @@ export default function LeftNav(props: {
                         <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path>
                       </svg>
                     </span>
-                    <span class="tree-section-label">外部数据</span>
+                    <span class="tree-section-label">{t("externalData")}</span>
                     <span class="leaf-count">{workspaceConns().length}</span>
                     <span class="tree-section-arrow">{dbSectionExpanded() ? "▼" : "▶"}</span>
                   </div>
@@ -797,7 +797,7 @@ export default function LeftNav(props: {
                                 <div style="margin-left: 12px; display: flex; flex-direction: column; gap: 2px;">
                                   <Show when={tables().length === 0}>
                                     <div style="font-size: 11px; font-style: italic; color: var(--text-dim); padding: 4px 8px;">
-                                      库中暂无数据表
+                                      {t("noTables")}
                                     </div>
                                   </Show>
 
@@ -818,10 +818,10 @@ export default function LeftNav(props: {
                                                 onClick={(e) => { e.stopPropagation(); handleRegisterDbTable(conn, t); }}
                                                 disabled={props.busy}
                                               >
-                                                添加
+                                                {t("addBtn")}
                                               </button>
                                             }>
-                                              <span style="color: var(--text-success); font-size: 10px; padding-right: 4px;">✓ 已加</span>
+                                              <span style="color: var(--text-success); font-size: 10px; padding-right: 4px;">{t("addedLabel")}</span>
                                             </Show>
                                           </div>
                                         );
@@ -858,10 +858,10 @@ export default function LeftNav(props: {
                                                             onClick={(e) => { e.stopPropagation(); handleRegisterDbTable(conn, t); }}
                                                             disabled={props.busy}
                                                           >
-                                                            添加
+                                                            {t("addBtn")}
                                                           </button>
                                                         }>
-                                                          <span style="color: var(--text-success); font-size: 10px; padding-right: 4px;">✓ 已加</span>
+                                                          <span style="color: var(--text-success); font-size: 10px; padding-right: 4px;">{t("addedLabel")}</span>
                                                         </Show>
                                                       </div>
                                                     );
@@ -882,9 +882,9 @@ export default function LeftNav(props: {
                       </For>
                       <Show when={workspaceConns().length === 0}>
                         <div style="padding: 10px; text-align: center; color: var(--text-dim); font-size: 11px; font-style: italic;">
-                          无关联数据库，可去
+                          {t("noLinkedConns")}
                           <a href="#" style="color: var(--brand); text-decoration: underline; margin-left: 4px;" onClick={(e) => { e.preventDefault(); props.onOpenSettings(); }}>
-                            设置页关联
+                            {t("settingsPageLink")}
                           </a>
                         </div>
                       </Show>

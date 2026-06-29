@@ -700,16 +700,16 @@ export default function SettingsPage(props: {
               {/* Header */}
               <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-faint); padding-bottom: 14px;">
                 <h3 style="margin: 0; font-size: 15px; font-weight: 600; color: var(--text-primary);">
-                  {editingConn()?.id ? "编辑数据库连接" : "配置新的数据库连接"}
+                  {editingConn()?.id ? t("editConnTitle") : t("addConnTitle")}
                 </h3>
                 <button class="ss-btn ss-btn-secondary" style="padding: 4px 12px; font-size: 12.5px; border-radius: 6px;" onClick={() => setEditingConn(null)}>
-                  取消
+                  {t("cancelBtn")}
                 </button>
               </div>
 
               {/* Database Type Card Selector */}
               <div style="display: flex; flex-direction: column; gap: 8px;">
-                <label style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">数据库类型</label>
+                <label style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">{t("dbType")}</label>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
                   {/* PostgreSQL Card */}
                   <div 
@@ -729,7 +729,7 @@ export default function SettingsPage(props: {
                     </div>
                     <div style="flex: 1; min-width: 0;">
                       <div style="font-weight: 600; font-size: 13.5px; color: var(--text-primary);">PostgreSQL</div>
-                      <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">适用于高并发与复杂查询</div>
+                      <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{t("dbTypePostgresDesc")}</div>
                     </div>
                     <Show when={formType() === "postgres"}>
                       <span style="color: var(--brand); font-size: 15px; font-weight: bold; margin-left: auto;">✓</span>
@@ -754,7 +754,7 @@ export default function SettingsPage(props: {
                     </div>
                     <div style="flex: 1; min-width: 0;">
                       <div style="font-weight: 600; font-size: 13.5px; color: var(--text-primary);">MySQL</div>
-                      <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">适用于主流业务数据分析</div>
+                      <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{t("dbTypeMysqlDesc")}</div>
                     </div>
                     <Show when={formType() === "mysql"}>
                       <span style="color: var(--brand); font-size: 15px; font-weight: bold; margin-left: auto;">✓</span>
@@ -765,33 +765,33 @@ export default function SettingsPage(props: {
 
               {/* Group 1: Connection & Network */}
               <div style="display: flex; flex-direction: column; gap: 14px; border: 1px solid var(--border-strong); padding: 16px; border-radius: 10px; background: rgba(255, 255, 255, 0.005);">
-                <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 4px;">连接与网络配置</div>
+                <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 4px;">{t("connNetworkConfig")}</div>
                 
                 <div style="display: grid; grid-template-columns: 2fr 3fr 1fr; gap: 12px;">
                   <div style="display: flex; flex-direction: column; gap: 6px;">
-                    <label style="font-size: 11.5px; color: var(--text-dim);">连接名称</label>
+                    <label style="font-size: 11.5px; color: var(--text-dim);">{t("connNameLabel")}</label>
                     <input
                       type="text"
                       class="ss-input"
                       value={formName()}
-                      placeholder="例如: neon_prod"
+                      placeholder="neon_prod"
                       onInput={(e) => setFormName(e.currentTarget.value)}
                     />
                   </div>
 
                   <div style="display: flex; flex-direction: column; gap: 6px;">
-                    <label style="font-size: 11.5px; color: var(--text-dim);">主机地址 (Host)</label>
+                    <label style="font-size: 11.5px; color: var(--text-dim);">{t("hostLabel")}</label>
                     <input
                       type="text"
                       class="ss-input"
                       value={formHost()}
-                      placeholder="主机域名 或 IP"
+                      placeholder="Host / IP"
                       onInput={(e) => setFormHost(e.currentTarget.value)}
                     />
                   </div>
 
                   <div style="display: flex; flex-direction: column; gap: 6px;">
-                    <label style="font-size: 11.5px; color: var(--text-dim);">端口</label>
+                    <label style="font-size: 11.5px; color: var(--text-dim);">{t("portLabel")}</label>
                     <input
                       type="number"
                       class="ss-input"
@@ -804,41 +804,41 @@ export default function SettingsPage(props: {
 
               {/* Group 2: Auth & DB info */}
               <div style="display: flex; flex-direction: column; gap: 14px; border: 1px solid var(--border-strong); padding: 16px; border-radius: 10px; background: rgba(255, 255, 255, 0.005);">
-                <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 4px;">身份验证与权限</div>
+                <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 4px;">{t("authPermissions")}</div>
 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
                   <div style="display: flex; flex-direction: column; gap: 6px;">
-                    <label style="font-size: 11.5px; color: var(--text-dim);">数据库名 (Database)</label>
+                    <label style="font-size: 11.5px; color: var(--text-dim);">{t("databaseLabel")}</label>
                     <input
                       type="text"
                       class="ss-input"
                       value={formDatabase()}
-                      placeholder="例如: neondb"
+                      placeholder="neondb"
                       onInput={(e) => setFormDatabase(e.currentTarget.value)}
                     />
                   </div>
 
                   <div style="display: flex; flex-direction: column; gap: 6px;">
-                    <label style="font-size: 11.5px; color: var(--text-dim);">用户名 (Username)</label>
+                    <label style="font-size: 11.5px; color: var(--text-dim);">{t("usernameLabel")}</label>
                     <input
                       type="text"
                       class="ss-input"
                       value={formUsername()}
-                      placeholder="数据库用户名"
+                      placeholder="Username"
                       onInput={(e) => setFormUsername(e.currentTarget.value)}
                     />
                   </div>
                 </div>
 
                 <div style="display: flex; flex-direction: column; gap: 6px;">
-                  <label style="font-size: 11.5px; color: var(--text-dim);">密码 (Password)</label>
+                  <label style="font-size: 11.5px; color: var(--text-dim);">{t("passwordLabel")}</label>
                   <div style="position: relative; display: flex; align-items: center; width: 100%;">
                     <input
                       type={showPassword() ? "text" : "password"}
                       class="ss-input"
                       style="padding-right: 40px; width: 100%;"
                       value={formPassword()}
-                      placeholder="请输入数据库连接密码"
+                      placeholder="••••••••"
                       onInput={(e) => setFormPassword(e.currentTarget.value)}
                     />
                     <button 
@@ -865,8 +865,8 @@ export default function SettingsPage(props: {
                 <Show when={formType() === "postgres"}>
                   <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
                     <div style="display: flex; align-items: center; justify-content: space-between;">
-                      <label style="font-size: 11.5px; color: var(--text-dim);">SSL 模式</label>
-                      <span style="font-size: 10px; color: var(--text-dim); opacity: 0.7;">💡 云数据库（如 Neon, AWS）通常强制要求 require</span>
+                      <label style="font-size: 11.5px; color: var(--text-dim);">{t("sslModeLabel")}</label>
+                      <span style="font-size: 10px; color: var(--text-dim); opacity: 0.7;">{t("sslModeTip")}</span>
                     </div>
                     <Select
                       options={[
@@ -906,7 +906,7 @@ export default function SettingsPage(props: {
                          testStatus().status === "success" ? "✓" : "✕"}
                       </span>
                       <div>
-                        {testStatus().status === "testing" ? "正在尝试测试建立数据库网络连接，请稍候..." : testStatus().msg}
+                        {testStatus().status === "testing" ? t("testConnTesting") : (testStatus().status === "success" ? t("testConnSuccess") : testStatus().msg)}
                       </div>
                     </div>
                   </div>
@@ -919,14 +919,14 @@ export default function SettingsPage(props: {
                     onClick={handleTestConnection} 
                     disabled={testStatus().status === "testing"}
                   >
-                    {testStatus().status === "testing" ? "连接中..." : "测试连接"}
+                    {testStatus().status === "testing" ? "..." : t("testConnBtn")}
                   </button>
                   <button 
                     class="ss-btn" 
                     style="padding: 6px 20px; font-size: 13px; font-weight: 500;"
                     onClick={handleSaveConnection}
                   >
-                    保存并应用
+                    {t("saveAndApplyBtn")}
                   </button>
                 </div>
               </div>
@@ -934,9 +934,9 @@ export default function SettingsPage(props: {
           }>
             <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 14px; max-width: 680px;">
               <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">已保存的外部连接</div>
+                <div style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">{t("savedConnectionsTitle")}</div>
                 <button class="ss-btn" style="padding: 5px 12px; font-size: 12.5px; font-weight: 500;" onClick={startAddConnection}>
-                  + 新建连接
+                  {t("newConnectionBtn")}
                 </button>
               </div>
 
@@ -947,7 +947,7 @@ export default function SettingsPage(props: {
                     <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
                     <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path>
                   </svg>
-                  <span>暂无已配置的外部数据库连接。点击右上角“新建连接”开始。</span>
+                  <span>{t("noConnectionsDesc")}</span>
                 </div>
               }>
                 <div style="display: flex; flex-direction: column; gap: 10px;">
@@ -983,7 +983,7 @@ export default function SettingsPage(props: {
                               style={`padding: 5px 12px; font-size: 12px; font-weight: 500; min-width: 90px; border-radius: 6px; transition: all 0.2s ease; ${linkedConns()[c.id] ? 'background: var(--brand); color: white; border-color: var(--brand);' : ''}`} 
                               onClick={() => handleToggleLink(c.id)}
                             >
-                              {linkedConns()[c.id] ? "已关联项目" : "关联项目"}
+                              {linkedConns()[c.id] ? t("linkedProjectBtn") : t("linkProjectBtn")}
                             </button>
                           </Show>
                           <button 
