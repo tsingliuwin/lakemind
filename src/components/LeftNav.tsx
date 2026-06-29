@@ -1,6 +1,6 @@
 import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import type { SourceTable, QueryTask, Workspace, FileItem, RegisterStatus, ImportProgress } from "../lib/types";
+import type { SourceTable, QueryTask, Workspace, FileItem, RegisterStatus, ImportProgress, DbConnection } from "../lib/types";
 import { t } from "../lib/i18n";
 import { logoSrc } from "../lib/theme";
 
@@ -70,7 +70,12 @@ function KindIcon(props: { kind: string }) {
       <Show when={k === "delta"}>
         <path d="M12 3L3 20h18z" />
       </Show>
-      <Show when={k !== "csv" && k !== "tsv" && k !== "parquet" && k !== "json" && k !== "excel" && k !== "delta" && k !== "table" && k !== "view"}>
+      <Show when={k === "postgres" || k === "mysql"}>
+        <ellipse cx="12" cy="6" rx="8" ry="3" />
+        <path d="M4 6v5c0 1.66 3.58 3 8 3s8-1.34 8-3V6" />
+        <path d="M4 11v5c0 1.66 3.58 3 8 3s8-1.34 8-3v-5" />
+      </Show>
+      <Show when={k !== "csv" && k !== "tsv" && k !== "parquet" && k !== "json" && k !== "excel" && k !== "delta" && k !== "table" && k !== "view" && k !== "postgres" && k !== "mysql"}>
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
         <polyline points="14 2 14 8 20 8" />
       </Show>
@@ -101,6 +106,7 @@ export default function LeftNav(props: {
   onNewQuery?: () => void;
   onNewChat?: () => void;
   onImportFile?: (filePath: string) => void;
+  onRegisterDatabaseTable?: (sources: SourceTable[]) => void;
   leftOpen?: boolean;
   onToggleLeft?: () => void;
   /** Current file-import progress (null = idle). Shown as a status banner. */
@@ -145,6 +151,63 @@ export default function LeftNav(props: {
   const [expandedPaths, setExpandedPaths] = createSignal<Record<string, boolean>>({});
   const [directoryContents, setDirectoryContents] = createSignal<Record<string, FileItem[]>>({});
   const [fileSearchQuery] = createSignal("");
+
+  // Database connection explorer states
+  interface DbTableItem {
+    schema: string;
+    name: string;
+    kind: string;
+  }
+  const [workspaceConns, setWorkspaceConns] = createSignal<DbConnection[]>([]);
+  const [dbTables, setDbTables] = createSignal<Record<string, DbTableItem[]>>({});
+  const [expandedDbConns, setExpandedDbConns] = createSignal<Record<string, boolean>>({});
+  const [loadingDbConns, setLoadingDbConns] = createSignal<Record<string, boolean>>({});
+  const [dbSectionExpanded, setDbSectionExpanded] = createSignal(true);
+
+  const loadWorkspaceConnections = async () => {
+    const ws = props.workspacePath;
+    if (!ws) return;
+    try {
+      const list = await invoke<DbConnection[]>("list_workspace_connections", { wsPath: ws });
+      setWorkspaceConns(list);
+    } catch (err) {
+      console.error("Failed to list workspace db connections:", err);
+    }
+  };
+
+  const toggleDbConn = async (c: DbConnection) => {
+    const id = c.id;
+    const isExpanded = expandedDbConns()[id];
+    setExpandedDbConns({ ...expandedDbConns(), [id]: !isExpanded });
+    
+    if (!isExpanded && !dbTables()[id]) {
+      setLoadingDbConns({ ...loadingDbConns(), [id]: true });
+      try {
+        const list = await invoke<DbTableItem[]>("list_db_connection_tables", { config: c });
+        setDbTables({ ...dbTables(), [id]: list });
+      } catch (err) {
+        console.error("Failed to load tables for connection " + c.name, err);
+      } finally {
+        setLoadingDbConns({ ...loadingDbConns(), [id]: false });
+      }
+    }
+  };
+
+  const handleRegisterDbTable = async (c: DbConnection, table: DbTableItem) => {
+    if (!props.workspacePath) return;
+    try {
+      const updatedSources = await invoke<SourceTable[]>("register_database_table", {
+        workspace: props.workspacePath,
+        connectionId: c.id,
+        schemaName: table.schema,
+        tableName: table.name,
+        dbType: c.dbType,
+      });
+      props.onRegisterDatabaseTable?.(updatedSources);
+    } catch (err) {
+      alert("注册外部表失败: " + err);
+    }
+  };
 
   // File ↔ Data cross-highlighting (linkage). Clicking a table highlights its
   // backing file in the Files tree, and clicking a file highlights its table.
@@ -212,6 +275,7 @@ export default function LeftNav(props: {
       setWsCollapsed(false);
       setExpandedPaths((prev) => ({ ...prev, [wsPath]: true }));
       await loadDirContents(wsPath);
+      await loadWorkspaceConnections();
     }
   });
 
@@ -664,6 +728,167 @@ export default function LeftNav(props: {
                         </span>
                       </div>
                     )}
+                  </Show>
+
+                  {/* Category: 外部数据库 */}
+                  <div
+                    class="tree-section-header"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDbSectionExpanded(!dbSectionExpanded());
+                    }}
+                  >
+                    <span class="tree-section-icon">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
+                        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                        <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path>
+                      </svg>
+                    </span>
+                    <span class="tree-section-label">外部数据</span>
+                    <span class="leaf-count">{workspaceConns().length}</span>
+                    <span class="tree-section-arrow">{dbSectionExpanded() ? "▼" : "▶"}</span>
+                  </div>
+                  <Show when={dbSectionExpanded()}>
+                    <div class="tree-section-content" style="display: flex; flex-direction: column; gap: 1px; margin-left: 8px;">
+                      <For each={workspaceConns()}>
+                        {(conn) => {
+                          const connId = conn.id;
+                          const isExpanded = () => expandedDbConns()[connId];
+                          const isLoading = () => loadingDbConns()[connId];
+                          const tables = () => dbTables()[connId] || [];
+                          
+                          const schemas = () => {
+                            const map: Record<string, DbTableItem[]> = {};
+                            for (const t of tables()) {
+                              const sch = t.schema || "public";
+                              if (!map[sch]) map[sch] = [];
+                              map[sch].push(t);
+                            }
+                            return Object.entries(map);
+                          };
+
+                          return (
+                            <div class="tree-subgroup">
+                              <div 
+                                class="tree-group-label" 
+                                style="display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; cursor: pointer; border-radius: 4px; hover: background: rgba(255,255,255,0.02);"
+                                onClick={() => toggleDbConn(conn)}
+                              >
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                  <span style="color: var(--brand); display: inline-flex; align-items: center;">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="width: 12px; height: 12px;">
+                                      <ellipse cx="12" cy="6" rx="8" ry="3" />
+                                      <path d="M4 6v5c0 1.66 3.58 3 8 3s8-1.34 8-3V6" />
+                                      <path d="M4 11v5c0 1.66 3.58 3 8 3s8-1.34 8-3v-5" />
+                                    </svg>
+                                  </span>
+                                  <span style="font-weight: 500; font-size: 12px;">{conn.name}</span>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                  <Show when={isLoading()}>
+                                    <span class="import-banner__spinner" style="width: 10px; height: 10px; border-width: 1.5px;" />
+                                  </Show>
+                                  <span style="font-size: 10px; color: var(--text-dim);">{isExpanded() ? "▼" : "▶"}</span>
+                                </div>
+                              </div>
+
+                              <Show when={isExpanded() && !isLoading()}>
+                                <div style="margin-left: 12px; display: flex; flex-direction: column; gap: 2px;">
+                                  <Show when={tables().length === 0}>
+                                    <div style="font-size: 11px; font-style: italic; color: var(--text-dim); padding: 4px 8px;">
+                                      库中暂无数据表
+                                    </div>
+                                  </Show>
+
+                                  <Show when={conn.dbType === "postgres"} fallback={
+                                    <For each={tables()}>
+                                      {(t) => {
+                                        const registered = () => props.sources.some(s => s.path === `db://${connId}/${t.schema}/${t.name}`);
+                                        return (
+                                          <div style="display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 2px 8px; border-radius: 4px;" class="tree-leaf">
+                                            <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                              <span style="color: var(--text-dim); display: inline-flex;"><KindIcon kind="table" /></span>
+                                              <span style="font-size: 11.5px;">{t.name}</span>
+                                            </div>
+                                            <Show when={registered()} fallback={
+                                              <button 
+                                                class="ss-btn" 
+                                                style="padding: 1px 6px; font-size: 10px; height: 18px; border-radius: 3px;"
+                                                onClick={(e) => { e.stopPropagation(); handleRegisterDbTable(conn, t); }}
+                                                disabled={props.busy}
+                                              >
+                                                添加
+                                              </button>
+                                            }>
+                                              <span style="color: var(--text-success); font-size: 10px; padding-right: 4px;">✓ 已加</span>
+                                            </Show>
+                                          </div>
+                                        );
+                                      }}
+                                    </For>
+                                  }>
+                                    <For each={schemas()}>
+                                      {([schemaName, schemaTables]) => {
+                                        const [schemaExpanded, setSchemaExpanded] = createSignal(schemaName === "public");
+                                        return (
+                                          <div style="display: flex; flex-direction: column; gap: 1px;">
+                                            <div 
+                                              style="display: flex; align-items: center; gap: 4px; padding: 2px 4px; cursor: pointer; color: var(--text-dim);"
+                                              onClick={() => setSchemaExpanded(!schemaExpanded())}
+                                            >
+                                              <span style="font-size: 10px;">{schemaExpanded() ? "▼" : "▶"}</span>
+                                              <span style="font-size: 11px; font-weight: 500;">📁 {schemaName}</span>
+                                            </div>
+                                            <Show when={schemaExpanded()}>
+                                              <div style="margin-left: 10px; display: flex; flex-direction: column; gap: 1px;">
+                                                <For each={schemaTables}>
+                                                  {(t) => {
+                                                    const registered = () => props.sources.some(s => s.path === `db://${connId}/${t.schema}/${t.name}`);
+                                                    return (
+                                                      <div style="display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 2px 8px; border-radius: 4px;" class="tree-leaf">
+                                                        <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                                          <span style="color: var(--text-dim); display: inline-flex;"><KindIcon kind="table" /></span>
+                                                          <span style="font-size: 11.5px;" title={t.name}>{t.name}</span>
+                                                        </div>
+                                                        <Show when={registered()} fallback={
+                                                          <button 
+                                                            class="ss-btn" 
+                                                            style="padding: 1px 6px; font-size: 10px; height: 18px; border-radius: 3px;"
+                                                            onClick={(e) => { e.stopPropagation(); handleRegisterDbTable(conn, t); }}
+                                                            disabled={props.busy}
+                                                          >
+                                                            添加
+                                                          </button>
+                                                        }>
+                                                          <span style="color: var(--text-success); font-size: 10px; padding-right: 4px;">✓ 已加</span>
+                                                        </Show>
+                                                      </div>
+                                                    );
+                                                  }}
+                                                </For>
+                                              </div>
+                                            </Show>
+                                          </div>
+                                        );
+                                      }}
+                                    </For>
+                                  </Show>
+                                </div>
+                              </Show>
+                            </div>
+                          );
+                        }}
+                      </For>
+                      <Show when={workspaceConns().length === 0}>
+                        <div style="padding: 10px; text-align: center; color: var(--text-dim); font-size: 11px; font-style: italic;">
+                          无关联数据库，可去
+                          <a href="#" style="color: var(--brand); text-decoration: underline; margin-left: 4px;" onClick={(e) => { e.preventDefault(); props.onOpenSettings(); }}>
+                            设置页关联
+                          </a>
+                        </div>
+                      </Show>
+                    </div>
                   </Show>
 
                   {/* Category 3: 数据 */}

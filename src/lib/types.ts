@@ -1,7 +1,20 @@
 // 通信类型定义 —— 与 src-tauri/src/model.rs 一一对应。
 // 修改 M1 通信格式时请同步两侧。
 
-export type SourceKind = "parquet" | "csv" | "json" | "delta" | "excel" | "table" | "view";
+export type SourceKind = "parquet" | "csv" | "json" | "delta" | "excel" | "table" | "view" | "postgres" | "mysql";
+
+export interface DbConnection {
+  id: string;
+  name: string;
+  dbType: "postgres" | "mysql";
+  host: string;
+  port: number;
+  databaseName: string;
+  username: string;
+  password?: string;
+  sslMode?: string;
+  createdAt?: number;
+}
 
 /** 文件导入进度事件（后端 emit "import-progress"）。 */
 export interface ImportProgress {

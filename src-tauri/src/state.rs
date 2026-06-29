@@ -81,12 +81,10 @@ impl AppState {
         Ok(conn)
     }
 
-    /// Initialize against the default workspace's lake at
-    /// `~/.lakemind/DefaultProject/`. Used only at startup; the frontend then
-    /// switches via `register_workspace_sources`.
     pub fn new() -> AppResult<Self> {
         let ws = default_workspace_dir();
         let conn = Self::open_workspace(&ws)?;
+        let _ = crate::db::attach_workspace_connections(&conn, "DefaultProject");
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             sources: Arc::new(Mutex::new(Vec::new())),

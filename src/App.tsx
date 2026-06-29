@@ -1273,6 +1273,7 @@ export default function App() {
         when={!settingsOpen()}
         fallback={
           <SettingsPage 
+            workspacePath={currentWorkspace().path}
             onClose={() => setSettingsOpen(false)} 
             titleBar={
               <TitleBar
@@ -1312,6 +1313,7 @@ export default function App() {
           onRemoveWorkspace={removeWorkspace}
           onAddWorkspace={addWorkspace}
           onImportFile={handleImportFile}
+          onRegisterDatabaseTable={setSources}
           sources={sources()}
           fileTrigger={fileTrigger()}
           selected={selectedTable()?.name ?? null}

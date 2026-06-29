@@ -461,6 +461,37 @@ pub fn init_global_db() -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to create object_defs table: {e}"))?;
 
+    // db_connections: external database connections
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS db_connections (
+            id            TEXT PRIMARY KEY,
+            name          TEXT NOT NULL,
+            db_type       TEXT NOT NULL,
+            host          TEXT NOT NULL,
+            port          INTEGER NOT NULL,
+            database_name TEXT NOT NULL,
+            username      TEXT NOT NULL,
+            password      TEXT NOT NULL,
+            ssl_mode      TEXT NOT NULL DEFAULT 'disable',
+            created_at    INTEGER NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| format!("Failed to create db_connections table: {e}"))?;
+
+    // workspace_connections: many-to-many relationship
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS workspace_connections (
+            workspace_path TEXT NOT NULL,
+            connection_id  TEXT NOT NULL,
+            PRIMARY KEY (workspace_path, connection_id),
+            FOREIGN KEY(workspace_path) REFERENCES workspaces(path) ON DELETE CASCADE,
+            FOREIGN KEY(connection_id) REFERENCES db_connections(id) ON DELETE CASCADE
+        )",
+        [],
+    )
+    .map_err(|e| format!("Failed to create workspace_connections table: {e}"))?;
+
     // Seed the default workspace on first run.
     let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM workspaces", [], |row| row.get(0))
@@ -479,3 +510,195 @@ pub fn init_global_db() -> Result<(), String> {
 
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// db_connections CRUD and workspace linking operations
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DbConnectionRecord {
+    pub id: String,
+    pub name: String,
+    pub db_type: String, // "postgres" | "mysql"
+    pub host: String,
+    pub port: i32,
+    pub database_name: String,
+    pub username: String,
+    pub password: String,
+    pub ssl_mode: String,
+    pub created_at: i64,
+}
+
+pub fn create_db_connection(conn: &Connection, r: &DbConnectionRecord) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO db_connections (id, name, db_type, host, port, database_name, username, password, ssl_mode, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rusqlite::params![r.id, r.name, r.db_type, r.host, r.port, r.database_name, r.username, r.password, r.ssl_mode, r.created_at],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn update_db_connection(conn: &Connection, r: &DbConnectionRecord) -> Result<(), String> {
+    conn.execute(
+        "UPDATE db_connections SET name=?, db_type=?, host=?, port=?, database_name=?, username=?, password=?, ssl_mode=?
+         WHERE id=?",
+        rusqlite::params![r.name, r.db_type, r.host, r.port, r.database_name, r.username, r.password, r.ssl_mode, r.id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn delete_db_connection(conn: &Connection, id: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM db_connections WHERE id = ?", [id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn list_db_connections(conn: &Connection) -> Result<Vec<DbConnectionRecord>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, name, db_type, host, port, database_name, username, password, ssl_mode, created_at FROM db_connections ORDER BY created_at ASC")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(DbConnectionRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                db_type: row.get(2)?,
+                host: row.get(3)?,
+                port: row.get(4)?,
+                database_name: row.get(5)?,
+                username: row.get(6)?,
+                password: row.get(7)?,
+                ssl_mode: row.get(8)?,
+                created_at: row.get(9)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
+pub fn get_db_connection(conn: &Connection, id: &str) -> Result<Option<DbConnectionRecord>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, name, db_type, host, port, database_name, username, password, ssl_mode, created_at FROM db_connections WHERE id = ?")
+        .map_err(|e| e.to_string())?;
+    let mut rows = stmt
+        .query_map([id], |row| {
+            Ok(DbConnectionRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                db_type: row.get(2)?,
+                host: row.get(3)?,
+                port: row.get(4)?,
+                database_name: row.get(5)?,
+                username: row.get(6)?,
+                password: row.get(7)?,
+                ssl_mode: row.get(8)?,
+                created_at: row.get(9)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    if let Some(r) = rows.next() {
+        Ok(Some(r.map_err(|e| e.to_string())?))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn link_connection_to_workspace(conn: &Connection, ws_path: &str, conn_id: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR IGNORE INTO workspace_connections (workspace_path, connection_id) VALUES (?, ?)",
+        [ws_path, conn_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn unlink_connection_from_workspace(conn: &Connection, ws_path: &str, conn_id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM workspace_connections WHERE workspace_path = ? AND connection_id = ?",
+        [ws_path, conn_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn list_workspace_connections(conn: &Connection, ws_path: &str) -> Result<Vec<DbConnectionRecord>, String> {
+    let mut stmt = conn
+        .prepare("SELECT c.id, c.name, c.db_type, c.host, c.port, c.database_name, c.username, c.password, c.ssl_mode, c.created_at
+                  FROM db_connections c
+                  JOIN workspace_connections wc ON c.id = wc.connection_id
+                  WHERE wc.workspace_path = ?
+                  ORDER BY c.created_at ASC")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([ws_path], |row| {
+            Ok(DbConnectionRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                db_type: row.get(2)?,
+                host: row.get(3)?,
+                port: row.get(4)?,
+                database_name: row.get(5)?,
+                username: row.get(6)?,
+                password: row.get(7)?,
+                ssl_mode: row.get(8)?,
+                created_at: row.get(9)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
+pub fn attach_workspace_connections(conn: &duckdb::Connection, ws_path: &str) -> Result<(), String> {
+    let sqlite = get_db_conn()?;
+    let linked = list_workspace_connections(&sqlite, ws_path)?;
+    for r in linked {
+        let install_sql = format!("INSTALL {};", r.db_type);
+        let load_sql = format!("LOAD {};", r.db_type);
+        let _ = conn.execute(&install_sql, []);
+        if let Err(e) = conn.execute(&load_sql, []) {
+            eprintln!("Auto-attach warning: failed to LOAD extension for connection {}: {e}", r.name);
+            continue;
+        }
+
+        let safe_name = r.name.chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+            .collect::<String>();
+        let conn_name = format!("db_{safe_name}");
+
+        let attach_sql = if r.db_type == "postgres" {
+            let mut conn_str = format!(
+                "host={} port={} dbname={} user={} password={}",
+                r.host, r.port, r.database_name, r.username, r.password
+            );
+            if r.ssl_mode != "disable" {
+                conn_str.push_str(&format!(" sslmode={}", r.ssl_mode));
+            }
+            format!("ATTACH '{}' AS {conn_name} (TYPE postgres);", conn_str)
+        } else {
+            format!(
+                "ATTACH 'host={} port={} database={} user={} password={}' AS {conn_name} (TYPE mysql);",
+                r.host, r.port, r.database_name, r.username, r.password
+            )
+        };
+
+        if let Err(e) = conn.execute(&attach_sql, []) {
+            eprintln!("Auto-attach warning: failed to ATTACH connection {}: {e}", r.name);
+        } else {
+            println!("Auto-attached database connection: {} AS {}", r.name, conn_name);
+        }
+    }
+    Ok(())
+}
+
+

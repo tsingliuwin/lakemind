@@ -889,6 +889,9 @@ async fn sync_entries(
         // and pruning would delete every other table in the workspace.
         if prune_orphans {
             for rec in &existing {
+                if rec.kind == "postgres" || rec.kind == "mysql" {
+                    continue;
+                }
                 if !entry_scan_paths.contains(&rec.scan_path) {
                     drop_lake_object(&guard, &rec.table_name);
                     let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
@@ -897,6 +900,12 @@ async fn sync_entries(
                 }
             }
         }
+
+        let db_sources: Vec<SourceTable> = existing.iter()
+            .filter(|rec| rec.kind == "postgres" || rec.kind == "mysql")
+            .map(build_source_table_from_record)
+            .collect();
+        result.extend(db_sources);
 
         // Checkpoint the DuckLake catalog so newly-created/updated tables are
         // flushed into lake.sqlite before the process exits. Skipped when nothing
@@ -1335,6 +1344,9 @@ async fn switch_workspace_lake(state: &AppState, workspace_path: String, ws_dir:
         .map_err(|e| format!("join error: {e}"))?
         .map_err(|e| e.to_string())?;
 
+    // Auto-attach database connections for the switched workspace
+    let _ = db::attach_workspace_connections(&new_conn, &workspace_path);
+
     {
         let mut c = state.conn.lock().await;
         *c = new_conn;
@@ -1557,6 +1569,8 @@ fn kind_to_str(k: &SourceKind) -> &'static str {
         SourceKind::Excel => "excel",
         SourceKind::Table => "table",
         SourceKind::View => "view",
+        SourceKind::Postgres => "postgres",
+        SourceKind::Mysql => "mysql",
     }
 }
 
@@ -1568,6 +1582,8 @@ fn str_to_kind(s: &str) -> SourceKind {
         "delta" => SourceKind::Delta,
         "excel" => SourceKind::Excel,
         "view" => SourceKind::View,
+        "postgres" => SourceKind::Postgres,
+        "mysql" => SourceKind::Mysql,
         _ => SourceKind::Table,
     }
 }
@@ -1718,3 +1734,301 @@ fn path_total_size(p: &Path) -> u64 {
     }
     total
 }
+
+// ===========================================================================
+// Database connection commands
+// ===========================================================================
+
+fn test_connection_impl(r: &db::DbConnectionRecord) -> Result<(), String> {
+    let conn = duckdb::Connection::open_in_memory().map_err(|e| e.to_string())?;
+    let install_sql = format!("INSTALL {};", r.db_type);
+    let load_sql = format!("LOAD {};", r.db_type);
+    let _ = conn.execute(&install_sql, []);
+    conn.execute(&load_sql, []).map_err(|e| format!("加载驱动失败: {e}"))?;
+
+    let conn_name = "test_attached_db";
+    let attach_sql = if r.db_type == "postgres" {
+        let mut conn_str = format!(
+            "host={} port={} dbname={} user={} password={}",
+            r.host, r.port, r.database_name, r.username, r.password
+        );
+        if r.ssl_mode != "disable" {
+            conn_str.push_str(&format!(" sslmode={}", r.ssl_mode));
+        }
+        format!("ATTACH '{}' AS {conn_name} (TYPE postgres);", conn_str)
+    } else {
+        format!(
+            "ATTACH 'host={} port={} database={} user={} password={}' AS {conn_name} (TYPE mysql);",
+            r.host, r.port, r.database_name, r.username, r.password
+        )
+    };
+
+    conn.execute(&attach_sql, []).map_err(|e| format!("连接数据库失败: {e}"))?;
+    let _ = conn.execute(&format!("DETACH {conn_name};"), []);
+    Ok(())
+}
+
+fn list_connection_tables_impl(r: &db::DbConnectionRecord) -> Result<Vec<DbTableItem>, String> {
+    let conn = duckdb::Connection::open_in_memory().map_err(|e| e.to_string())?;
+    let install_sql = format!("INSTALL {};", r.db_type);
+    let load_sql = format!("LOAD {};", r.db_type);
+    let _ = conn.execute(&install_sql, []);
+    conn.execute(&load_sql, []).map_err(|e| format!("加载驱动失败: {e}"))?;
+
+    let conn_name = "list_attached_db";
+    let attach_sql = if r.db_type == "postgres" {
+        let mut conn_str = format!(
+            "host={} port={} dbname={} user={} password={}",
+            r.host, r.port, r.database_name, r.username, r.password
+        );
+        if r.ssl_mode != "disable" {
+            conn_str.push_str(&format!(" sslmode={}", r.ssl_mode));
+        }
+        format!("ATTACH '{}' AS {conn_name} (TYPE postgres);", conn_str)
+    } else {
+        format!(
+            "ATTACH 'host={} port={} database={} user={} password={}' AS {conn_name} (TYPE mysql);",
+            r.host, r.port, r.database_name, r.username, r.password
+        )
+    };
+
+    conn.execute(&attach_sql, []).map_err(|e| format!("连接数据库失败: {e}"))?;
+
+    let mut stmt = conn.prepare(&format!(
+        "SELECT schema_name, table_name, 'table' AS type FROM duckdb_tables() WHERE database_name = '{conn_name}' AND NOT internal
+         UNION ALL
+         SELECT schema_name, view_name AS table_name, 'view' AS type FROM duckdb_views() WHERE database_name = '{conn_name}' AND NOT internal
+         ORDER BY schema_name, table_name"
+    )).map_err(|e| e.to_string())?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok(DbTableItem {
+            schema: row.get(0)?,
+            name: row.get(1)?,
+            kind: row.get(2)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut out = Vec::new();
+    for r in rows {
+        if let Ok(item) = r {
+            out.push(item);
+        }
+    }
+
+    let _ = conn.execute(&format!("DETACH {conn_name};"), []);
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn get_db_connections() -> Result<Vec<db::DbConnectionRecord>, String> {
+    let conn = db::get_db_conn()?;
+    db::list_db_connections(&conn)
+}
+
+#[tauri::command]
+pub async fn upsert_db_connection(config: db::DbConnectionRecord) -> Result<(), String> {
+    let conn = db::get_db_conn()?;
+    if db::get_db_connection(&conn, &config.id)?.is_some() {
+        db::update_db_connection(&conn, &config)
+    } else {
+        db::create_db_connection(&conn, &config)
+    }
+}
+
+#[tauri::command]
+pub async fn delete_db_connection(id: String) -> Result<(), String> {
+    let conn = db::get_db_conn()?;
+    db::delete_db_connection(&conn, &id)
+}
+
+#[tauri::command]
+pub async fn test_db_connection(config: db::DbConnectionRecord) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || test_connection_impl(&config))
+        .await
+        .map_err(|e| format!("Task execution error: {e}"))?
+}
+
+#[tauri::command]
+pub async fn link_connection_to_workspace(ws_path: String, conn_id: String) -> Result<(), String> {
+    let conn = db::get_db_conn()?;
+    db::link_connection_to_workspace(&conn, &ws_path, &conn_id)
+}
+
+#[tauri::command]
+pub async fn unlink_connection_from_workspace(ws_path: String, conn_id: String) -> Result<(), String> {
+    let conn = db::get_db_conn()?;
+    db::unlink_connection_from_workspace(&conn, &ws_path, &conn_id)
+}
+
+#[tauri::command]
+pub async fn list_workspace_connections(ws_path: String) -> Result<Vec<db::DbConnectionRecord>, String> {
+    let conn = db::get_db_conn()?;
+    db::list_workspace_connections(&conn, &ws_path)
+}
+
+#[derive(serde::Serialize)]
+pub struct DbTableItem {
+    pub schema: String,
+    pub name: String,
+    pub kind: String, // "table" | "view"
+}
+
+#[tauri::command]
+pub async fn list_db_connection_tables(config: db::DbConnectionRecord) -> Result<Vec<DbTableItem>, String> {
+    tokio::task::spawn_blocking(move || list_connection_tables_impl(&config))
+        .await
+        .map_err(|e| format!("Task execution error: {e}"))?
+}
+
+#[tauri::command]
+pub async fn register_database_table(
+    workspace: String,
+    connection_id: String,
+    schema_name: String,
+    table_name: String,
+    db_type: String, // "postgres" | "mysql"
+    state: State<'_, AppState>,
+) -> Result<Vec<SourceTable>, String> {
+    let sqlite = db::get_db_conn()?;
+    let conn_record = db::get_db_connection(&sqlite, &connection_id)?
+        .ok_or_else(|| format!("未找到数据库连接: {}", connection_id))?;
+    
+    let safe_conn_name = conn_record.name.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect::<String>();
+    let catalog_name = format!("db_{safe_conn_name}");
+    
+    let full_path = if db_type == "postgres" {
+        format!("{}.{}.{}", catalog_name, schema_name, table_name)
+    } else {
+        format!("{}.{}", catalog_name, table_name)
+    };
+    
+    let local_table_name = format!("s_{}_{}", safe_conn_name, table_name)
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect::<String>();
+    
+    let ws_dir = resolve_workspace_dir(&workspace)?;
+    let ws_dir_str = ws_dir.to_string_lossy().to_string();
+    
+    let conn_clone = state.conn.clone();
+    let sources_clone = state.sources.clone();
+    let ws_path_clone = workspace.clone();
+    
+    let res = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<SourceTable>> {
+        let guard = conn_clone.blocking_lock();
+        let sqlite = db::get_db_conn()?;
+        
+        let catalog_exists = guard.prepare(&format!("SELECT * FROM duckdb_databases() WHERE database_name = '{}'", catalog_name))?
+            .query_row([], |_| Ok(()))
+            .is_ok();
+        
+        if !catalog_exists {
+            let install_sql = format!("INSTALL {};", conn_record.db_type);
+            let load_sql = format!("LOAD {};", conn_record.db_type);
+            let _ = guard.execute(&install_sql, []);
+            guard.execute(&load_sql, [])?;
+            
+            let attach_sql = if conn_record.db_type == "postgres" {
+                let mut conn_str = format!(
+                    "host={} port={} dbname={} user={} password={}",
+                    conn_record.host, conn_record.port, conn_record.database_name, conn_record.username, conn_record.password
+                );
+                if conn_record.ssl_mode != "disable" {
+                    conn_str.push_str(&format!(" sslmode={}", conn_record.ssl_mode));
+                }
+                format!("ATTACH '{}' AS {catalog_name} (TYPE postgres);", conn_str)
+            } else {
+                format!(
+                    "ATTACH 'host={} port={} database={} user={} password={}' AS {catalog_name} (TYPE mysql);",
+                    conn_record.host, conn_record.port, conn_record.database_name, conn_record.username, conn_record.password
+                )
+            };
+            guard.execute(&attach_sql, [])?;
+        }
+        
+        let create_view_sql = format!("CREATE OR REPLACE VIEW \"{}\" AS SELECT * FROM {};", local_table_name, full_path);
+        guard.execute(&create_view_sql, [])?;
+        
+        let columns = schema::describe_view(&guard, &local_table_name)?;
+        
+        let (write_count, approx_rows) = if conn_record.db_type == "postgres" {
+            let stats_sql = format!(
+                "SELECT reltuples::BIGINT, 
+                       (SELECT COALESCE(MAX(n_tup_ins + n_tup_upd + n_tup_del), 0) 
+                        FROM {catalog_name}.pg_catalog.pg_stat_all_tables 
+                        WHERE schemaname = '{}' AND relname = '{}') 
+                 FROM {catalog_name}.pg_catalog.pg_class 
+                 JOIN {catalog_name}.pg_catalog.pg_namespace ON pg_namespace.oid = pg_class.relnamespace 
+                 WHERE pg_namespace.nspname = '{}' AND pg_class.relname = '{}';",
+                schema_name, table_name, schema_name, table_name
+            );
+            guard.query_row(&stats_sql, [], |row| Ok((row.get::<_, i64>(1).unwrap_or(0), row.get::<_, i64>(0).unwrap_or(0))))
+                .unwrap_or((0, 0))
+        } else {
+            let stats_sql = format!(
+                "SELECT COALESCE(table_rows, 0)::BIGINT, 
+                        COALESCE(UNIX_TIMESTAMP(update_time), 0)::BIGINT 
+                 FROM {catalog_name}.information_schema.tables 
+                 WHERE table_schema = '{}' AND table_name = '{}';",
+                conn_record.database_name, table_name
+            );
+            guard.query_row(&stats_sql, [], |row| Ok((row.get::<_, i64>(1).unwrap_or(0), row.get::<_, i64>(0).unwrap_or(0))))
+                .unwrap_or((0, 0))
+        };
+        
+        let now = now_ms();
+        let record = db::SourceRecord {
+            table_name: local_table_name.clone(),
+            label: format!("{}.{}.{}", conn_record.name, schema_name, table_name),
+            kind: db_type.clone(),
+            storage: "view".to_string(),
+            file_path: format!("db://{}/{}/{}", connection_id, schema_name, table_name),
+            scan_path: full_path.clone(),
+            partition_keys: Vec::new(),
+            created_at: now,
+            name_source: "llm".to_string(),
+            file_mtime: write_count,
+            file_size: approx_rows,
+            columns: columns.clone(),
+            row_count: Some(approx_rows),
+        };
+        
+        db::upsert_source(&sqlite, &ws_path_clone, &record)?;
+        let _ = crate::okf::write_source_okf(&ws_dir_str, &local_table_name, &record.label, &record.file_path, approx_rows, write_count, &columns, Some(approx_rows));
+        let _ = crate::okf::write_pipeline_okf(&ws_dir_str, &local_table_name, &record.label, &record.file_path, "view");
+        
+        let records = db::list_sources(&sqlite, &ws_path_clone)?;
+        let mut result: Vec<SourceTable> = records.iter().map(build_source_table_from_record).collect();
+        
+        let defs = db::list_object_defs(&sqlite, &ws_path_clone)?;
+        for d in &defs {
+            result.push(SourceTable {
+                name: d.table_name.clone(),
+                label: d.table_name.clone(),
+                kind: SourceKind::View,
+                storage: StorageKind::Custom,
+                path: String::new(),
+                scan_path: String::new(),
+                partition_keys: Vec::new(),
+                row_count_estimate: d.row_count,
+                columns: d.columns.clone(),
+            });
+        }
+        
+        let mut cache = sources_clone.blocking_lock();
+        cache.clear();
+        cache.extend(result.iter().cloned().filter(|r| r.kind != SourceKind::View || r.storage != StorageKind::Custom));
+        
+        Ok(result)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
+    .map_err(|e| e.to_string())?;
+    
+    Ok(res)
+}
+
+

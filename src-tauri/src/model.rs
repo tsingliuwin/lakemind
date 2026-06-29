@@ -16,6 +16,8 @@ pub enum SourceKind {
     Excel,
     Table,
     View,
+    Postgres,
+    Mysql,
 }
 
 /// How a SOURCE is stored in the DuckLake. Drives the import strategy and the

@@ -8,11 +8,13 @@ import {
   codeLineNumbers, setCodeLineNumbersP,
   codeWrap, setCodeWrapP,
 } from "../lib/codeConfig";
+import type { DbConnection } from "../lib/types";
 
 const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
 type SettingsTab =
   | "general"
+  | "databases"
   | "codePreview"
   | "modelSettings"
   | "skills"
@@ -84,6 +86,7 @@ export interface AppSettings {
 }
 
 export default function SettingsPage(props: {
+  workspacePath?: string;
   onClose: () => void;
   onOpenSettings?: () => void;
   titleBar?: any;
@@ -122,7 +125,186 @@ export default function SettingsPage(props: {
   const [modelFormWindow, setModelFormWindow] = createSignal(200000);
   const [modelFormMaxTokens, setModelFormMaxTokens] = createSignal(4096);
 
-  onMount(async () => {
+  // Database connections state
+  const [connections, setConnections] = createSignal<DbConnection[]>([]);
+  const [editingConn, setEditingConn] = createSignal<DbConnection | null>(null);
+  const [testStatus, setTestStatus] = createSignal<{ status: "idle" | "testing" | "success" | "error"; msg?: string }>({ status: "idle" });
+  const [linkedConns, setLinkedConns] = createSignal<Record<string, boolean>>({});
+
+  const [formName, setFormName] = createSignal("");
+  const [formType, setFormType] = createSignal<"postgres" | "mysql">("postgres");
+  const [formHost, setFormHost] = createSignal("");
+  const [formPort, setFormPort] = createSignal(5432);
+  const [formDatabase, setFormDatabase] = createSignal("");
+  const [formUsername, setFormUsername] = createSignal("");
+  const [formPassword, setFormPassword] = createSignal("");
+  const [formSslMode, setFormSslMode] = createSignal("disable");
+  const [showPassword, setShowPassword] = createSignal(false);
+
+  const loadConnections = async () => {
+    try {
+      const list = await invoke<DbConnection[]>("get_db_connections");
+      setConnections(list);
+    } catch (err) {
+      console.error("Failed to load db connections:", err);
+    }
+  };
+
+  const loadWorkspaceLinks = async () => {
+    if (!props.workspacePath) return;
+    try {
+      const linked = await invoke<DbConnection[]>("list_workspace_connections", { wsPath: props.workspacePath });
+      const map: Record<string, boolean> = {};
+      for (const c of linked) {
+        map[c.id] = true;
+      }
+      setLinkedConns(map);
+    } catch (err) {
+      console.error("Failed to load workspace connections:", err);
+    }
+  };
+
+  const handleToggleLink = async (connId: string) => {
+    if (!props.workspacePath) return;
+    const isLinked = linkedConns()[connId];
+    try {
+      if (isLinked) {
+        await invoke("unlink_connection_from_workspace", { wsPath: props.workspacePath, connId });
+      } else {
+        await invoke("link_connection_to_workspace", { wsPath: props.workspacePath, connId });
+      }
+      loadWorkspaceLinks();
+    } catch (err) {
+      alert("操作失败: " + err);
+    }
+  };
+
+  const handleSaveConnection = async () => {
+    const name = formName().trim();
+    if (!name) {
+      alert("请输入连接名称");
+      return;
+    }
+    const host = formHost().trim();
+    if (!host) {
+      alert("请输入主机地址");
+      return;
+    }
+    const databaseName = formDatabase().trim();
+    if (!databaseName) {
+      alert("请输入数据库名");
+      return;
+    }
+    const username = formUsername().trim();
+    if (!username) {
+      alert("请输入用户名");
+      return;
+    }
+
+    const connData: DbConnection = {
+      id: editingConn()?.id || "conn_" + Date.now(),
+      name,
+      dbType: formType(),
+      host,
+      port: formPort(),
+      databaseName,
+      username,
+      password: formPassword(),
+      sslMode: formSslMode(),
+      createdAt: editingConn()?.createdAt || Date.now(),
+    };
+
+    try {
+      await invoke("upsert_db_connection", { config: connData });
+      setEditingConn(null);
+      loadConnections();
+    } catch (err) {
+      alert("保存失败: " + err);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    const name = formName().trim();
+    const host = formHost().trim();
+    const databaseName = formDatabase().trim();
+    const username = formUsername().trim();
+
+    if (!name || !host || !databaseName || !username) {
+      alert("请填写基础连接信息以测试");
+      return;
+    }
+
+    const connData: DbConnection = {
+      id: editingConn()?.id || "test_temp",
+      name,
+      dbType: formType(),
+      host,
+      port: formPort(),
+      databaseName,
+      username,
+      password: formPassword(),
+      sslMode: formSslMode(),
+      createdAt: Date.now(),
+    };
+
+    setTestStatus({ status: "testing" });
+    try {
+      await invoke("test_db_connection", { config: connData });
+      setTestStatus({ status: "success", msg: "连接成功！" });
+    } catch (err) {
+      setTestStatus({ status: "error", msg: "测试失败: " + err });
+    }
+  };
+
+  const handleDeleteConnection = async (id: string) => {
+    if (!confirm("确定要删除该数据库连接吗？这将从所有关联的项目中解绑！")) {
+      return;
+    }
+    try {
+      await invoke("delete_db_connection", { id });
+      loadConnections();
+    } catch (err) {
+      alert("删除失败: " + err);
+    }
+  };
+
+  const startEditConnection = (c: DbConnection) => {
+    setEditingConn(c);
+    setFormName(c.name);
+    setFormType(c.dbType);
+    setFormHost(c.host);
+    setFormPort(c.port);
+    setFormDatabase(c.databaseName);
+    setFormUsername(c.username);
+    setFormPassword(c.password || "");
+    setFormSslMode(c.sslMode || "disable");
+    setShowPassword(false);
+    setTestStatus({ status: "idle" });
+  };
+
+  const startAddConnection = () => {
+    setEditingConn({
+      id: "",
+      name: "",
+      dbType: "postgres",
+      host: "localhost",
+      port: 5432,
+      databaseName: "",
+      username: "",
+    });
+    setFormName("");
+    setFormType("postgres");
+    setFormHost("localhost");
+    setFormPort(5432);
+    setFormDatabase("");
+    setFormUsername("");
+    setFormPassword("");
+    setFormSslMode("disable");
+    setShowPassword(false);
+    setTestStatus({ status: "idle" });
+  };
+
+    onMount(async () => {
     try {
       const json = await invoke<string>("load_settings_json");
       if (json && json !== "{}") {
@@ -136,6 +318,8 @@ export default function SettingsPage(props: {
     } catch (err) {
       console.error("Failed to load settings:", err);
     }
+    loadConnections();
+    loadWorkspaceLinks();
   });
 
   // Save settings helper
@@ -343,6 +527,21 @@ export default function SettingsPage(props: {
 
           <button 
             class="ss-nav-item" 
+            classList={{ active: activeTab() === "databases" }}
+            onClick={() => setActiveTab("databases")}
+          >
+            <span class="ss-nav-icon">
+              <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <ellipse cx="8" cy="4.5" rx="5" ry="2" />
+                <path d="M3 4.5v3.5c0 1.1 2.24 2 5 2s5-.9 5-2v-3.5" />
+                <path d="M3 8v3.5c0 1.1 2.24 2 5 2s5-.9 5-2v-3.5" />
+              </svg>
+            </span>
+            <span>{t("settingsDatabases")}</span>
+          </button>
+
+          <button 
+            class="ss-nav-item" 
             classList={{ active: activeTab() === "codePreview" }}
             onClick={() => setActiveTab("codePreview")}
           >
@@ -488,6 +687,337 @@ export default function SettingsPage(props: {
         {/* Settings Main Content Area */}
         <main class="settings-content">
         
+        {/* Tab: Databases Settings (数据库) */}
+        <Show when={activeTab() === "databases"}>
+          <div class="settings-view-header">
+            <h2>{t("settingsDatabases")}</h2>
+            <p class="settings-view-subtitle">{t("settingsDatabasesDesc")}</p>
+          </div>
+
+          <Show when={!editingConn()} fallback={
+            <div class="settings-section-card" style="padding: 24px; display: flex; flex-direction: column; gap: 20px; margin-top: 16px; max-width: 680px; border-radius: 12px; background: var(--bg-surface); border: 1px solid var(--border-strong); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);">
+              
+              {/* Header */}
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-faint); padding-bottom: 14px;">
+                <h3 style="margin: 0; font-size: 15px; font-weight: 600; color: var(--text-primary);">
+                  {editingConn()?.id ? "编辑数据库连接" : "配置新的数据库连接"}
+                </h3>
+                <button class="ss-btn ss-btn-secondary" style="padding: 4px 12px; font-size: 12.5px; border-radius: 6px;" onClick={() => setEditingConn(null)}>
+                  取消
+                </button>
+              </div>
+
+              {/* Database Type Card Selector */}
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                <label style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">数据库类型</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                  {/* PostgreSQL Card */}
+                  <div 
+                    onClick={() => {
+                      setFormType("postgres");
+                      if (formPort() === 3306) setFormPort(5432);
+                    }}
+                    style={`display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-radius: 10px; border: 2px solid ${formType() === "postgres" ? "var(--brand)" : "var(--border-strong)"}; background: ${formType() === "postgres" ? "rgba(80, 160, 255, 0.06)" : "rgba(255, 255, 255, 0.015)"}; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: ${formType() === "postgres" ? "0 4px 12px rgba(80, 160, 255, 0.1)" : "none"}`}
+                    class="db-type-card"
+                  >
+                    <div style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; background: rgba(80, 160, 255, 0.12); color: var(--brand); border-radius: 8px; flex-shrink: 0;">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                        <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path>
+                      </svg>
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                      <div style="font-weight: 600; font-size: 13.5px; color: var(--text-primary);">PostgreSQL</div>
+                      <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">适用于高并发与复杂查询</div>
+                    </div>
+                    <Show when={formType() === "postgres"}>
+                      <span style="color: var(--brand); font-size: 15px; font-weight: bold; margin-left: auto;">✓</span>
+                    </Show>
+                  </div>
+
+                  {/* MySQL Card */}
+                  <div 
+                    onClick={() => {
+                      setFormType("mysql");
+                      if (formPort() === 5432) setFormPort(3306);
+                    }}
+                    style={`display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-radius: 10px; border: 2px solid ${formType() === "mysql" ? "var(--brand)" : "var(--border-strong)"}; background: ${formType() === "mysql" ? "rgba(255, 140, 0, 0.06)" : "rgba(255, 255, 255, 0.015)"}; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: ${formType() === "mysql" ? "0 4px 12px rgba(255, 140, 0, 0.1)" : "none"}`}
+                    class="db-type-card"
+                  >
+                    <div style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; background: rgba(255, 140, 0, 0.12); color: #ffa500; border-radius: 8px; flex-shrink: 0;">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                        <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path>
+                      </svg>
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                      <div style="font-weight: 600; font-size: 13.5px; color: var(--text-primary);">MySQL</div>
+                      <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">适用于主流业务数据分析</div>
+                    </div>
+                    <Show when={formType() === "mysql"}>
+                      <span style="color: var(--brand); font-size: 15px; font-weight: bold; margin-left: auto;">✓</span>
+                    </Show>
+                  </div>
+                </div>
+              </div>
+
+              {/* Group 1: Connection & Network */}
+              <div style="display: flex; flex-direction: column; gap: 14px; border: 1px solid var(--border-strong); padding: 16px; border-radius: 10px; background: rgba(255, 255, 255, 0.005);">
+                <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 4px;">连接与网络配置</div>
+                
+                <div style="display: grid; grid-template-columns: 2fr 3fr 1fr; gap: 12px;">
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 11.5px; color: var(--text-dim);">连接名称</label>
+                    <input
+                      type="text"
+                      class="ss-input"
+                      value={formName()}
+                      placeholder="例如: neon_prod"
+                      onInput={(e) => setFormName(e.currentTarget.value)}
+                    />
+                  </div>
+
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 11.5px; color: var(--text-dim);">主机地址 (Host)</label>
+                    <input
+                      type="text"
+                      class="ss-input"
+                      value={formHost()}
+                      placeholder="主机域名 或 IP"
+                      onInput={(e) => setFormHost(e.currentTarget.value)}
+                    />
+                  </div>
+
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 11.5px; color: var(--text-dim);">端口</label>
+                    <input
+                      type="number"
+                      class="ss-input"
+                      value={formPort()}
+                      onInput={(e) => setFormPort(parseInt(e.currentTarget.value) || 0)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Group 2: Auth & DB info */}
+              <div style="display: flex; flex-direction: column; gap: 14px; border: 1px solid var(--border-strong); padding: 16px; border-radius: 10px; background: rgba(255, 255, 255, 0.005);">
+                <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 4px;">身份验证与权限</div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 11.5px; color: var(--text-dim);">数据库名 (Database)</label>
+                    <input
+                      type="text"
+                      class="ss-input"
+                      value={formDatabase()}
+                      placeholder="例如: neondb"
+                      onInput={(e) => setFormDatabase(e.currentTarget.value)}
+                    />
+                  </div>
+
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 11.5px; color: var(--text-dim);">用户名 (Username)</label>
+                    <input
+                      type="text"
+                      class="ss-input"
+                      value={formUsername()}
+                      placeholder="数据库用户名"
+                      onInput={(e) => setFormUsername(e.currentTarget.value)}
+                    />
+                  </div>
+                </div>
+
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  <label style="font-size: 11.5px; color: var(--text-dim);">密码 (Password)</label>
+                  <div style="position: relative; display: flex; align-items: center; width: 100%;">
+                    <input
+                      type={showPassword() ? "text" : "password"}
+                      class="ss-input"
+                      style="padding-right: 40px; width: 100%;"
+                      value={formPassword()}
+                      placeholder="请输入数据库连接密码"
+                      onInput={(e) => setFormPassword(e.currentTarget.value)}
+                    />
+                    <button 
+                      type="button" 
+                      onClick={() => setShowPassword(!showPassword())}
+                      style="position: absolute; right: 8px; background: transparent; border: none; cursor: pointer; color: var(--text-dim); display: flex; align-items: center; justify-content: center; padding: 6px;"
+                    >
+                      <Show when={showPassword()} fallback={
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px; opacity: 0.6;">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                      }>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px; opacity: 0.6;">
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                          <line x1="1" y1="1" x2="23" y2="23"/>
+                        </svg>
+                      </Show>
+                    </button>
+                  </div>
+                </div>
+
+                {/* SSL Mode (Postgres Only) */}
+                <Show when={formType() === "postgres"}>
+                  <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                      <label style="font-size: 11.5px; color: var(--text-dim);">SSL 模式</label>
+                      <span style="font-size: 10px; color: var(--text-dim); opacity: 0.7;">💡 云数据库（如 Neon, AWS）通常强制要求 require</span>
+                    </div>
+                    <Select
+                      options={[
+                        { label: "disable", value: "disable" },
+                        { label: "require", value: "require" },
+                        { label: "verify-ca", value: "verify-ca" },
+                        { label: "verify-full", value: "verify-full" }
+                      ]}
+                      value={formSslMode()}
+                      onChange={(v) => setFormSslMode(v)}
+                    />
+                  </div>
+                </Show>
+              </div>
+
+              {/* Bottom Test & Action Footer */}
+              <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 6px; padding-top: 18px; border-top: 1px solid var(--border-faint);">
+                <Show when={testStatus().status !== "idle"}>
+                  <div 
+                    style={`padding: 12px 16px; border-radius: 8px; font-size: 12.5px; line-height: 1.5; border: 1px solid ${
+                      testStatus().status === "success" ? "rgba(80, 200, 120, 0.3)" : 
+                      testStatus().status === "error" ? "rgba(255, 80, 80, 0.3)" : 
+                      "var(--border-strong)"
+                    }; background: ${
+                      testStatus().status === "success" ? "rgba(80, 200, 120, 0.06)" : 
+                      testStatus().status === "error" ? "rgba(255, 80, 80, 0.06)" : 
+                      "rgba(255, 255, 255, 0.02)"
+                    }; color: ${
+                      testStatus().status === "success" ? "var(--text-success)" : 
+                      testStatus().status === "error" ? "var(--text-danger)" : 
+                      "var(--text-dim)"
+                    }; overflow-wrap: break-word; word-break: break-all;`}
+                  >
+                    <div style="display: flex; gap: 8px; align-items: flex-start;">
+                      <span style="font-weight: bold; flex-shrink: 0;">
+                        {testStatus().status === "testing" ? "🌀" : 
+                         testStatus().status === "success" ? "✓" : "✕"}
+                      </span>
+                      <div>
+                        {testStatus().status === "testing" ? "正在尝试测试建立数据库网络连接，请稍候..." : testStatus().msg}
+                      </div>
+                    </div>
+                  </div>
+                </Show>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
+                  <button 
+                    class="ss-btn ss-btn-secondary" 
+                    style="padding: 6px 16px; font-size: 13px;"
+                    onClick={handleTestConnection} 
+                    disabled={testStatus().status === "testing"}
+                  >
+                    {testStatus().status === "testing" ? "连接中..." : "测试连接"}
+                  </button>
+                  <button 
+                    class="ss-btn" 
+                    style="padding: 6px 20px; font-size: 13px; font-weight: 500;"
+                    onClick={handleSaveConnection}
+                  >
+                    保存并应用
+                  </button>
+                </div>
+              </div>
+            </div>
+          }>
+            <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 14px; max-width: 680px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">已保存的外部连接</div>
+                <button class="ss-btn" style="padding: 5px 12px; font-size: 12.5px; font-weight: 500;" onClick={startAddConnection}>
+                  + 新建连接
+                </button>
+              </div>
+
+              <Show when={connections().length > 0} fallback={
+                <div style="padding: 48px 24px; text-align: center; color: var(--text-dim); border: 1px dashed var(--border-strong); border-radius: 10px; background: rgba(255,255,255,0.015); font-style: italic; font-size: 12.5px; display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 32px; height: 32px; opacity: 0.5;">
+                    <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                    <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path>
+                  </svg>
+                  <span>暂无已配置的外部数据库连接。点击右上角“新建连接”开始。</span>
+                </div>
+              }>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                  <For each={connections()}>
+                    {(c) => (
+                      <div 
+                        style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border: 1px solid var(--border-strong); border-radius: 10px; background: rgba(255,255,255,0.015); transition: transform 0.2s ease, background 0.2s ease; hover: background: rgba(255,255,255,0.03);"
+                        class="db-connection-item-row"
+                      >
+                        <div style="display: flex; align-items: center; gap: 14px;">
+                          <span style={`display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : '#ffa500'}; border-radius: 8px; flex-shrink: 0;`}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                              <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                              <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path>
+                            </svg>
+                          </span>
+                          <div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                              <span style="font-weight: 600; font-size: 14px; color: var(--text-primary);">{c.name}</span>
+                              <span style={`font-size: 10px; font-weight: bold; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : '#ffa500'}`}>{c.dbType}</span>
+                            </div>
+                            <div style="font-size: 12px; color: var(--text-dim); margin-top: 4px; font-family: var(--font-mono, monospace); word-break: break-all;">
+                              {c.username}@{c.host}:{c.port}/{c.databaseName}
+                            </div>
+                          </div>
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0; margin-left: 12px;">
+                          <Show when={props.workspacePath}>
+                            <button 
+                              class="ss-btn" 
+                              classList={{ "ss-btn-secondary": !linkedConns()[c.id] }}
+                              style={`padding: 5px 12px; font-size: 12px; font-weight: 500; min-width: 90px; border-radius: 6px; transition: all 0.2s ease; ${linkedConns()[c.id] ? 'background: var(--brand); color: white; border-color: var(--brand);' : ''}`} 
+                              onClick={() => handleToggleLink(c.id)}
+                            >
+                              {linkedConns()[c.id] ? "已关联项目" : "关联项目"}
+                            </button>
+                          </Show>
+                          <button 
+                            class="ss-btn ss-btn-secondary" 
+                            style="padding: 6px 10px; font-size: 12px; border-radius: 6px;" 
+                            onClick={() => startEditConnection(c)}
+                            title="编辑"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; opacity: 0.85;">
+                              <path d="M12 20h9"></path>
+                              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                            </svg>
+                          </button>
+                          <button 
+                            class="ss-btn ss-btn-danger" 
+                            style="padding: 6px 10px; font-size: 12px; border-radius: 6px; background: rgba(255, 80, 80, 0.08); color: var(--text-danger); border-color: rgba(255, 80, 80, 0.15);" 
+                            onClick={() => handleDeleteConnection(c.id)}
+                            title="删除"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                              <polyline points="3 6 5 6 21 6"></polyline>
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </div>
+          </Show>
+        </Show>
+
         {/* Tab 1: General Settings (常规) */}
         <Show when={activeTab() === "general"}>
           <div class="settings-view-header">
