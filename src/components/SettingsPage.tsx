@@ -771,7 +771,7 @@ export default function SettingsPage(props: {
                       setFormType("postgres");
                       if (formPort() === 3306) setFormPort(5432);
                     }}
-                    style={`display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-radius: 10px; border: 2px solid ${formType() === "postgres" ? "var(--brand)" : "var(--border-strong)"}; background: ${formType() === "postgres" ? "rgba(80, 160, 255, 0.06)" : "rgba(255, 255, 255, 0.015)"}; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: ${formType() === "postgres" ? "0 4px 12px rgba(80, 160, 255, 0.1)" : "none"}`}
+                    style={`display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-radius: 10px; border: 2px solid transparent; background: ${formType() === "postgres" ? "rgba(80, 160, 255, 0.06)" : "rgba(255, 255, 255, 0.015)"}; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: ${formType() === "postgres" ? "0 4px 12px rgba(80, 160, 255, 0.1)" : "none"}`}
                     class="db-type-card"
                   >
                     <div style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; background: rgba(80, 160, 255, 0.12); color: var(--brand); border-radius: 8px; flex-shrink: 0;">
@@ -800,7 +800,7 @@ export default function SettingsPage(props: {
                       setFormType("mysql");
                       if (formPort() === 5432) setFormPort(3306);
                     }}
-                    style={`display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-radius: 10px; border: 2px solid ${formType() === "mysql" ? "#ffa500" : "var(--border-strong)"}; background: ${formType() === "mysql" ? "rgba(255, 140, 0, 0.06)" : "rgba(255, 255, 255, 0.015)"}; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: ${formType() === "mysql" ? "0 4px 12px rgba(255, 140, 0, 0.1)" : "none"}`}
+                    style={`display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-radius: 10px; border: 2px solid transparent; background: ${formType() === "mysql" ? "rgba(255, 140, 0, 0.06)" : "rgba(255, 255, 255, 0.015)"}; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: ${formType() === "mysql" ? "0 4px 12px rgba(255, 140, 0, 0.1)" : "none"}`}
                     class="db-type-card"
                   >
                     <div style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; background: rgba(255, 140, 0, 0.12); color: #ffa500; border-radius: 8px; flex-shrink: 0;">
