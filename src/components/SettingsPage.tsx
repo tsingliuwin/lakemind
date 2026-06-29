@@ -961,7 +961,7 @@ export default function SettingsPage(props: {
                       ]}
                       value={formSslMode()}
                       onChange={(v) => setFormSslMode(v)}
-                      width="100%"
+                      width="200px"
                     />
                   </div>
                 </Show>
