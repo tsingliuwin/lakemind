@@ -865,7 +865,11 @@ export default function LeftNav(props: {
                                                 {t("addBtn")}
                                               </button>
                                             }>
-                                              <span style="color: var(--text-success); font-size: 10px; padding-right: 4px;">{t("addedLabel")}</span>
+                                              <span style="color: var(--text-success); display: inline-flex; padding-right: 4px;" title={t("addedLabel")}>
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
+                                                  <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
+                                              </span>
                                             </Show>
                                           </div>
                                         );
@@ -911,7 +915,11 @@ export default function LeftNav(props: {
                                                             {t("addBtn")}
                                                           </button>
                                                         }>
-                                                          <span style="color: var(--text-success); font-size: 10px; padding-right: 4px;">{t("addedLabel")}</span>
+                                                          <span style="color: var(--text-success); display: inline-flex; padding-right: 4px;" title={t("addedLabel")}>
+                                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
+                                                              <polyline points="20 6 9 17 4 12"></polyline>
+                                                            </svg>
+                                                          </span>
                                                         </Show>
                                                       </div>
                                                     );

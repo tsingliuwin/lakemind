@@ -156,7 +156,7 @@ const translations: Record<Language, Record<string, string>> = {
     externalData: "数据库",
     noTables: "库中暂无数据表",
     addBtn: "添加",
-    addedLabel: "✓ 已加",
+    addedLabel: "已加",
     noLinkedConns: "无关联数据库，可去",
     settingsPageLink: "设置页关联",
   },
@@ -311,7 +311,7 @@ const translations: Record<Language, Record<string, string>> = {
     externalData: "Databases",
     noTables: "No tables in database",
     addBtn: "Add",
-    addedLabel: "✓ Added",
+    addedLabel: "Added",
     noLinkedConns: "No linked databases, configure in ",
     settingsPageLink: "Settings",
   }
