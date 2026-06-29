@@ -289,21 +289,9 @@ export default function LeftNav(props: {
   // workspace switch so switching into a project never starts collapsed.
   const [wsCollapsed, setWsCollapsed] = createSignal(false);
 
-  // True only when all subsections are open. Drives the collapse/expand
-  // toggle button next to the workspace node (chevron direction + tooltip).
-  const allSectionsExpanded = createMemo(
-    () => tasksSectionExpanded() && filesSectionExpanded() && dbSectionExpanded() && dataSectionExpanded(),
-  );
-
-  // Toggle all subsections at once. When any is collapsed, expand all;
-  // otherwise collapse all. This is the single hover button on a workspace row.
-  const toggleAllSections = () => {
-    const open = allSectionsExpanded();
-    setTasksSectionExpanded(!open);
-    setFilesSectionExpanded(!open);
-    setDbSectionExpanded(!open);
-    setDataSectionExpanded(!open);
-  };
+  // Subsections expanded states are toggled individually by clicking each
+  // section header. Whole-subtree collapse is driven by wsCollapsed, toggled
+  // by clicking the workspace row itself.
 
   // Automatically load root directory contents when workspace changes.
   // Also reset the workspace-level collapse so a freshly-switched project is open.
@@ -549,7 +537,16 @@ export default function LeftNav(props: {
                   class="tree-group-label workspace-root-node"
                   classList={{ active: isActive() }}
                   title={ws.path}
-                  onClick={() => props.onSelectWorkspace?.(ws.path)}
+                  onClick={() => {
+                    // Clicking a workspace row: if it's not the active one, switch
+                    // into it (the workspace-change effect resets collapse so it
+                    // opens expanded); if it's already active, toggle its subtree.
+                    if (isActive()) {
+                      setWsCollapsed(!wsCollapsed());
+                    } else {
+                      props.onSelectWorkspace?.(ws.path);
+                    }
+                  }}
                   style={{
                     display: "flex", 
                     "align-items": "center", 
@@ -591,31 +588,9 @@ export default function LeftNav(props: {
                     </Show>
                   </span>
 
-                  {/* Toggle expand/collapse all subsections (任务/文件/数据) and
-                      remove this workspace. Project-level collapse is handled by
-                      the "收起全部" button in the workspace section header. */}
+                  {/* Remove this workspace. Subtree collapse/expand is now driven
+                      by clicking the workspace row itself (wsCollapsed). */}
                   <div class="ws-hover-actions">
-                    <button
-                      class="ws-action-icon-btn"
-                      title={allSectionsExpanded() ? "全部折叠" : "全部展开"}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleAllSections();
-                      }}
-                    >
-                      <Show
-                        when={allSectionsExpanded()}
-                        fallback={
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
-                            <polyline points="6 9 12 15 18 9"></polyline>
-                          </svg>
-                        }
-                      >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
-                          <polyline points="18 15 12 9 6 15"></polyline>
-                        </svg>
-                      </Show>
-                    </button>
                     <button
                       class="ws-action-icon-btn remove-ws-btn"
                       title="移除工作区"
