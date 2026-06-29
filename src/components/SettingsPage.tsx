@@ -888,7 +888,7 @@ export default function SettingsPage(props: {
               </div>
 
               {/* Group 2: Auth & DB info */}
-              <div style="display: flex; flex-direction: column; gap: 14px; min-height: 210px; border-top: 1px solid var(--border-faint); padding-top: 20px; margin-top: 6px;">
+              <div style="display: flex; flex-direction: column; gap: 14px; min-height: 166px; border-top: 1px solid var(--border-faint); padding-top: 20px; margin-top: 6px;">
                 <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 4px;">{t("authPermissions")}</div>
 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
@@ -915,56 +915,58 @@ export default function SettingsPage(props: {
                   </div>
                 </div>
 
-                <div style="display: flex; flex-direction: column; gap: 6px;">
-                  <label style="font-size: 11.5px; color: var(--text-dim);">{t("passwordLabel")}</label>
-                  <div style="position: relative; display: flex; align-items: center; width: 100%;">
-                    <input
-                      type={showPassword() ? "text" : "password"}
-                      class="sp-input"
-                      style="padding-right: 40px; width: 100%;"
-                      value={formPassword()}
-                      placeholder="••••••••"
-                      onInput={(e) => setFormPassword(e.currentTarget.value)}
-                    />
-                    <button 
-                      type="button" 
-                      onClick={() => setShowPassword(!showPassword())}
-                      style="position: absolute; right: 8px; background: transparent; border: none; cursor: pointer; color: var(--text-dim); display: flex; align-items: center; justify-content: center; padding: 6px;"
-                    >
-                      <Show when={showPassword()} fallback={
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px; opacity: 0.6;">
-                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                          <circle cx="12" cy="12" r="3"/>
-                        </svg>
-                      }>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px; opacity: 0.6;">
-                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-                          <line x1="1" y1="1" x2="23" y2="23"/>
-                        </svg>
-                      </Show>
-                    </button>
-                  </div>
-                </div>
-
-                {/* SSL Mode (Postgres Only) */}
-                <Show when={formType() === "postgres"}>
-                  <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
-                    <div style="display: flex; align-items: center;">
-                      <label style="font-size: 11.5px; color: var(--text-dim);">{t("sslModeLabel")}</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: flex-end;">
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 11.5px; color: var(--text-dim);">{t("passwordLabel")}</label>
+                    <div style="position: relative; display: flex; align-items: center; width: 100%;">
+                      <input
+                        type={showPassword() ? "text" : "password"}
+                        class="sp-input"
+                        style="padding-right: 40px; width: 100%;"
+                        value={formPassword()}
+                        placeholder="••••••••"
+                        onInput={(e) => setFormPassword(e.currentTarget.value)}
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => setShowPassword(!showPassword())}
+                        style="position: absolute; right: 8px; background: transparent; border: none; cursor: pointer; color: var(--text-dim); display: flex; align-items: center; justify-content: center; padding: 6px;"
+                      >
+                        <Show when={showPassword()} fallback={
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px; opacity: 0.6;">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                          </svg>
+                        }>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px; opacity: 0.6;">
+                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                            <line x1="1" y1="1" x2="23" y2="23"/>
+                          </svg>
+                        </Show>
+                      </button>
                     </div>
-                    <Select
-                      options={[
-                        { label: "disable", value: "disable" },
-                        { label: "require", value: "require" },
-                        { label: "verify-ca", value: "verify-ca" },
-                        { label: "verify-full", value: "verify-full" }
-                      ]}
-                      value={formSslMode()}
-                      onChange={(v) => setFormSslMode(v)}
-                      width="200px"
-                    />
                   </div>
-                </Show>
+
+                  {/* SSL Mode (Postgres Only) */}
+                  <Show when={formType() === "postgres"}>
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <div style="display: flex; align-items: center;">
+                        <label style="font-size: 11.5px; color: var(--text-dim);">{t("sslModeLabel")}</label>
+                      </div>
+                      <Select
+                        options={[
+                          { label: "disable", value: "disable" },
+                          { label: "require", value: "require" },
+                          { label: "verify-ca", value: "verify-ca" },
+                          { label: "verify-full", value: "verify-full" }
+                        ]}
+                        value={formSslMode()}
+                        onChange={(v) => setFormSslMode(v)}
+                        width="100%"
+                      />
+                    </div>
+                  </Show>
+                </div>
               </div>
 
               {/* Bottom Test & Action Footer */}
