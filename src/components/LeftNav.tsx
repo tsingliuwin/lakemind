@@ -1004,17 +1004,20 @@ export default function LeftNav(props: {
                             <For each={group[1]}>
                               {(t) => {
                                 // Hover text for an external-database view: reconstruct the
-                                // human-friendly origin (label = "<conn>.<schema>.<table>")
-                                // and surface the live-read caveat. Falls back to the generic
-                                // last-path-segment tip for local tables.
+                                // human-friendly origin (label = "<conn>.<schema>.<table>").
+                                // Falls back to the generic last-path-segment tip for local tables.
                                 const extTitle = () => {
                                   const m = t.path.match(/^db:\/\/[^/]+\/([^/]*)\/(.*)$/);
                                   const schema = m?.[1] ?? "";
                                   const table = m?.[2] ?? t.name;
                                   const dbKind = t.kind === "mysql" ? "MySQL" : "PostgreSQL";
-                                  const origin = schema ? `${dbKind} · ${schema}.${table}` : `${dbKind} · ${table}`;
+                                  // Connection name = label with the trailing "<schema>.<table>"
+                                  // stripped (handles connection names that contain dots).
+                                  const tail = schema ? `.${schema}.${table}` : `.${table}`;
+                                  const conn = t.label.endsWith(tail) ? t.label.slice(0, -tail.length) : t.label;
+                                  const origin = schema ? `${dbKind} · ${conn} · ${schema}.${table}` : `${dbKind} · ${conn} · ${table}`;
                                   const rows = t.rowCountEstimate != null ? `\n约 ${formatCount(t.rowCountEstimate!)} 行` : "";
-                                  return `${origin}（视图，实时读取，零拷贝）${rows}`;
+                                  return `${origin}${rows}`;
                                 };
                                 return (
                                 <button
