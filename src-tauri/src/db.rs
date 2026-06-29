@@ -40,10 +40,21 @@ pub fn get_db_path() -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// Establish connection to sqlite database
+/// Establish connection to sqlite database.
+///
+/// Each call opens a fresh connection (the app fans out concurrent reads/writes
+/// from many commands). Two pragmas make that safe under concurrency:
+/// - `busy_timeout = 5000`: wait up to 5s for a lock instead of failing
+///   instantly with SQLITE_BUSY when two connections race for the write lock.
+/// - `journal_mode = WAL`: readers never block writers (and vice-versa), so
+///   concurrent commands don't serialize on the DB file.
 pub fn get_db_conn() -> Result<Connection, String> {
     let db_path = get_db_path()?;
-    Connection::open(&db_path).map_err(|e| format!("Failed to open SQLite database: {e}"))
+    let conn = Connection::open(&db_path)
+        .map_err(|e| format!("Failed to open SQLite database: {e}"))?;
+    let _ = conn.pragma_update(None, "busy_timeout", 5000);
+    let _ = conn.pragma_update(None, "journal_mode", "WAL");
+    Ok(conn)
 }
 
 // ---------------------------------------------------------------------------
@@ -492,6 +503,24 @@ pub fn init_global_db() -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to create workspace_connections table: {e}"))?;
 
+    // db_connection_tables: cached list of tables/views per external connection.
+    // Listing tables from a remote (e.g. Neon postgres) via DuckDB's catalog
+    // scans the server's system tables and takes ~2s per query, so we cache the
+    // result locally and only re-hit the server on explicit refresh / first use.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS db_connection_tables (
+            connection_id  TEXT NOT NULL,
+            schema_name    TEXT NOT NULL,
+            table_name     TEXT NOT NULL,
+            kind           TEXT NOT NULL,
+            cached_at      INTEGER NOT NULL,
+            PRIMARY KEY (connection_id, schema_name, table_name),
+            FOREIGN KEY(connection_id) REFERENCES db_connections(id) ON DELETE CASCADE
+        )",
+        [],
+    )
+    .map_err(|e| format!("Failed to create db_connection_tables table: {e}"))?;
+
     // Seed the default workspace on first run.
     let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM workspaces", [], |row| row.get(0))
@@ -659,43 +688,141 @@ pub fn list_workspace_connections(conn: &Connection, ws_path: &str) -> Result<Ve
     Ok(out)
 }
 
+/// A cached table/view entry for an external connection.
+#[derive(Debug, Clone)]
+pub struct CachedDbTable {
+    pub schema: String,
+    pub name: String,
+    pub kind: String, // "table" | "view"
+}
+
+/// Replace the cached table list for `connection_id` with `items` (delete-then-
+/// insert in one transaction so callers never see a partial cache).
+pub fn save_db_connection_tables(
+    conn: &mut Connection,
+    connection_id: &str,
+    items: &[CachedDbTable],
+) -> Result<(), String> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    // rusqlite transaction: commits on Ok, rolls back on Err automatically.
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM db_connection_tables WHERE connection_id = ?",
+        [connection_id],
+    )
+    .map_err(|e| e.to_string())?;
+    for it in items {
+        tx.execute(
+            "INSERT OR IGNORE INTO db_connection_tables (connection_id, schema_name, table_name, kind, cached_at)
+             VALUES (?, ?, ?, ?, ?)",
+            rusqlite::params![connection_id, it.schema, it.name, it.kind, now],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Read the cached table list for `connection_id`. Empty if never cached.
+pub fn list_db_connection_tables_cache(
+    conn: &Connection,
+    connection_id: &str,
+) -> Result<Vec<CachedDbTable>, String> {
+    let mut stmt = conn
+        .prepare("SELECT schema_name, table_name, kind FROM db_connection_tables WHERE connection_id = ? ORDER BY schema_name, table_name")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([connection_id], |row| {
+            Ok(CachedDbTable {
+                schema: row.get(0)?,
+                name: row.get(1)?,
+                kind: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
+/// Drop the cached table list for `connection_id` (e.g. when the connection is
+/// unlinked, so a future re-enable doesn't show a stale list).
+pub fn clear_db_connection_tables_cache(conn: &Connection, connection_id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM db_connection_tables WHERE connection_id = ?",
+        [connection_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// DuckDB identifier-safe alias for an attached connection: `db_` + the
+/// connection name reduced to `[A-Za-z0-9_]`. Keep this in sync with
+/// `commands::workspace_attach_alias`.
+pub fn workspace_attach_alias(name: &str) -> String {
+    let safe = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect::<String>();
+    format!("db_{safe}")
+}
+
+/// ATTACH a single external database connection to a DuckDB session under the
+/// alias `db_{safe_name}`. Loads (INSTALL/LOAD) the driver first.
+pub fn attach_one(conn: &duckdb::Connection, r: &DbConnectionRecord) -> Result<(), String> {
+    let install_sql = format!("INSTALL {};", r.db_type);
+    let load_sql = format!("LOAD {};", r.db_type);
+    let _ = conn.execute(&install_sql, []);
+    conn.execute(&load_sql, []).map_err(|e| format!("加载驱动失败: {e}"))?;
+
+    let conn_name = workspace_attach_alias(&r.name);
+
+    let attach_sql = if r.db_type == "postgres" {
+        let mut conn_str = format!(
+            "host={} port={} dbname={} user={} password={}",
+            r.host, r.port, r.database_name, r.username, r.password
+        );
+        if r.ssl_mode != "disable" {
+            conn_str.push_str(&format!(" sslmode={}", r.ssl_mode));
+        }
+        format!("ATTACH '{}' AS {conn_name} (TYPE postgres);", conn_str)
+    } else {
+        format!(
+            "ATTACH 'host={} port={} database={} user={} password={}' AS {conn_name} (TYPE mysql);",
+            r.host, r.port, r.database_name, r.username, r.password
+        )
+    };
+
+    conn.execute(&attach_sql, [])
+        .map(|e| {
+            println!("Auto-attached database connection: {} AS {}", r.name, conn_name);
+            e
+        })
+        .map_err(|e| format!("连接数据库失败: {e}"))?;
+    Ok(())
+}
+
+/// DETACH a single external database connection (by name) from a DuckDB session.
+/// Returns Err if the name isn't attached — callers may ignore that case.
+pub fn detach_one(conn: &duckdb::Connection, name: &str) -> Result<(), String> {
+    let conn_name = workspace_attach_alias(name);
+    conn.execute(&format!("DETACH {conn_name};"), [])
+        .map_err(|e| e.to_string())?;
+    println!("Detached database connection: {} AS {}", name, conn_name);
+    Ok(())
+}
+
 pub fn attach_workspace_connections(conn: &duckdb::Connection, ws_path: &str) -> Result<(), String> {
     let sqlite = get_db_conn()?;
     let linked = list_workspace_connections(&sqlite, ws_path)?;
     for r in linked {
-        let install_sql = format!("INSTALL {};", r.db_type);
-        let load_sql = format!("LOAD {};", r.db_type);
-        let _ = conn.execute(&install_sql, []);
-        if let Err(e) = conn.execute(&load_sql, []) {
-            eprintln!("Auto-attach warning: failed to LOAD extension for connection {}: {e}", r.name);
-            continue;
-        }
-
-        let safe_name = r.name.chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
-            .collect::<String>();
-        let conn_name = format!("db_{safe_name}");
-
-        let attach_sql = if r.db_type == "postgres" {
-            let mut conn_str = format!(
-                "host={} port={} dbname={} user={} password={}",
-                r.host, r.port, r.database_name, r.username, r.password
-            );
-            if r.ssl_mode != "disable" {
-                conn_str.push_str(&format!(" sslmode={}", r.ssl_mode));
-            }
-            format!("ATTACH '{}' AS {conn_name} (TYPE postgres);", conn_str)
-        } else {
-            format!(
-                "ATTACH 'host={} port={} database={} user={} password={}' AS {conn_name} (TYPE mysql);",
-                r.host, r.port, r.database_name, r.username, r.password
-            )
-        };
-
-        if let Err(e) = conn.execute(&attach_sql, []) {
+        if let Err(e) = attach_one(conn, &r) {
             eprintln!("Auto-attach warning: failed to ATTACH connection {}: {e}", r.name);
-        } else {
-            println!("Auto-attached database connection: {} AS {}", r.name, conn_name);
         }
     }
     Ok(())
