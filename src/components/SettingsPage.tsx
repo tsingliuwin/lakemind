@@ -983,12 +983,15 @@ export default function SettingsPage(props: {
                         <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0; margin-left: 12px;">
                           <Show when={props.workspacePath}>
                             <button 
-                              class="ss-btn" 
-                              classList={{ "ss-btn-secondary": !linkedConns()[c.id] }}
-                              style={`padding: 5px 12px; font-size: 12px; font-weight: 500; min-width: 90px; border-radius: 6px; transition: all 0.2s ease; ${linkedConns()[c.id] ? 'background: var(--brand); color: white; border-color: var(--brand);' : ''}`} 
+                              class="ss-btn ss-btn-secondary" 
+                              style={`padding: 6px 10px; font-size: 12px; border-radius: 6px; transition: all 0.2s ease; ${linkedConns()[c.id] ? 'background: rgba(80, 160, 255, 0.15); color: var(--brand); border-color: rgba(80, 160, 255, 0.35);' : ''}`}
                               onClick={() => handleToggleLink(c.id)}
+                              title={linkedConns()[c.id] ? t("unlinkFromWorkspaceTooltip") : t("linkToWorkspaceTooltip")}
                             >
-                              {linkedConns()[c.id] ? t("linkedProjectBtn") : t("linkProjectBtn")}
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                              </svg>
                             </button>
                           </Show>
                           <button 
