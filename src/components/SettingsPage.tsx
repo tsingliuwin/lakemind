@@ -527,11 +527,11 @@ export default function SettingsPage(props: {
           color: var(--text-danger);
           border-color: transparent !important;
         }
-        .btn-new-conn {
+        .btn-prim-no-highlight {
           border: 1px solid transparent !important;
           transition: all 0.15s ease;
         }
-        .btn-new-conn:hover {
+        .btn-prim-no-highlight:hover {
           border-color: transparent !important;
           opacity: 0.9;
         }
@@ -544,11 +544,11 @@ export default function SettingsPage(props: {
           outline: none !important;
           box-shadow: none !important;
         }
-        .btn-cancel {
+        .btn-sec-no-highlight {
           border: 1px solid var(--border-strong) !important;
           transition: all 0.15s ease;
         }
-        .btn-cancel:hover {
+        .btn-sec-no-highlight:hover {
           border-color: var(--border-strong) !important;
           background: var(--bg-hover) !important;
         }
@@ -756,7 +756,7 @@ export default function SettingsPage(props: {
             </div>
             <Show when={!editingConn()}>
               <button 
-                class="ss-btn btn-new-conn" 
+                class="ss-btn btn-prim-no-highlight" 
                 style="padding: 6px 16px; font-size: 13px; font-weight: 500; border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);" 
                 onClick={startAddConnection}
               >
@@ -773,7 +773,7 @@ export default function SettingsPage(props: {
                 <h3 style="margin: 0; font-size: 15px; font-weight: 600; color: var(--text-primary);">
                   {editingConn()?.id ? t("editConnTitle") : t("addConnTitle")}
                 </h3>
-                <button class="ss-btn ss-btn-secondary btn-cancel" style="padding: 4px 12px; font-size: 12.5px; border-radius: 6px;" onClick={() => setEditingConn(null)}>
+                <button class="ss-btn ss-btn-secondary btn-sec-no-highlight" style="padding: 4px 12px; font-size: 12.5px; border-radius: 6px;" onClick={() => setEditingConn(null)}>
                   {t("cancelBtn")}
                 </button>
               </div>
@@ -1000,7 +1000,7 @@ export default function SettingsPage(props: {
 
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
                   <button 
-                    class="ss-btn ss-btn-secondary" 
+                    class="ss-btn ss-btn-secondary btn-sec-no-highlight" 
                     style="padding: 6px 16px; font-size: 13px;"
                     onClick={handleTestConnection} 
                     disabled={testStatus().status === "testing"}
@@ -1008,7 +1008,7 @@ export default function SettingsPage(props: {
                     {testStatus().status === "testing" ? "..." : t("testConnBtn")}
                   </button>
                   <button 
-                    class="ss-btn" 
+                    class="ss-btn btn-prim-no-highlight" 
                     style="padding: 6px 20px; font-size: 13px; font-weight: 500;"
                     onClick={handleSaveConnection}
                   >
