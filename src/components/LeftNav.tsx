@@ -856,13 +856,17 @@ export default function LeftNav(props: {
                                               <span style="font-size: 11.5px;">{tbl.name}</span>
                                             </div>
                                             <Show when={registered()} fallback={
-                                              <button 
-                                                class="ss-btn" 
-                                                style="padding: 1px 6px; font-size: 10px; height: 18px; border-radius: 3px;"
+                                              <button
+                                                class="ws-action-icon-btn"
+                                                title={t("addBtn")}
                                                 onClick={(e) => { e.stopPropagation(); handleRegisterDbTable(conn, tbl); }}
                                                 disabled={props.busy}
+                                                style="width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim);"
                                               >
-                                                {t("addBtn")}
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
+                                                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                                                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                                                </svg>
                                               </button>
                                             }>
                                               <span style="color: var(--text-success); display: inline-flex; padding-right: 4px;" title={t("addedLabel")}>
@@ -906,13 +910,17 @@ export default function LeftNav(props: {
                                                           <span style="font-size: 11.5px;" title={tbl.name}>{tbl.name}</span>
                                                         </div>
                                                         <Show when={registered()} fallback={
-                                                          <button 
-                                                            class="ss-btn" 
-                                                            style="padding: 1px 6px; font-size: 10px; height: 18px; border-radius: 3px;"
+                                                          <button
+                                                            class="ws-action-icon-btn"
+                                                            title={t("addBtn")}
                                                             onClick={(e) => { e.stopPropagation(); handleRegisterDbTable(conn, tbl); }}
                                                             disabled={props.busy}
+                                                            style="width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim);"
                                                           >
-                                                            {t("addBtn")}
+                                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
+                                                              <line x1="12" y1="5" x2="12" y2="19"></line>
+                                                              <line x1="5" y1="12" x2="19" y2="12"></line>
+                                                            </svg>
                                                           </button>
                                                         }>
                                                           <span style="color: var(--text-success); display: inline-flex; padding-right: 4px;" title={t("addedLabel")}>
