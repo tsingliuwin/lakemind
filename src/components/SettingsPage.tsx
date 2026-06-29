@@ -140,6 +140,8 @@ export default function SettingsPage(props: {
   const [formPassword, setFormPassword] = createSignal("");
   const [formSslMode, setFormSslMode] = createSignal("disable");
   const [showPassword, setShowPassword] = createSignal(false);
+  const [formUri, setFormUri] = createSignal("");
+  const [uriStatus, setUriStatus] = createSignal<{ status: "idle" | "success" | "error" }>({ status: "idle" });
 
   const loadConnections = async () => {
     try {
@@ -279,6 +281,8 @@ export default function SettingsPage(props: {
     setFormPassword(c.password || "");
     setFormSslMode(c.sslMode || "disable");
     setShowPassword(false);
+    setFormUri("");
+    setUriStatus({ status: "idle" });
     setTestStatus({ status: "idle" });
   };
 
@@ -301,7 +305,78 @@ export default function SettingsPage(props: {
     setFormPassword("");
     setFormSslMode("disable");
     setShowPassword(false);
+    setFormUri("");
+    setUriStatus({ status: "idle" });
     setTestStatus({ status: "idle" });
+  };
+
+  const parseConnectionString = (str: string) => {
+    try {
+      const clean = str.trim();
+      const url = new URL(clean);
+      const protocol = url.protocol.toLowerCase();
+      if (protocol !== "postgresql:" && protocol !== "postgres:" && protocol !== "mysql:") {
+        return null;
+      }
+      const dbType = protocol === "mysql:" ? "mysql" : "postgres";
+      const host = url.hostname;
+      if (!host) return null;
+      
+      const port = url.port ? parseInt(url.port) : (dbType === "mysql" ? 3306 : 5432);
+      const username = decodeURIComponent(url.username || "");
+      const password = decodeURIComponent(url.password || "");
+      
+      let databaseName = url.pathname;
+      if (databaseName.startsWith("/")) {
+        databaseName = databaseName.substring(1);
+      }
+      databaseName = decodeURIComponent(databaseName);
+      
+      let sslMode = "disable";
+      if (url.searchParams.has("sslmode")) {
+        sslMode = url.searchParams.get("sslmode") || "disable";
+      }
+      
+      return {
+        dbType,
+        host,
+        port,
+        databaseName,
+        username,
+        password,
+        sslMode
+      };
+    } catch (err) {
+      return null;
+    }
+  };
+
+  const handleUriInput = (e: { currentTarget: HTMLInputElement }) => {
+    const val = e.currentTarget.value.trim();
+    if (!val) {
+      setUriStatus({ status: "idle" });
+      return;
+    }
+    const parsed = parseConnectionString(val);
+    if (parsed) {
+      setFormType(parsed.dbType);
+      setFormHost(parsed.host);
+      setFormPort(parsed.port);
+      setFormDatabase(parsed.databaseName);
+      setFormUsername(parsed.username);
+      setFormPassword(parsed.password);
+      setFormSslMode(parsed.sslMode);
+      
+      // Auto name if default or empty
+      if (formName() === "" || formName() === "local_postgres" || formName() === "local_mysql") {
+        const cleanHost = parsed.host.split('.')[0];
+        setFormName(`${cleanHost}_${parsed.databaseName}`);
+      }
+      
+      setUriStatus({ status: "success" });
+    } else {
+      setUriStatus({ status: "error" });
+    }
   };
 
     onMount(async () => {
@@ -776,6 +851,35 @@ export default function SettingsPage(props: {
                 <button class="ss-btn ss-btn-secondary btn-sec-no-highlight" style="padding: 4px 12px; font-size: 12.5px; border-radius: 6px;" onClick={() => setEditingConn(null)}>
                   {t("cancelBtn")}
                 </button>
+              </div>
+
+              {/* Connection URI Import */}
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                  <label style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">一键导入连接串 (Connection URI)</label>
+                  <Show when={uriStatus().status !== "idle"}>
+                    <span 
+                      style={`font-size: 10.5px; font-weight: 600; transition: all 0.15s ease; ${
+                        uriStatus().status === "success" ? "color: var(--accent-green);" : "color: var(--accent-red);"
+                      }`}
+                    >
+                      {uriStatus().status === "success" ? "✓ 已智能解析并填充" : "✕ 格式无法解析"}
+                    </span>
+                  </Show>
+                </div>
+                <input
+                  type="text"
+                  class="sp-input"
+                  value={formUri()}
+                  placeholder="例: postgresql://username:password@host:port/database"
+                  onInput={(e) => {
+                    setFormUri(e.currentTarget.value);
+                    handleUriInput(e);
+                  }}
+                />
+                <span style="font-size: 10px; color: var(--text-dim); opacity: 0.85;">
+                  粘贴后可自动识别协议类型（Postgres / MySQL）并拆分填充下方所有字段。
+                </span>
               </div>
 
               {/* Database Type Card Selector */}
