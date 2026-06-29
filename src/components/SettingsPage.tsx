@@ -877,9 +877,6 @@ export default function SettingsPage(props: {
                     handleUriInput(e);
                   }}
                 />
-                <span style="font-size: 10px; color: var(--text-dim); opacity: 0.85;">
-                  粘贴后可自动识别协议类型（Postgres / MySQL）并拆分填充下方所有字段。
-                </span>
               </div>
 
               {/* Database Type Card Selector */}
