@@ -785,9 +785,13 @@ export default function SettingsPage(props: {
                       <div style="font-weight: 600; font-size: 13.5px; color: var(--text-primary);">PostgreSQL</div>
                       <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{t("dbTypePostgresDesc")}</div>
                     </div>
-                    <Show when={formType() === "postgres"}>
-                      <span style="color: var(--brand); font-size: 15px; font-weight: bold; margin-left: auto;">✓</span>
-                    </Show>
+                    <span 
+                      style={`color: var(--brand); font-size: 15px; font-weight: bold; margin-left: auto; transition: opacity 0.15s ease-in-out; ${
+                        formType() === "postgres" ? "opacity: 1;" : "opacity: 0; pointer-events: none;"
+                      }`}
+                    >
+                      ✓
+                    </span>
                   </div>
 
                   {/* MySQL Card */}
@@ -796,7 +800,7 @@ export default function SettingsPage(props: {
                       setFormType("mysql");
                       if (formPort() === 5432) setFormPort(3306);
                     }}
-                    style={`display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-radius: 10px; border: 2px solid ${formType() === "mysql" ? "var(--brand)" : "var(--border-strong)"}; background: ${formType() === "mysql" ? "rgba(255, 140, 0, 0.06)" : "rgba(255, 255, 255, 0.015)"}; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: ${formType() === "mysql" ? "0 4px 12px rgba(255, 140, 0, 0.1)" : "none"}`}
+                    style={`display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-radius: 10px; border: 2px solid ${formType() === "mysql" ? "#ffa500" : "var(--border-strong)"}; background: ${formType() === "mysql" ? "rgba(255, 140, 0, 0.06)" : "rgba(255, 255, 255, 0.015)"}; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: ${formType() === "mysql" ? "0 4px 12px rgba(255, 140, 0, 0.1)" : "none"}`}
                     class="db-type-card"
                   >
                     <div style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; background: rgba(255, 140, 0, 0.12); color: #ffa500; border-radius: 8px; flex-shrink: 0;">
@@ -810,9 +814,13 @@ export default function SettingsPage(props: {
                       <div style="font-weight: 600; font-size: 13.5px; color: var(--text-primary);">MySQL</div>
                       <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{t("dbTypeMysqlDesc")}</div>
                     </div>
-                    <Show when={formType() === "mysql"}>
-                      <span style="color: var(--brand); font-size: 15px; font-weight: bold; margin-left: auto;">✓</span>
-                    </Show>
+                    <span 
+                      style={`color: #ffa500; font-size: 15px; font-weight: bold; margin-left: auto; transition: opacity 0.15s ease-in-out; ${
+                        formType() === "mysql" ? "opacity: 1;" : "opacity: 0; pointer-events: none;"
+                      }`}
+                    >
+                      ✓
+                    </span>
                   </div>
                 </div>
               </div>
@@ -917,7 +925,7 @@ export default function SettingsPage(props: {
 
                 {/* SSL Mode (Postgres Only) */}
                 <div 
-                  style={`display: flex; flex-direction: column; gap: 6px; margin-top: 4px; transition: all 0.2s ease-in-out; ${
+                  style={`display: flex; flex-direction: column; gap: 6px; margin-top: 4px; transition: opacity 0.2s ease-in-out; ${
                     formType() === "postgres" ? "" : "opacity: 0.35; pointer-events: none;"
                   }`}
                 >
