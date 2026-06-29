@@ -885,21 +885,27 @@ export default function SettingsPage(props: {
                       handleUriInput(e);
                     }}
                   />
-                  <div style="position: absolute; left: 10px; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 10;">
+                  <div 
+                    style={`position: absolute; left: 10px; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 10; ${
+                      uriStatus().status === "success" ? "color: var(--text-success);" :
+                      uriStatus().status === "error" ? "color: var(--text-danger);" :
+                      "color: var(--text-dim);"
+                    }`}
+                  >
                     <Show when={uriStatus().status !== "idle"} fallback={
-                      <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px; opacity: 0.6;">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px; opacity: 0.6;">
                         <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
                         <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
                       </svg>
                     }>
                       <Show when={uriStatus().status === "success"} fallback={
-                        <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-danger)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
                           <circle cx="12" cy="12" r="10"/>
                           <line x1="12" y1="8" x2="12" y2="12"/>
                           <line x1="12" y1="16" x2="12.01" y2="16"/>
                         </svg>
                       }>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
                           <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                           <polyline points="22 4 12 14.01 9 11.01"/>
                         </svg>
