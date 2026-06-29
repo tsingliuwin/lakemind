@@ -1033,17 +1033,11 @@ export default function LeftNav(props: {
                                     </Show>
                                   }>
                                     {/* External database table: a zero-copy VIEW pointing
-                                        at Postgres/MySQL. Render the database cylinder with
-                                        a small eye overlay so it reads as "external view". */}
-                                    <span class="kind-badge kind-badge--icon kind-badge--extdb" title="外部数据库视图（实时读取，零拷贝）" style="position: relative; display: inline-flex; align-items: center;">
+                                        at Postgres/MySQL. A single eye icon reads as "view". */}
+                                    <span class="kind-badge kind-badge--icon kind-badge--extdb" title="外部数据库视图（实时读取，零拷贝）">
                                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
-                                        <ellipse cx="12" cy="6" rx="8" ry="3"></ellipse>
-                                        <path d="M4 6v5c0 1.66 3.58 3 8 3s8-1.34 8-3V6"></path>
-                                        <path d="M4 11v5c0 1.66 3.58 3 8 3s8-1.34 8-3v-5"></path>
-                                      </svg>
-                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="width: 8px; height: 8px; position: absolute; right: -3px; bottom: -2px;">
                                         <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
-                                        <circle cx="12" cy="12" r="2.5"></circle>
+                                        <circle cx="12" cy="12" r="3"></circle>
                                       </svg>
                                     </span>
                                   </Show>
