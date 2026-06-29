@@ -113,6 +113,10 @@ pub async fn list_tables_fast(
     _state: State<'_, AppState>,
 ) -> Result<Vec<SourceTable>, String> {
     let start = std::time::Instant::now();
+    let ws_dir = resolve_workspace_dir(&workspace_path)?;
+    let okf_views_dir = ws_dir.join("okf").join("views");
+    let okf_tables_dir = ws_dir.join("okf").join("tables");
+
     // No lake attach, no DuckDB connection — just the SQLite caches.
     let sqlite = db::get_db_conn()?;
     let records = db::list_sources(&sqlite, &workspace_path)?;
@@ -122,6 +126,11 @@ pub async fn list_tables_fast(
     // valid as long as input_hash matches — verified later by warmup/sync).
     let defs = db::list_object_defs(&sqlite, &workspace_path)?;
     for d in &defs {
+        let view_okf = okf_views_dir.join(format!("{}.md", d.table_name));
+        let table_okf = okf_tables_dir.join(format!("{}.md", d.table_name));
+        if !view_okf.exists() && !table_okf.exists() {
+            continue;
+        }
         result.push(SourceTable {
             name: d.table_name.clone(),
             label: d.table_name.clone(),
@@ -151,12 +160,20 @@ pub async fn list_tables_fast(
 #[tauri::command]
 pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<SourceTable>, String> {
     let ws_path = state.workspace_path.lock().await.clone();
+    let active_ws_path = state.workspace_path.clone();
+    let ws_path_clone = ws_path.clone();
     // Registered sources come straight from the SQLite cache (columns + row
     // count stored), so only custom tables/views need a live DuckLake catalog
     // query here. Used to refresh after DDL/import.
     run_blocking(state, move |conn| {
+        {
+            let active = active_ws_path.blocking_lock().clone();
+            if active != ws_path_clone {
+                return Err(AppError::new("Workspace changed, list_duckdb_tables aborted"));
+            }
+        }
         let sqlite = db::get_db_conn()?;
-        let records = db::list_sources(&sqlite, &ws_path)?;
+        let records = db::list_sources(&sqlite, &ws_path_clone)?;
 
         // 1. Registered sources (authoritative). Pure SQLite cache.
         let mut result = Vec::new();
@@ -177,6 +194,9 @@ pub async fn list_duckdb_tables(state: State<'_, AppState>) -> Result<Vec<Source
                 continue;
             };
             for name in rows.flatten() {
+                if name.starts_with("s_") {
+                    continue;
+                }
                 if known.contains(&name) {
                     continue;
                 }
@@ -228,8 +248,21 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
         let rec_clone = rec.clone();
         let ws_path_clone = ws_path.clone();
         let ws_dir_clone = ws_dir.clone();
+        let active_ws_path = state.workspace_path.clone();
         let did_rebuild = tauri::async_runtime::spawn_blocking(move || -> bool {
+            {
+                let active = active_ws_path.blocking_lock().clone();
+                if active != ws_path_clone {
+                    return false;
+                }
+            }
             let guard = conn.blocking_lock();
+            {
+                let active = active_ws_path.blocking_lock().clone();
+                if active != ws_path_clone {
+                    return false;
+                }
+            }
             // LIMIT 0: metadata-only probe (cheap). Validates the lake object is
             // usable without reading data pages the user may never look at.
             let probe = format!("SELECT * FROM \"{}\" LIMIT 0", rec_clone.table_name.replace('"', "\"\""));
@@ -274,18 +307,28 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
 
     // Checkpoint if any rebuild happened.
     if rebuilt {
-        let conn = state.conn.clone();
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            let guard = conn.blocking_lock();
-            let _ = guard.execute("CHECKPOINT;", []);
-        })
-        .await;
+        let active = state.workspace_path.lock().await.clone();
+        if active == ws_path {
+            let conn = state.conn.clone();
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                let guard = conn.blocking_lock();
+                let _ = guard.execute("CHECKPOINT;", []);
+            })
+            .await;
+        }
     }
 
     // Warm custom tables (short lock each) and return the refreshed list.
     let conn = state.conn.clone();
     let ws_path2 = ws_path.clone();
+    let active_ws_path2 = state.workspace_path.clone();
     let result = run_blocking(state, move |conn| {
+        {
+            let active = active_ws_path2.blocking_lock().clone();
+            if active != ws_path2 {
+                return Err(AppError::new("Workspace changed, warmup aborted"));
+            }
+        }
         let sqlite = db::get_db_conn()?;
         let records = db::list_sources(&sqlite, &ws_path2)?;
         let mut result = Vec::new();
@@ -298,6 +341,7 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
             let Ok(mut stmt) = conn.prepare(sql) else { continue };
             let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else { continue };
             for name in rows.flatten() {
+                if name.starts_with("s_") { continue; }
                 if known.contains(&name) || name.starts_with("_tmp_") { continue; }
                 known.insert(name.clone());
                 let _ = conn.execute(&format!("SELECT * FROM \"{}\" LIMIT 0", name.replace('"', "\"\"")), []);
@@ -530,13 +574,25 @@ pub async fn import_file_to_workspace(
         }
     };
 
+    // GUARD: Check if workspace changed during scan
+    {
+        let current = state.workspace_path.lock().await.clone();
+        if current != workspace {
+            let _ = window.emit("import-progress", ImportProgress {
+                file: file_name.clone(), stage: "error".into(), table: None, columns: None, rows: None,
+                error: Some("Workspace changed during scan".to_string()),
+            });
+            return Err("Workspace changed during scan".to_string());
+        }
+    }
+
     let _ = window.emit("import-progress", ImportProgress {
         file: file_name.clone(), stage: "registering".into(), table: None, columns: None, rows: None, error: None,
     });
 
     let window_for_sync = window.clone();
     let file_for_sync = file_name.clone();
-    let result = sync_entries(state.conn.clone(), state.sources.clone(), workspace, ws_dir, entries, false, Some(move |stage_msg: &str| {
+    let result = sync_entries(state.conn.clone(), state.sources.clone(), state.workspace_path.clone(), workspace, ws_dir, entries, false, Some(move |stage_msg: &str| {
         let _ = window_for_sync.emit("import-progress", ImportProgress {
             file: file_for_sync.clone(), stage: "registering".into(), table: Some(stage_msg.to_string()),
             columns: None, rows: None, error: None,
@@ -607,7 +663,15 @@ pub async fn register_workspace_sources_inner(
         Err(e) => return Err(format!("scan task join error: {e}")),
     };
 
-    sync_entries(state.conn.clone(), state.sources.clone(), workspace_path, ws_dir, entries, true, None::<fn(&str)>)
+    // GUARD: Check if workspace changed during scan
+    {
+        let current = state.workspace_path.lock().await.clone();
+        if current != workspace_path {
+            return Err("Workspace changed during file scan".to_string());
+        }
+    }
+
+    sync_entries(state.conn.clone(), state.sources.clone(), state.workspace_path.clone(), workspace_path, ws_dir, entries, true, None::<fn(&str)>)
         .await
         .map_err(|e| e.to_string())
 }
@@ -666,6 +730,7 @@ pub async fn workspace_register_status(
 async fn sync_entries(
     conn: Arc<Mutex<duckdb::Connection>>,
     sources_cache: Arc<Mutex<Vec<SourceTable>>>,
+    active_ws_path: Arc<Mutex<String>>,
     ws_path: String,
     ws_dir: PathBuf,
     entries: Vec<scan::ScanEntry>,
@@ -745,6 +810,15 @@ async fn sync_entries(
             .collect();
 
         let guard = conn.blocking_lock();
+        
+        // GUARD: check if the workspace has changed
+        {
+            let active = active_ws_path.blocking_lock().clone();
+            if active != ws_path {
+                return Err(AppError::new("Workspace changed, sync aborted"));
+            }
+        }
+
         load_extensions_if_needed(&guard, &entries);
 
         let mut result: Vec<SourceTable> = Vec::new();
@@ -897,6 +971,53 @@ async fn sync_entries(
                     let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
                     let _ = crate::okf::delete_okf_files(&ws_dir_str, &rec.table_name);
                     lake_mutated = true;
+                }
+            }
+
+            // Also clean up any other orphan/polluted tables/views starting with "s_"
+            // in the DuckDB database that are not mapped in this workspace's sources
+            // (either via filesystem files or external database tables).
+            let mut active_s_names: HashSet<String> = final_names.iter().cloned().collect();
+            for rec in &existing {
+                if rec.kind == "postgres" || rec.kind == "mysql" {
+                    active_s_names.insert(rec.table_name.clone());
+                }
+            }
+            for sql in CUSTOM_TABLE_SQLS {
+                if let Ok(mut stmt) = guard.prepare(sql) {
+                    if let Ok(mut rows) = stmt.query([]) {
+                        while let Ok(Some(row)) = rows.next() {
+                            if let Ok(name) = row.get::<_, String>(0) {
+                                if name.starts_with("s_") && !active_s_names.contains(&name) {
+                                    println!("[sync] dropping untracked/polluted lake object: {name}");
+                                    drop_lake_object(&guard, &name);
+                                    let _ = db::delete_source_by_table(&sqlite, &ws_path, &name);
+                                    let _ = crate::okf::delete_okf_files(&ws_dir_str, &name);
+                                    lake_mutated = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Clean up custom tables/views in object_defs that are broken (fail probe)
+            // and do not have corresponding OKF metadata files on disk.
+            let okf_views_dir = Path::new(&ws_dir_str).join("okf").join("views");
+            let okf_tables_dir = Path::new(&ws_dir_str).join("okf").join("tables");
+            if let Ok(custom_defs) = db::list_object_defs(&sqlite, &ws_path) {
+                for def in custom_defs {
+                    let view_okf = okf_views_dir.join(format!("{}.md", def.table_name));
+                    let table_okf = okf_tables_dir.join(format!("{}.md", def.table_name));
+                    if !view_okf.exists() && !table_okf.exists() {
+                        let probe = format!("SELECT * FROM \"{}\" LIMIT 0", def.table_name.replace('"', "\"\""));
+                        if guard.execute(&probe, []).is_err() {
+                            println!("[sync] dropping polluted/broken custom object: {}", def.table_name);
+                            drop_lake_object(&guard, &def.table_name);
+                            let _ = db::delete_object_def(&sqlite, &ws_path, &def.table_name);
+                            lake_mutated = true;
+                        }
+                    }
                 }
             }
         }

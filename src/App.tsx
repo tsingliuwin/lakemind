@@ -106,6 +106,20 @@ export default function App() {
   // 所以用一个独立信号准确跟踪执行状态，供 ChatView 派生 streaming。
   const [streamingTaskId, setStreamingTaskId] = createSignal<string | null>(null);
 
+  function changeWorkspace(ws: Workspace) {
+    // Clear workspace-specific states synchronously to avoid showing stale data from
+    // the previous workspace during the async load phase.
+    setSources([]);
+    setTasks([]);
+    setSelectedTable(null);
+    setActiveTaskId(null);
+    setDeps(null);
+    setImportStatus(null);
+    setStreamingTaskId(null);
+    setCurrentWorkspace(ws);
+  }
+
+
   const currentTabs = createMemo<QueryResultTab[]>(() => {
     const taskId = activeTaskId();
     if (!taskId) return [];
@@ -341,7 +355,7 @@ export default function App() {
         // — otherwise the unchanged-value set would re-trigger the workspace-load
         // effect (duplicate scan/sync + list_tables_fast on startup).
         if (currentWorkspace().path !== defaultWS.path) {
-          setCurrentWorkspace(defaultWS);
+          changeWorkspace(defaultWS);
         }
       }
     } catch (err) {
@@ -381,6 +395,8 @@ export default function App() {
       // 1. Load tasks. Normalize legacy chat messages (flat content/reasoning/
       //    cards) into the segment model so old persisted chats stay readable.
       const loadedTasks = await invoke<QueryTask[]>("load_workspace_tasks", { workspacePath: ws.path });
+      if (currentWorkspace().path !== ws.path) return;
+
       const migrated = loadedTasks
         .map((t) =>
           t.kind === "chat" && Array.isArray(t.messages)
@@ -407,6 +423,8 @@ export default function App() {
       //    the background; it rebuilds only sources whose fingerprint changed and
       //    merges custom tables/views back in when done.
       const fastTables = await invoke<SourceTable[]>("list_tables_fast", { workspacePath: ws.path });
+      if (currentWorkspace().path !== ws.path) return;
+
       setSources(fastTables);
       setSelectedTable(null);
       refreshRegisterStatus(ws.path);
@@ -432,11 +450,19 @@ export default function App() {
             })
             .catch((err) => console.error("Failed to warmup sources:", err));
         })
-        .catch((err) => console.error("Failed to sync workspace sources:", err));
+        .catch((err) => {
+          if (currentWorkspace()?.path === ws.path) {
+            console.error("Failed to sync workspace sources:", err);
+          }
+        });
     } catch (err) {
-      console.error("Failed to load workspace tasks & sources:", err);
+      if (currentWorkspace().path === ws.path) {
+        console.error("Failed to load workspace tasks & sources:", err);
+      }
     } finally {
-      setBusy(false);
+      if (currentWorkspace().path === ws.path) {
+        setBusy(false);
+      }
     }
   });
 
@@ -451,7 +477,7 @@ export default function App() {
         return [...prev, { name, path }];
       });
       const ws = { name, path };
-      setCurrentWorkspace(ws);
+      changeWorkspace(ws);
     } catch (err) {
       console.error("Failed to add workspace:", err);
     }
@@ -460,7 +486,7 @@ export default function App() {
   function selectWorkspace(path: string) {
     const ws = workspaces().find((w) => w.path === path);
     if (ws) {
-      setCurrentWorkspace(ws);
+      changeWorkspace(ws);
     }
   }
 
@@ -474,13 +500,13 @@ export default function App() {
         const def = { name: "DefaultProject", path: "DefaultProject" };
         await invoke("add_workspace", def);
         setWorkspaces([def]);
-        setCurrentWorkspace(def);
+        changeWorkspace(def);
         return;
       }
       
       setWorkspaces(nextList);
       if (currentWorkspace().path === path) {
-        setCurrentWorkspace(nextList[0]);
+        changeWorkspace(nextList[0]);
       }
     } catch (err) {
       console.error("Failed to remove workspace:", err);
