@@ -1794,10 +1794,20 @@ fn list_connection_tables_impl(r: &db::DbConnectionRecord) -> Result<Vec<DbTable
 
     conn.execute(&attach_sql, []).map_err(|e| format!("连接数据库失败: {e}"))?;
 
+    let out = query_attached_tables(&conn, conn_name)?;
+    let _ = conn.execute(&format!("DETACH {conn_name};"), []);
+    Ok(out)
+}
+
+/// List user tables/views already ATTACHed under `alias` on `conn`.
+/// Pulled out of `list_connection_tables_impl` so the fast path (querying the
+/// shared session connection, where workspace connections are already attached
+/// as `db_{safe_name}`) and the slow fallback path share one implementation.
+fn query_attached_tables(conn: &duckdb::Connection, alias: &str) -> Result<Vec<DbTableItem>, String> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT schema_name, table_name, 'table' AS type FROM duckdb_tables() WHERE database_name = '{conn_name}' AND NOT internal
+        "SELECT schema_name, table_name, 'table' AS type FROM duckdb_tables() WHERE database_name = '{alias}' AND NOT internal
          UNION ALL
-         SELECT schema_name, view_name AS table_name, 'view' AS type FROM duckdb_views() WHERE database_name = '{conn_name}' AND NOT internal
+         SELECT schema_name, view_name AS table_name, 'view' AS type FROM duckdb_views() WHERE database_name = '{alias}' AND NOT internal
          ORDER BY schema_name, table_name"
     )).map_err(|e| e.to_string())?;
 
@@ -1815,8 +1825,6 @@ fn list_connection_tables_impl(r: &db::DbConnectionRecord) -> Result<Vec<DbTable
             out.push(item);
         }
     }
-
-    let _ = conn.execute(&format!("DETACH {conn_name};"), []);
     Ok(out)
 }
 
@@ -1850,15 +1858,78 @@ pub async fn test_db_connection(config: db::DbConnectionRecord) -> Result<(), St
 }
 
 #[tauri::command]
-pub async fn link_connection_to_workspace(ws_path: String, conn_id: String) -> Result<(), String> {
-    let conn = db::get_db_conn()?;
-    db::link_connection_to_workspace(&conn, &ws_path, &conn_id)
+pub async fn link_connection_to_workspace(
+    ws_path: String,
+    conn_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // Persist the link in SQLite first.
+    let sqlite = db::get_db_conn()?;
+    db::link_connection_to_workspace(&sqlite, &ws_path, &conn_id)?;
+
+    // Fetch the full record so we can ATTACH it to the live session connection.
+    let record = db::get_db_connection(&sqlite, &conn_id)?
+        .ok_or_else(|| format!("未找到数据库连接: {}", conn_id))?;
+
+    // Immediately ATTACH on the shared session so "enabled" is truthful. Run it
+    // on a blocking thread (attach does a synchronous driver load + server
+    // handshake) and take the tokio mutex via blocking_lock — never hold the
+    // async lock across a blocking DuckDB call, that stalls the runtime.
+    let conn_arc = state.conn.clone();
+    let name_for_log = record.name.clone();
+    let attach_result = tauri::async_runtime::spawn_blocking(move || {
+        let guard = conn_arc.blocking_lock();
+        db::attach_one(&guard, &record)
+    })
+    .await
+    .map_err(|e| format!("task join error: {e}"))?;
+
+    if let Err(e) = attach_result {
+        eprintln!("[link] ATTACH failed for {}: {e}", name_for_log);
+        // Roll back the persisted link so the UI doesn't show "enabled" while
+        // the database isn't actually attached.
+        let _ = db::unlink_connection_from_workspace(&sqlite, &ws_path, &conn_id);
+        return Err(format!("启用连接失败: {e}"));
+    }
+    eprintln!("[link] {} attached to session", name_for_log);
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn unlink_connection_from_workspace(ws_path: String, conn_id: String) -> Result<(), String> {
-    let conn = db::get_db_conn()?;
-    db::unlink_connection_from_workspace(&conn, &ws_path, &conn_id)
+pub async fn unlink_connection_from_workspace(
+    ws_path: String,
+    conn_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // Fetch the record (by id) before removing the link so we know the name to
+    // DETACH. If it's already gone, there's nothing to detach.
+    let sqlite = db::get_db_conn()?;
+    let record = db::get_db_connection(&sqlite, &conn_id)?;
+
+    // Remove the persisted link first.
+    db::unlink_connection_from_workspace(&sqlite, &ws_path, &conn_id)?;
+
+    // Drop the cached table list so a future re-enable fetches fresh data
+    // instead of showing a stale snapshot.
+    let _ = db::clear_db_connection_tables_cache(&sqlite, &conn_id);
+
+    // Immediately DETACH from the live session so "disabled" is truthful.
+    if let Some(r) = record {
+        let conn_arc = state.conn.clone();
+        let name_for_log = r.name.clone();
+        let res = tauri::async_runtime::spawn_blocking(move || {
+            let guard = conn_arc.blocking_lock();
+            db::detach_one(&guard, &r.name)
+        })
+        .await
+        .map_err(|e| format!("task join error: {e}"))?;
+        // DETACH may fail if the database was never attached — that's fine.
+        match res {
+            Ok(()) => eprintln!("[unlink] {} detached from session", name_for_log),
+            Err(e) => eprintln!("[unlink] detach warning for {}: {e}", name_for_log),
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1875,10 +1946,100 @@ pub struct DbTableItem {
 }
 
 #[tauri::command]
-pub async fn list_db_connection_tables(config: db::DbConnectionRecord) -> Result<Vec<DbTableItem>, String> {
-    tokio::task::spawn_blocking(move || list_connection_tables_impl(&config))
+pub async fn list_db_connection_tables(
+    config: db::DbConnectionRecord,
+    force_refresh: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<Vec<DbTableItem>, String> {
+    let conn_id = config.id.clone();
+    let conn_name = config.name.clone();
+    let force = force_refresh == Some(true);
+
+    // ── Cache-first. Listing tables from a remote catalog via DuckDB is slow
+    //    (~2s — it scans the server's system tables every time), so serve from
+    //    the local SQLite cache unless an explicit refresh is requested. SQLite
+    //    reads are blocking, so run on a blocking thread.
+    if !force {
+        let cid = conn_id.clone();
+        let cname = conn_name.clone();
+        let cached = tauri::async_runtime::spawn_blocking(move || {
+            let sqlite = db::get_db_conn()?;
+            db::list_db_connection_tables_cache(&sqlite, &cid)
+        })
         .await
-        .map_err(|e| format!("Task execution error: {e}"))?
+        .map_err(|e| format!("task join error: {e}"))?
+        .unwrap_or_default();
+        if !cached.is_empty() {
+            eprintln!("[db_tables] cache hit: {} ({} tables)", cname, cached.len());
+            return Ok(cached
+                .into_iter()
+                .map(|c| DbTableItem { schema: c.schema, name: c.name, kind: c.kind })
+                .collect());
+        }
+    }
+
+    // ── Cache miss / forced refresh: query the live database. Try the shared
+    //    session connection first (workspace connections are already ATTACHed
+    //    there as `db_{alias}`); on failure fall back to a throwaway connection.
+    let alias = db::workspace_attach_alias(&conn_name);
+    let conn_arc = state.conn.clone();
+    let alias_clone = alias.clone();
+    let name_clone = conn_name.clone();
+    let start = std::time::Instant::now();
+    // Use try_lock instead of blocking_lock to avoid a deadlock: if another
+    // async task (e.g. an agent stream) is holding the session connection,
+    // blocking_lock would stall the spawn_blocking thread forever, causing the
+    // frontend spinner to never stop. When the lock is unavailable, we fall
+    // through to the fallback path that opens a fresh throwaway connection.
+    let tables: Vec<DbTableItem> = match tauri::async_runtime::spawn_blocking(move || {
+        match conn_arc.try_lock() {
+            Ok(guard) => query_attached_tables(&guard, &alias_clone),
+            Err(_) => Err("session connection busy, will use fresh connection".to_string()),
+        }
+    })
+    .await
+    .map_err(|e| format!("task join error: {e}"))?
+    {
+        Ok(t) => {
+            eprintln!(
+                "[db_tables] live query (attached) {} -> {} tables in {}ms",
+                name_clone,
+                t.len(),
+                start.elapsed().as_millis()
+            );
+            t
+        }
+        Err(e) => {
+            eprintln!(
+                "[db_tables] attached query failed for {} ({}), falling back to fresh connection",
+                conn_name, e
+            );
+            let config2 = config.clone();
+            tokio::task::spawn_blocking(move || list_connection_tables_impl(&config2))
+                .await
+                .map_err(|e| format!("Task execution error: {e}"))?
+                .map_err(|e| e)?
+        }
+    };
+
+    // Persist the fresh result so subsequent clicks are instant. Run on a
+    // blocking thread (SQLite writes block).
+    let cached_items: Vec<db::CachedDbTable> = tables
+        .iter()
+        .map(|t| db::CachedDbTable { schema: t.schema.clone(), name: t.name.clone(), kind: t.kind.clone() })
+        .collect();
+    let cid2 = conn_id.clone();
+    let cname2 = conn_name.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let mut sqlite = db::get_db_conn()?;
+        db::save_db_connection_tables(&mut sqlite, &cid2, &cached_items)?;
+        eprintln!("[db_tables] cached {} tables for {}", cached_items.len(), cname2);
+        Ok(())
+    })
+    .await;
+
+    eprintln!("[db_tables] returning {} tables for {}", tables.len(), conn_name);
+    Ok(tables)
 }
 
 #[tauri::command]
@@ -2029,6 +2190,73 @@ pub async fn register_database_table(
     .map_err(|e| e.to_string())?;
     
     Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_list_connection() {
+        let sqlite = db::get_db_conn().unwrap();
+        let list = db::list_db_connections(&sqlite).unwrap();
+        println!("Connections found: {:?}", list);
+        for conn in list {
+            println!("Testing connection: {}", conn.name);
+            match list_connection_tables_impl(&conn) {
+                Ok(tables) => {
+                    println!("SUCCESS: found {} tables", tables.len());
+                }
+                Err(e) => {
+                    println!("ERROR testing connection {}: {}", conn.name, e);
+                }
+            }
+        }
+    }
+
+    /// Verify the SQLite table-list cache round-trips and replaces correctly
+    /// (save → list → clear), without hitting any remote database.
+    #[test]
+    fn test_db_tables_cache() {
+        let mut sqlite = db::get_db_conn().unwrap();
+        let list = db::list_db_connections(&sqlite).unwrap();
+        let conn_id = match list.first() {
+            Some(c) => c.id.clone(),
+            None => {
+                println!("[cache] no connections configured, skipping");
+                return;
+            }
+        };
+
+        // Initially empty.
+        let initial = db::list_db_connection_tables_cache(&sqlite, &conn_id).unwrap();
+        println!("[cache] initial count: {}", initial.len());
+
+        // Save a fake list.
+        let items = vec![
+            db::CachedDbTable { schema: "public".into(), name: "t1".into(), kind: "table".into() },
+            db::CachedDbTable { schema: "public".into(), name: "v1".into(), kind: "view".into() },
+        ];
+        db::save_db_connection_tables(&mut sqlite, &conn_id, &items).unwrap();
+        let read = db::list_db_connection_tables_cache(&sqlite, &conn_id).unwrap();
+        assert_eq!(read.len(), 2, "cache should hold saved items");
+        println!("[cache] after save: {} items", read.len());
+
+        // Replace with a different list — old entries must be gone.
+        let items2 = vec![
+            db::CachedDbTable { schema: "public".into(), name: "t2".into(), kind: "table".into() },
+        ];
+        db::save_db_connection_tables(&mut sqlite, &conn_id, &items2).unwrap();
+        let read2 = db::list_db_connection_tables_cache(&sqlite, &conn_id).unwrap();
+        assert_eq!(read2.len(), 1, "save should replace, not append");
+        assert_eq!(read2[0].name, "t2");
+
+        // Clear.
+        db::clear_db_connection_tables_cache(&sqlite, &conn_id).unwrap();
+        let after = db::list_db_connection_tables_cache(&sqlite, &conn_id).unwrap();
+        assert!(after.is_empty(), "cache should be empty after clear");
+        println!("[cache] after clear: {} items", after.len());
+    }
 }
 
 

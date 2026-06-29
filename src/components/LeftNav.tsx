@@ -175,22 +175,51 @@ export default function LeftNav(props: {
     }
   };
 
+  /** Fetch the table list for a connection. `forceRefresh` bypasses the
+   * frontend in-memory cache (and asks the backend to bypass its SQLite cache
+   * too), used by the per-row refresh button. */
+  const loadDbTables = async (c: DbConnection, forceRefresh: boolean) => {
+    const id = c.id;
+    setLoadingDbConns({ ...loadingDbConns(), [id]: true });
+    try {
+      const list = await invoke<DbTableItem[]>("list_db_connection_tables", {
+        config: c,
+        forceRefresh,
+      });
+      setDbTables({ ...dbTables(), [id]: list });
+    } catch (err) {
+      console.error("Failed to load tables for connection " + c.name, err);
+    } finally {
+      setLoadingDbConns({ ...loadingDbConns(), [id]: false });
+    }
+  };
+
   const toggleDbConn = async (c: DbConnection) => {
     const id = c.id;
     const isExpanded = expandedDbConns()[id];
+    const isLoading = loadingDbConns()[id];
+
+    // If we're currently loading, ignore the click to prevent expanding/collapsing
+    // while data is in-flight (avoids the toggle-twice-and-end-up-collapsed problem).
+    if (isLoading) return;
+
+    // Toggle the expanded state immediately for instant UI feedback.
     setExpandedDbConns({ ...expandedDbConns(), [id]: !isExpanded });
-    
-    if (!isExpanded && !dbTables()[id]) {
-      setLoadingDbConns({ ...loadingDbConns(), [id]: true });
-      try {
-        const list = await invoke<DbTableItem[]>("list_db_connection_tables", { config: c });
-        setDbTables({ ...dbTables(), [id]: list });
-      } catch (err) {
-        console.error("Failed to load tables for connection " + c.name, err);
-      } finally {
-        setLoadingDbConns({ ...loadingDbConns(), [id]: false });
-      }
+
+    // If we are expanding (not collapsing) AND there is no data yet, kick off a fetch.
+    // Note: we check tables length > 0 so that a stale empty-array cache doesn't
+    // prevent a reload (an empty array means the previous fetch might have failed or
+    // the db had no tables — allow retry on next expand).
+    if (!isExpanded && !(dbTables()[id]?.length > 0)) {
+      await loadDbTables(c, false);
     }
+  };
+
+
+  const refreshDbConn = async (c: DbConnection) => {
+    const id = c.id;
+    setExpandedDbConns({ ...expandedDbConns(), [id]: true });
+    await loadDbTables(c, true);
   };
 
   const handleRegisterDbTable = async (c: DbConnection, table: DbTableItem) => {
@@ -786,15 +815,29 @@ export default function LeftNav(props: {
                                   </span>
                                   <span style="font-weight: 500; font-size: 12px;">{conn.name}</span>
                                 </div>
-                                <div style="display: flex; align-items: center; gap: 6px;">
+                                <div style="display: flex; align-items: center; gap: 4px;">
                                   <Show when={isLoading()}>
                                     <span class="import-banner__spinner" style="width: 10px; height: 10px; border-width: 1.5px;" />
+                                  </Show>
+                                  <Show when={!isLoading()}>
+                                    <button
+                                      class="ws-action-icon-btn"
+                                      title="刷新表列表"
+                                      onClick={(e) => { e.stopPropagation(); refreshDbConn(conn); }}
+                                      style="width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim);"
+                                    >
+                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 11px; height: 11px;">
+                                        <polyline points="23 4 23 10 17 10"></polyline>
+                                        <polyline points="1 20 1 14 7 14"></polyline>
+                                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                                      </svg>
+                                    </button>
                                   </Show>
                                   <span style="font-size: 10px; color: var(--text-dim);">{isExpanded() ? "▼" : "▶"}</span>
                                 </div>
                               </div>
 
-                              <Show when={isExpanded() && !isLoading()}>
+                              <Show when={isExpanded()}>
                                 <div style="margin-left: 12px; display: flex; flex-direction: column; gap: 2px;">
                                   <Show when={tables().length === 0}>
                                     <div style="font-size: 11px; font-style: italic; color: var(--text-dim); padding: 4px 8px;">
@@ -804,19 +847,19 @@ export default function LeftNav(props: {
 
                                   <Show when={conn.dbType === "postgres"} fallback={
                                     <For each={tables()}>
-                                      {(t) => {
-                                        const registered = () => props.sources.some(s => s.path === `db://${connId}/${t.schema}/${t.name}`);
+                                      {(tbl) => {
+                                        const registered = () => props.sources.some(s => s.path === `db://${connId}/${tbl.schema}/${tbl.name}`);
                                         return (
                                           <div style="display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 2px 8px; border-radius: 4px;" class="tree-leaf">
                                             <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                                               <span style="color: var(--text-dim); display: inline-flex;"><KindIcon kind="table" /></span>
-                                              <span style="font-size: 11.5px;">{t.name}</span>
+                                              <span style="font-size: 11.5px;">{tbl.name}</span>
                                             </div>
                                             <Show when={registered()} fallback={
                                               <button 
                                                 class="ss-btn" 
                                                 style="padding: 1px 6px; font-size: 10px; height: 18px; border-radius: 3px;"
-                                                onClick={(e) => { e.stopPropagation(); handleRegisterDbTable(conn, t); }}
+                                                onClick={(e) => { e.stopPropagation(); handleRegisterDbTable(conn, tbl); }}
                                                 disabled={props.busy}
                                               >
                                                 {t("addBtn")}
@@ -844,19 +887,19 @@ export default function LeftNav(props: {
                                             <Show when={schemaExpanded()}>
                                               <div style="margin-left: 10px; display: flex; flex-direction: column; gap: 1px;">
                                                 <For each={schemaTables}>
-                                                  {(t) => {
-                                                    const registered = () => props.sources.some(s => s.path === `db://${connId}/${t.schema}/${t.name}`);
+                                                  {(tbl) => {
+                                                    const registered = () => props.sources.some(s => s.path === `db://${connId}/${tbl.schema}/${tbl.name}`);
                                                     return (
                                                       <div style="display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 2px 8px; border-radius: 4px;" class="tree-leaf">
                                                         <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                                                           <span style="color: var(--text-dim); display: inline-flex;"><KindIcon kind="table" /></span>
-                                                          <span style="font-size: 11.5px;" title={t.name}>{t.name}</span>
+                                                          <span style="font-size: 11.5px;" title={tbl.name}>{tbl.name}</span>
                                                         </div>
                                                         <Show when={registered()} fallback={
                                                           <button 
                                                             class="ss-btn" 
                                                             style="padding: 1px 6px; font-size: 10px; height: 18px; border-radius: 3px;"
-                                                            onClick={(e) => { e.stopPropagation(); handleRegisterDbTable(conn, t); }}
+                                                            onClick={(e) => { e.stopPropagation(); handleRegisterDbTable(conn, tbl); }}
                                                             disabled={props.busy}
                                                           >
                                                             {t("addBtn")}
