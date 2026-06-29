@@ -859,8 +859,10 @@ export default function SettingsPage(props: {
                   <label style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">连接串 (Connection URI)</label>
                   <Show when={uriStatus().status !== "idle"}>
                     <span 
-                      style={`font-size: 10.5px; font-weight: 600; transition: all 0.15s ease; ${
-                        uriStatus().status === "success" ? "color: var(--accent-green);" : "color: var(--accent-red);"
+                      style={`font-size: 10px; font-weight: 500; padding: 2px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; line-height: 1; transition: all 0.15s ease; ${
+                        uriStatus().status === "success" 
+                          ? "background: rgba(80, 200, 120, 0.12); color: var(--text-success);" 
+                          : "background: rgba(255, 80, 80, 0.12); color: var(--text-danger);"
                       }`}
                     >
                       {uriStatus().status === "success" ? "✓ 已智能解析并填充" : "✕ 格式无法解析"}
