@@ -289,18 +289,19 @@ export default function LeftNav(props: {
   // workspace switch so switching into a project never starts collapsed.
   const [wsCollapsed, setWsCollapsed] = createSignal(false);
 
-  // True only when all three subsections are open. Drives the collapse/expand
+  // True only when all subsections are open. Drives the collapse/expand
   // toggle button next to the workspace node (chevron direction + tooltip).
   const allSectionsExpanded = createMemo(
-    () => tasksSectionExpanded() && filesSectionExpanded() && dataSectionExpanded(),
+    () => tasksSectionExpanded() && filesSectionExpanded() && dbSectionExpanded() && dataSectionExpanded(),
   );
 
-  // Toggle all three subsections at once. When any is collapsed, expand all;
+  // Toggle all subsections at once. When any is collapsed, expand all;
   // otherwise collapse all. This is the single hover button on a workspace row.
   const toggleAllSections = () => {
     const open = allSectionsExpanded();
     setTasksSectionExpanded(!open);
     setFilesSectionExpanded(!open);
+    setDbSectionExpanded(!open);
     setDataSectionExpanded(!open);
   };
 
