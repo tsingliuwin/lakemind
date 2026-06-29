@@ -841,7 +841,7 @@ export default function SettingsPage(props: {
               </div>
 
               {/* Group 1: Connection & Network */}
-              <div style="display: flex; flex-direction: column; gap: 14px; border: 1px solid var(--border-strong); padding: 16px; border-radius: 10px; background: rgba(255, 255, 255, 0.005);">
+              <div style="display: flex; flex-direction: column; gap: 14px;">
                 <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 4px;">{t("connNetworkConfig")}</div>
                 
                 <div style="display: grid; grid-template-columns: 2fr 3fr 1fr; gap: 12px;">
@@ -880,7 +880,7 @@ export default function SettingsPage(props: {
               </div>
 
               {/* Group 2: Auth & DB info */}
-              <div style="display: flex; flex-direction: column; gap: 14px; border: 1px solid var(--border-strong); padding: 16px; border-radius: 10px; background: rgba(255, 255, 255, 0.005); min-height: 262px;">
+              <div style="display: flex; flex-direction: column; gap: 14px; min-height: 210px; border-top: 1px solid var(--border-faint); padding-top: 20px; margin-top: 6px;">
                 <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 4px;">{t("authPermissions")}</div>
 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
