@@ -1127,49 +1127,37 @@ export default function SettingsPage(props: {
 
               {/* Bottom Test & Action Footer */}
               <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 6px; padding-top: 18px; border-top: 1px solid var(--border-faint);">
-                <Show when={testStatus().status !== "idle"}>
-                  <div 
-                    style={`padding: 10px 14px; border-radius: 6px; font-size: 12px; line-height: 1.5; border: 1px solid ${
-                      testStatus().status === "success" ? "rgba(80, 200, 120, 0.3)" : 
-                      testStatus().status === "error" ? "rgba(255, 80, 80, 0.3)" : 
-                      "rgba(80, 160, 255, 0.2)"
-                    }; background: ${
-                      testStatus().status === "success" ? "rgba(80, 200, 120, 0.06)" : 
-                      testStatus().status === "error" ? "rgba(255, 80, 80, 0.06)" : 
-                      "rgba(80, 160, 255, 0.05)"
-                    }; color: ${
-                      testStatus().status === "success" ? "var(--text-success)" : 
-                      testStatus().status === "error" ? "var(--text-danger)" : 
-                      "var(--brand)"
-                    }; overflow-wrap: break-word; word-break: break-all;`}
-                  >
-                    <div style="display: flex; gap: 8px; align-items: center;">
-                      <Show when={testStatus().status === "testing"} fallback={
-                        <span style="font-weight: bold; flex-shrink: 0; font-size: 14px;">
-                          {testStatus().status === "success" ? "✓" : "✕"}
-                        </span>
-                      }>
-                        <div class="loader-spinner" style="flex-shrink: 0;"></div>
-                      </Show>
-                      <div style="font-weight: 500;">
-                        {testStatus().status === "testing" ? t("testConnTesting") : (testStatus().status === "success" ? t("testConnSuccess") : testStatus().msg)}
-                      </div>
-                    </div>
-                  </div>
-                </Show>
-
-                <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
                   <button 
                     class="ss-btn ss-btn-secondary btn-sec-no-highlight" 
-                    style="padding: 6px 16px; font-size: 13px;"
+                    style="padding: 6px 16px; font-size: 13px; display: flex; align-items: center; gap: 6px;"
                     onClick={handleTestConnection} 
                     disabled={testStatus().status === "testing"}
                   >
+                    <Show when={testStatus().status === "testing"}>
+                      <div class="loader-spinner" style="border-top-color: var(--text-primary); width: 11px; height: 11px; border-width: 1.5px;"></div>
+                    </Show>
                     {testStatus().status === "testing" ? "正在测试..." : t("testConnBtn")}
                   </button>
+
+                  {/* Status Indicator inline next to the button */}
+                  <Show when={testStatus().status === "success"}>
+                    <span style="font-size: 12.5px; color: var(--text-success); display: flex; align-items: center; gap: 4px; font-weight: 500;">
+                      ✓ {t("testConnSuccess")}
+                    </span>
+                  </Show>
+                  <Show when={testStatus().status === "error"}>
+                    <span 
+                      style="font-size: 12px; color: var(--text-danger); display: flex; align-items: center; gap: 4px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px;" 
+                      title={testStatus().msg}
+                    >
+                      ✕ {testStatus().msg}
+                    </span>
+                  </Show>
+
                   <button 
                     class="ss-btn btn-prim-no-highlight" 
-                    style="padding: 6px 20px; font-size: 13px; font-weight: 500;"
+                    style="padding: 6px 20px; font-size: 13px; font-weight: 500; margin-left: auto;"
                     onClick={handleSaveConnection}
                   >
                     {t("saveAndApplyBtn")}
