@@ -644,6 +644,18 @@ export default function SettingsPage(props: {
           border-color: var(--border-strong) !important;
           background: var(--bg-hover) !important;
         }
+        .loader-spinner {
+          width: 13px;
+          height: 13px;
+          border: 2px solid var(--border-strong);
+          border-top: 2px solid var(--brand);
+          border-radius: 50%;
+          animation: loader-spin 0.8s linear infinite;
+        }
+        @keyframes loader-spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
       `}</style>
       {/* Settings Sidebar */}
       <aside class="settings-sidebar">
@@ -1117,26 +1129,29 @@ export default function SettingsPage(props: {
               <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 6px; padding-top: 18px; border-top: 1px solid var(--border-faint);">
                 <Show when={testStatus().status !== "idle"}>
                   <div 
-                    style={`padding: 12px 16px; border-radius: 8px; font-size: 12.5px; line-height: 1.5; border: 1px solid ${
+                    style={`padding: 10px 14px; border-radius: 6px; font-size: 12px; line-height: 1.5; border: 1px solid ${
                       testStatus().status === "success" ? "rgba(80, 200, 120, 0.3)" : 
                       testStatus().status === "error" ? "rgba(255, 80, 80, 0.3)" : 
-                      "var(--border-strong)"
+                      "rgba(80, 160, 255, 0.2)"
                     }; background: ${
                       testStatus().status === "success" ? "rgba(80, 200, 120, 0.06)" : 
                       testStatus().status === "error" ? "rgba(255, 80, 80, 0.06)" : 
-                      "rgba(255, 255, 255, 0.02)"
+                      "rgba(80, 160, 255, 0.05)"
                     }; color: ${
                       testStatus().status === "success" ? "var(--text-success)" : 
                       testStatus().status === "error" ? "var(--text-danger)" : 
-                      "var(--text-dim)"
+                      "var(--brand)"
                     }; overflow-wrap: break-word; word-break: break-all;`}
                   >
-                    <div style="display: flex; gap: 8px; align-items: flex-start;">
-                      <span style="font-weight: bold; flex-shrink: 0;">
-                        {testStatus().status === "testing" ? "🌀" : 
-                         testStatus().status === "success" ? "✓" : "✕"}
-                      </span>
-                      <div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                      <Show when={testStatus().status === "testing"} fallback={
+                        <span style="font-weight: bold; flex-shrink: 0; font-size: 14px;">
+                          {testStatus().status === "success" ? "✓" : "✕"}
+                        </span>
+                      }>
+                        <div class="loader-spinner" style="flex-shrink: 0;"></div>
+                      </Show>
+                      <div style="font-weight: 500;">
                         {testStatus().status === "testing" ? t("testConnTesting") : (testStatus().status === "success" ? t("testConnSuccess") : testStatus().msg)}
                       </div>
                     </div>
@@ -1150,7 +1165,7 @@ export default function SettingsPage(props: {
                     onClick={handleTestConnection} 
                     disabled={testStatus().status === "testing"}
                   >
-                    {testStatus().status === "testing" ? "..." : t("testConnBtn")}
+                    {testStatus().status === "testing" ? "正在测试..." : t("testConnBtn")}
                   </button>
                   <button 
                     class="ss-btn btn-prim-no-highlight" 

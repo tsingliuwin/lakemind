@@ -149,7 +149,7 @@ const translations: Record<Language, Record<string, string>> = {
     editConnTitle: "编辑数据库连接",
     addConnTitle: "配置新的数据库连接",
     testConnSuccess: "连接成功！",
-    testConnTesting: "正在尝试测试建立数据库网络连接，请稍候...",
+    testConnTesting: "正在测试网络连接...",
     linkToWorkspaceTooltip: "加载到工作区",
     unlinkFromWorkspaceTooltip: "取消关联工作区",
     // LeftNav External Data Explorer
@@ -304,7 +304,7 @@ const translations: Record<Language, Record<string, string>> = {
     editConnTitle: "Edit Connection",
     addConnTitle: "Configure New Connection",
     testConnSuccess: "Connected successfully!",
-    testConnTesting: "Testing database network connection, please wait...",
+    testConnTesting: "Testing network connection...",
     linkToWorkspaceTooltip: "Load to workspace",
     unlinkFromWorkspaceTooltip: "Unlink from workspace",
     // LeftNav External Data Explorer
