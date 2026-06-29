@@ -153,7 +153,7 @@ const translations: Record<Language, Record<string, string>> = {
     linkToWorkspaceTooltip: "加载到工作区",
     unlinkFromWorkspaceTooltip: "取消关联工作区",
     // LeftNav External Data Explorer
-    externalData: "外部数据",
+    externalData: "数据库",
     noTables: "库中暂无数据表",
     addBtn: "添加",
     addedLabel: "✓ 已加",
@@ -308,7 +308,7 @@ const translations: Record<Language, Record<string, string>> = {
     linkToWorkspaceTooltip: "Load to workspace",
     unlinkFromWorkspaceTooltip: "Unlink from workspace",
     // LeftNav External Data Explorer
-    externalData: "External Data",
+    externalData: "Databases",
     noTables: "No tables in database",
     addBtn: "Add",
     addedLabel: "✓ Added",
