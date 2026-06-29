@@ -285,19 +285,19 @@ export default function SettingsPage(props: {
   const startAddConnection = () => {
     setEditingConn({
       id: "",
-      name: "",
+      name: "local_postgres",
       dbType: "postgres",
       host: "localhost",
       port: 5432,
-      databaseName: "",
-      username: "",
+      databaseName: "postgres",
+      username: "postgres",
     });
-    setFormName("");
+    setFormName("local_postgres");
     setFormType("postgres");
     setFormHost("localhost");
     setFormPort(5432);
-    setFormDatabase("");
-    setFormUsername("");
+    setFormDatabase("postgres");
+    setFormUsername("postgres");
     setFormPassword("");
     setFormSslMode("disable");
     setShowPassword(false);
@@ -779,6 +779,9 @@ export default function SettingsPage(props: {
                     onClick={() => {
                       setFormType("postgres");
                       if (formPort() === 3306) setFormPort(5432);
+                      if (formName() === "local_mysql" || formName() === "") setFormName("local_postgres");
+                      if (formUsername() === "root" || formUsername() === "") setFormUsername("postgres");
+                      if (formDatabase() === "mysql" || formDatabase() === "") setFormDatabase("postgres");
                     }}
                     style={`display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-radius: 10px; border: 2px solid transparent; background: ${formType() === "postgres" ? "rgba(80, 160, 255, 0.06)" : "rgba(255, 255, 255, 0.015)"}; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: ${formType() === "postgres" ? "0 4px 12px rgba(80, 160, 255, 0.1)" : "none"}`}
                     class="db-type-card"
@@ -808,6 +811,9 @@ export default function SettingsPage(props: {
                     onClick={() => {
                       setFormType("mysql");
                       if (formPort() === 5432) setFormPort(3306);
+                      if (formName() === "local_postgres" || formName() === "") setFormName("local_mysql");
+                      if (formUsername() === "postgres" || formUsername() === "") setFormUsername("root");
+                      if (formDatabase() === "postgres" || formDatabase() === "") setFormDatabase("mysql");
                     }}
                     style={`display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-radius: 10px; border: 2px solid transparent; background: ${formType() === "mysql" ? "rgba(255, 140, 0, 0.06)" : "rgba(255, 255, 255, 0.015)"}; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: ${formType() === "mysql" ? "0 4px 12px rgba(255, 140, 0, 0.1)" : "none"}`}
                     class="db-type-card"
