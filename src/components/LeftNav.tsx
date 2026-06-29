@@ -1002,12 +1002,26 @@ export default function LeftNav(props: {
                               </div>
                             </Show>
                             <For each={group[1]}>
-                              {(t) => (
+                              {(t) => {
+                                // Hover text for an external-database view: reconstruct the
+                                // human-friendly origin (label = "<conn>.<schema>.<table>")
+                                // and surface the live-read caveat. Falls back to the generic
+                                // last-path-segment tip for local tables.
+                                const extTitle = () => {
+                                  const m = t.path.match(/^db:\/\/[^/]+\/([^/]*)\/(.*)$/);
+                                  const schema = m?.[1] ?? "";
+                                  const table = m?.[2] ?? t.name;
+                                  const dbKind = t.kind === "mysql" ? "MySQL" : "PostgreSQL";
+                                  const origin = schema ? `${dbKind} · ${schema}.${table}` : `${dbKind} · ${table}`;
+                                  const rows = t.rowCountEstimate != null ? `\n约 ${formatCount(t.rowCountEstimate!)} 行` : "";
+                                  return `${origin}（视图，实时读取，零拷贝）${rows}`;
+                                };
+                                return (
                                 <button
                                   class="tree-leaf"
                                   classList={{ selected: props.selected === t.name }}
                                   disabled={props.busy}
-                                  title={t.path.split("/").pop() ?? t.path}
+                                  title={t.path.startsWith("db://") ? extTitle() : (t.path.split("/").pop() ?? t.path)}
                                   onClick={() => handleSelectTable(t)}
                                   onContextMenu={(e) => {
                                     e.preventDefault();
@@ -1051,7 +1065,8 @@ export default function LeftNav(props: {
                                     </span>
                                   </Show>
                                 </button>
-                              )}
+                                );
+                              }}
                             </For>
                           </div>
                           );
