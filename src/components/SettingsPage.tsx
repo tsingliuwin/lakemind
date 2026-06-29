@@ -1537,7 +1537,7 @@ export default function SettingsPage(props: {
         </Show>
 
         {/* Placeholders for other tabs */}
-        <Show when={activeTab() !== "general" && activeTab() !== "modelSettings" && activeTab() !== "commands" && activeTab() !== "codePreview"}>
+        <Show when={activeTab() !== "general" && activeTab() !== "modelSettings" && activeTab() !== "commands" && activeTab() !== "codePreview" && activeTab() !== "databases"}>
           <div class="settings-view-header">
             <h2>{t("settings")}</h2>
             <p class="settings-view-subtitle">{t("moduleDeveloping")}...</p>
