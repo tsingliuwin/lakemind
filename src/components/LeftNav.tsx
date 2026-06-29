@@ -777,11 +777,12 @@ export default function LeftNav(props: {
                                 onClick={() => toggleDbConn(conn)}
                               >
                                 <div style="display: flex; align-items: center; gap: 6px;">
-                                  <span style="color: var(--brand); display: inline-flex; align-items: center;">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
-                                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-                                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
-                                    </svg>
+                                  <span style="display: inline-flex; align-items: center;">
+                                    <Show when={conn.dbType === "postgres"} fallback={
+                                      <span style="font-size: 8px; font-weight: 800; background: rgba(255, 140, 0, 0.16); color: #ffa500; width: 13px; height: 13px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; line-height: 1; font-family: system-ui, -apple-system, sans-serif; flex-shrink: 0;">M</span>
+                                    }>
+                                      <span style="font-size: 8px; font-weight: 800; background: rgba(80, 160, 255, 0.16); color: var(--brand); width: 13px; height: 13px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; line-height: 1; font-family: system-ui, -apple-system, sans-serif; flex-shrink: 0;">P</span>
+                                    </Show>
                                   </span>
                                   <span style="font-weight: 500; font-size: 12px;">{conn.name}</span>
                                 </div>
