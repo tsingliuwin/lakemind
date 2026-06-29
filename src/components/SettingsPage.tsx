@@ -949,9 +949,8 @@ export default function SettingsPage(props: {
                 {/* SSL Mode (Postgres Only) */}
                 <Show when={formType() === "postgres"}>
                   <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
-                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center;">
                       <label style="font-size: 11.5px; color: var(--text-dim);">{t("sslModeLabel")}</label>
-                      <span style="font-size: 10px; color: var(--text-dim); opacity: 0.7;">{t("sslModeTip")}</span>
                     </div>
                     <Select
                       options={[
