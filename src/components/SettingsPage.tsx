@@ -538,6 +538,11 @@ export default function SettingsPage(props: {
         .sp-input:hover:not(:focus) {
           border-color: var(--border-strong) !important;
         }
+        .sp-input:focus {
+          border-color: var(--text-dim) !important;
+          background: var(--bg-active) !important;
+          box-shadow: none !important;
+        }
       `}</style>
       {/* Settings Sidebar */}
       <aside class="settings-sidebar">
