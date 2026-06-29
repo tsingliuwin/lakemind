@@ -916,24 +916,30 @@ export default function SettingsPage(props: {
                 </div>
 
                 {/* SSL Mode (Postgres Only) */}
-                <Show when={formType() === "postgres"}>
-                  <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
-                    <div style="display: flex; align-items: center; justify-content: space-between;">
-                      <label style="font-size: 11.5px; color: var(--text-dim);">{t("sslModeLabel")}</label>
-                      <span style="font-size: 10px; color: var(--text-dim); opacity: 0.7;">{t("sslModeTip")}</span>
-                    </div>
-                    <Select
-                      options={[
-                        { label: "disable", value: "disable" },
-                        { label: "require", value: "require" },
-                        { label: "verify-ca", value: "verify-ca" },
-                        { label: "verify-full", value: "verify-full" }
-                      ]}
-                      value={formSslMode()}
-                      onChange={(v) => setFormSslMode(v)}
-                    />
+                <div 
+                  style={`display: flex; flex-direction: column; gap: 6px; margin-top: 4px; transition: all 0.2s ease-in-out; ${
+                    formType() === "postgres" ? "" : "opacity: 0.35; pointer-events: none;"
+                  }`}
+                >
+                  <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <label style="font-size: 11.5px; color: var(--text-dim);">{t("sslModeLabel")}</label>
+                    <span style="font-size: 10px; color: var(--text-dim); opacity: 0.7;">
+                      {formType() === "postgres" ? t("sslModeTip") : "（仅适用于 PostgreSQL）"}
+                    </span>
                   </div>
-                </Show>
+                  <Select
+                    options={[
+                      { label: "disable", value: "disable" },
+                      { label: "require", value: "require" },
+                      { label: "verify-ca", value: "verify-ca" },
+                      { label: "verify-full", value: "verify-full" }
+                    ]}
+                    value={formType() === "postgres" ? formSslMode() : "disable"}
+                    onChange={(v) => { if (formType() === "postgres") setFormSslMode(v); }}
+                    width="100%"
+                    disabled={formType() !== "postgres"}
+                  />
+                </div>
               </div>
 
               {/* Bottom Test & Action Footer */}
