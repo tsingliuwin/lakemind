@@ -959,7 +959,6 @@ export default function SettingsPage(props: {
                   </div>
                 </Show>
               </div>
-              </div>
 
               {/* Bottom Test & Action Footer */}
               <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 6px; padding-top: 18px; border-top: 1px solid var(--border-faint);">
