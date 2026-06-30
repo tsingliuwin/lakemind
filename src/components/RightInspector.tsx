@@ -31,7 +31,7 @@ export default function RightInspector(props: {
   const [copied, setCopied] = createSignal(false);
   const [copiedDdl, setCopiedDdl] = createSignal(false);
   const [ddl, setDdl] = createSignal<string | null>(null);
-  const [ddlLoading, setDdlLoading] = createSignal(false);
+  const [_ddlLoading, setDdlLoading] = createSignal(false);
   const [ddlOpen, setDdlOpen] = createSignal(false);
 
   createEffect(() => {

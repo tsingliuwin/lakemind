@@ -107,6 +107,10 @@ export default function SettingsPage(props: {
   const [editingProviderId, setEditingProviderId] = createSignal<string | null>(null);
   const [tempName, setTempName] = createSignal("");
 
+  // Database sampling state
+  const [sampleEnabled, setSampleEnabled] = createSignal(true);
+  const [sampleLimit, setSampleLimit] = createSignal(10000);
+
 
 
   // New provider temp states
@@ -142,7 +146,7 @@ export default function SettingsPage(props: {
   const [formSslMode, setFormSslMode] = createSignal("disable");
   const [showPassword, setShowPassword] = createSignal(false);
   const [formUri, setFormUri] = createSignal("");
-  const [uriStatus, setUriStatus] = createSignal<{ status: "idle" | "success" | "error" }>({ status: "idle" });
+  const [uriStatus, setUriStatus] = createSignal<{ status: "idle" | "success" | "error"; errorMsg?: string }>({ status: "idle" });
 
   const loadConnections = async () => {
     try {
@@ -411,6 +415,24 @@ export default function SettingsPage(props: {
     } catch (err) {
       console.error("Failed to load settings:", err);
     }
+
+    // Load database sampling configurations
+    try {
+      const enabledVal = await invoke<string | null>("get_app_config", { key: "explore.materialized_sample_enabled" });
+      if (enabledVal !== null) {
+        setSampleEnabled(enabledVal === "true");
+      }
+      const limitVal = await invoke<string | null>("get_app_config", { key: "explore.materialized_sample_limit" });
+      if (limitVal !== null) {
+        const parsed = parseInt(limitVal, 10);
+        if (!isNaN(parsed)) {
+          setSampleLimit(parsed);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load app config settings:", err);
+    }
+
     loadConnections();
     loadWorkspaceLinks();
   });
@@ -422,6 +444,24 @@ export default function SettingsPage(props: {
     invoke("save_settings_json", { json: JSON.stringify(updated, null, 2) }).catch(err => {
       console.error("Failed to save settings:", err);
     });
+  };
+
+  const handleToggleSampleEnabled = async (enabled: boolean) => {
+    setSampleEnabled(enabled);
+    try {
+      await invoke("set_app_config", { key: "explore.materialized_sample_enabled", value: enabled ? "true" : "false" });
+    } catch (err) {
+      console.error("Failed to save explore.materialized_sample_enabled:", err);
+    }
+  };
+
+  const handleUpdateSampleLimit = async (limit: number) => {
+    setSampleLimit(limit);
+    try {
+      await invoke("set_app_config", { key: "explore.materialized_sample_limit", value: limit.toString() });
+    } catch (err) {
+      console.error("Failed to save explore.materialized_sample_limit:", err);
+    }
   };
 
   const updateProviderProperty = (providerId: string, property: keyof ModelProvider, value: any) => {
@@ -1365,16 +1405,44 @@ export default function SettingsPage(props: {
                 <p class="settings-row-desc">即席执行 SQL 或对话探索时单次查询的最大允许时间，超时自动中断以防卡顿。</p>
               </div>
               <Select
-                value={settings().queryTimeout !== undefined ? settings().queryTimeout : 60}
+                value={String(settings().queryTimeout !== undefined ? settings().queryTimeout : 60)}
                 onChange={(v) => updateSetting("queryTimeout", Number(v))}
                 width="fit-content"
                 options={[
-                  { value: 30, label: "30 秒" },
-                  { value: 60, label: "1 分钟 (默认)" },
-                  { value: 180, label: "3 分钟" },
-                  { value: 300, label: "5 分钟" },
-                  { value: 0, label: "无限制" },
+                  { value: "30", label: "30 秒" },
+                  { value: "60", label: "1 分钟 (默认)" },
+                  { value: "180", label: "3 分钟" },
+                  { value: "300", label: "5 分钟" },
+                  { value: "0", label: "无限制" },
                 ]}
+              />
+            </div>
+            <div class="settings-row-control">
+              <div class="settings-row-info">
+                <span class="label-title">外部数据库物化采样</span>
+                <p class="settings-row-desc">引入外部数据库表（PostgreSQL/MySQL）时开启本地物化采样缓存，以大幅提升探索和字段结构查验速度，并保护生产数据库。</p>
+              </div>
+              <button
+                class="ss-toggle"
+                classList={{ on: sampleEnabled() }}
+                onClick={() => handleToggleSampleEnabled(!sampleEnabled())}
+                aria-label="外部数据库物化采样"
+              />
+            </div>
+
+            <div class="settings-row-control">
+              <div class="settings-row-info">
+                <span class="label-title">物化采样限制行数</span>
+                <p class="settings-row-desc">进行外部表本地物化采样缓存时，每个表的最大采样行数限制。</p>
+              </div>
+              <input
+                type="number"
+                class="ss-input"
+                style={{ width: "120px", "text-align": "right" }}
+                value={sampleLimit()}
+                onInput={(e) => handleUpdateSampleLimit(parseInt(e.currentTarget.value) || 0)}
+                disabled={!sampleEnabled()}
+                min="1"
               />
             </div>
           </div>
