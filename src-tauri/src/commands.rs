@@ -2313,7 +2313,7 @@ pub async fn register_database_table(
         let sample_limit = db::get_config(&sqlite, "explore.materialized_sample_limit")
             .unwrap_or(None)
             .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(1000);
+            .unwrap_or(10000);
 
         // 3. Determine if we should materialize a local sample or create a view
         let do_sample = sample_enabled && (approx_rows > sample_limit as i64 || approx_rows <= 0);
