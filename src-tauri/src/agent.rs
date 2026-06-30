@@ -1366,6 +1366,154 @@ impl Tool for SampleDataTool {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+struct MaterializeRemoteTableArgs {
+    table_name: String,
+}
+
+struct MaterializeRemoteTableTool {
+    app_state: AppState,
+    task_id: String,
+    window: tauri::Window,
+}
+
+impl Tool for MaterializeRemoteTableTool {
+    const NAME: &'static str = "materialize_remote_table";
+    type Error = ToolError;
+    type Args = MaterializeRemoteTableArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "materialize_remote_table".to_string(),
+            description: "将指定的外部数据库表/采样表（如 s_db_cdp_message_sending_notification）完整导入为本地 DuckDB 物理表，以实现全量数据的高速本地分析 and 聚合。此操作在数据表极大时可能会消耗较多的网络 and 存储空间。当需要对一个大表进行多次复杂的 OLAP 聚合分析（如频繁 GROUP BY / ORDER BY）时，你应该自主判断是否建议 or 执行此操作，从而避免跨网络全表扫描带来的极大延迟。".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "table_name": { "type": "string", "description": "要进行全量本地物化的采样表或外部表名，例如 s_postgres_users" }
+                },
+                "required": ["table_name"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let table_name = args.table_name.trim();
+        if !table_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            return Err(ToolError("表名包含非法字符，仅允许字母、数字和下划线。".to_string()));
+        }
+
+        let ws_path = self.app_state.workspace_path.lock().await.clone();
+        let conn = self.app_state.conn.clone();
+        let table_name_str = table_name.to_string();
+
+        let call_id = next_tool_id("mat");
+        emit_tool_call(
+            &self.window, &self.task_id, &call_id, "materialize_remote_table",
+            json!({ "table_name": table_name }),
+        );
+
+        let start = std::time::Instant::now();
+
+        // 1. Get SourceRecord from SQLite
+        let source_record_opt = tokio::task::spawn_blocking(move || {
+            let sqlite = crate::db::get_db_conn()?;
+            crate::db::get_source_by_table(&sqlite, &ws_path, &table_name_str)
+        })
+        .await
+        .map_err(|e| ToolError(format!("线程执行失败: {e}")))
+        .and_then(|res| res.map_err(|e| ToolError(format!("数据库查询失败: {e}"))))?;
+
+        let source_record = match source_record_opt {
+            Some(r) => r,
+            None => {
+                let err_msg = format!("未找到该表 '{}' 的注册元数据。确保它是已挂载的外部表。", table_name);
+                emit_tool_result(
+                    &self.window, &self.task_id, &call_id, "error",
+                    err_msg.clone(), None, None, Some(start.elapsed().as_millis() as u64), None,
+                );
+                return Err(ToolError(err_msg));
+            }
+        };
+
+        // 2. Perform table drop & drop view, then CREATE TABLE AS SELECT *
+        let full_path = source_record.scan_path.clone();
+        let table_name_clone = table_name.to_string();
+        let conn_clone = conn.clone();
+
+        let exec_res = tokio::task::spawn_blocking(move || -> Result<i64, String> {
+            let guard = conn_clone.blocking_lock();
+            // Drop view/table to clean up any existing sample view/table
+            let _ = guard.execute(&format!("DROP VIEW IF EXISTS \"{}\";", table_name_clone), []);
+            let _ = guard.execute(&format!("DROP TABLE IF EXISTS \"{}\";", table_name_clone), []);
+            
+            // Materialize the full remote table locally
+            let create_sql = format!("CREATE TABLE \"{}\" AS SELECT * FROM {};", table_name_clone, full_path);
+            guard.execute(&create_sql, []).map_err(|e| e.to_string())?;
+
+            // Retrieve the imported row count
+            let count_sql = format!("SELECT COUNT(*)::BIGINT FROM \"{}\";", table_name_clone);
+            let imported_rows = guard.query_row(&count_sql, [], |row| row.get::<_, i64>(0)).unwrap_or(0);
+            Ok(imported_rows)
+        })
+        .await
+        .map_err(|e| ToolError(format!("线程执行失败: {e}")))
+        .and_then(|res| res.map_err(|e| ToolError(format!("物化数据失败: {e}"))));
+
+        let elapsed = start.elapsed().as_millis() as u64;
+
+        match exec_res {
+            Ok(imported_rows) => {
+                // 3. Update metadata in SQLite
+                let ws_path = self.app_state.workspace_path.lock().await.clone();
+                let table_name_clone = table_name.to_string();
+                let conn_clone = conn.clone();
+                let mut updated_record = source_record;
+                updated_record.storage = "table".to_string();
+                updated_record.is_sampled = false;
+                updated_record.row_count = Some(imported_rows);
+                updated_record.full_row_count = Some(imported_rows);
+
+                let update_db_res = tokio::task::spawn_blocking(move || -> Result<(), String> {
+                    let sqlite = crate::db::get_db_conn()?;
+                    // Describe the new columns schema
+                    let guard = conn_clone.blocking_lock();
+                    if let Ok(new_cols) = crate::duckdb::schema::describe_view(&guard, &table_name_clone) {
+                        updated_record.columns = new_cols;
+                    }
+                    crate::db::upsert_source(&sqlite, &ws_path, &updated_record)?;
+                    Ok(())
+                })
+                .await
+                .map_err(|e| ToolError(format!("线程执行失败: {e}")))
+                .and_then(|res| res.map_err(|e| ToolError(format!("更新元数据失败: {e}"))));
+
+                if let Err(err) = update_db_res {
+                    emit_tool_result(
+                        &self.window, &self.task_id, &call_id, "error",
+                        err.0.clone(), None, None, Some(elapsed), None,
+                    );
+                    return Err(err);
+                }
+
+                let summary = format!("成功将外部表 {} 完整物化到本地 DuckDB，共导入 {} 行数据。", table_name, imported_rows);
+                emit_tool_result(
+                    &self.window, &self.task_id, &call_id, "ok",
+                    summary.clone(), None, None, Some(elapsed), None,
+                );
+                Ok(summary)
+            }
+            Err(err) => {
+                emit_tool_result(
+                    &self.window, &self.task_id, &call_id, "error",
+                    err.0.clone(), None, None, Some(elapsed), None,
+                );
+                Err(err)
+            }
+        }
+    }
+}
+
 // ===========================================================================
 // DDL Tools — create_table / create_view / drop_object
 //
@@ -2315,6 +2463,10 @@ pub async fn run_agent_chat_stream(
     let tidy_okf_2 = TidyOkfKnowledgeTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone(), model_id: model_id.clone() };
     let tidy_okf_3 = TidyOkfKnowledgeTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone(), model_id: model_id.clone() };
 
+    let materialize_tool_1 = MaterializeRemoteTableTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    let materialize_tool_2 = MaterializeRemoteTableTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+    let materialize_tool_3 = MaterializeRemoteTableTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
+
     let ddl_shared = DdlToolShared {
         app_state: app_state.clone(),
         task_id: task_id.clone(),
@@ -2365,6 +2517,7 @@ pub async fn run_agent_chat_stream(
         search_okf_1.definition(String::new()).await,
         check_okf_1.definition(String::new()).await,
         tidy_okf_1.definition(String::new()).await,
+        materialize_tool_1.definition(String::new()).await,
     ];
     let tools_json = serde_json::to_string(&tool_defs).unwrap_or_default();
     let ws_dir = app_state.workspace_dir.lock().await.to_string_lossy().to_string();
@@ -2409,7 +2562,8 @@ pub async fn run_agent_chat_stream(
             .tool(write_okf_1)
             .tool(search_okf_1)
             .tool(check_okf_1)
-            .tool(tidy_okf_1);
+            .tool(tidy_okf_1)
+            .tool(materialize_tool_1);
 
         if model_id.starts_with("o1") || model_id.starts_with("o3") {
             agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
@@ -2454,7 +2608,8 @@ pub async fn run_agent_chat_stream(
             .tool(write_okf_2)
             .tool(search_okf_2)
             .tool(check_okf_2)
-            .tool(tidy_okf_2);
+            .tool(tidy_okf_2)
+            .tool(materialize_tool_2);
 
         if model_id.starts_with("o1") || model_id.starts_with("o3") {
             agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
@@ -2500,6 +2655,7 @@ pub async fn run_agent_chat_stream(
             .tool(search_okf_3)
             .tool(check_okf_3)
             .tool(tidy_okf_3)
+            .tool(materialize_tool_3)
             .build();
 
         let stream = agent.stream_chat(prompt.clone(), rig_history)
