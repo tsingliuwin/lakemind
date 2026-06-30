@@ -122,6 +122,28 @@ struct ChatMessageDto {
 #[serde(rename_all = "camelCase")]
 struct SavedSettings {
     providers: Vec<ModelProvider>,
+    #[serde(default)]
+    query_timeout: Option<u64>,
+}
+
+pub(crate) fn get_query_timeout() -> Option<u64> {
+    let mut path = match crate::db::get_lakemind_dir() {
+        Ok(p) => p,
+        Err(_) => return Some(60),
+    };
+    path.push("settings.json");
+    if !path.exists() {
+        return Some(60);
+    }
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return Some(60),
+    };
+    let settings: SavedSettings = match serde_json::from_str(&content) {
+        Ok(s) => s,
+        Err(_) => return Some(60),
+    };
+    settings.query_timeout.or(Some(60))
 }
 
 #[allow(dead_code)]

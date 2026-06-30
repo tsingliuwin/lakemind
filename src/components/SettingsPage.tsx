@@ -1358,6 +1358,25 @@ export default function SettingsPage(props: {
                 </button>
               </div>
             </div>
+
+            <div class="settings-row-control">
+              <div class="settings-row-info">
+                <span class="label-title">查询超时限制</span>
+                <p class="settings-row-desc">即席执行 SQL 或对话探索时单次查询的最大允许时间，超时自动中断以防卡顿。</p>
+              </div>
+              <Select
+                value={settings().queryTimeout !== undefined ? settings().queryTimeout : 60}
+                onChange={(v) => updateSetting("queryTimeout", Number(v))}
+                width="fit-content"
+                options={[
+                  { value: 30, label: "30 秒" },
+                  { value: 60, label: "1 分钟 (默认)" },
+                  { value: 180, label: "3 分钟" },
+                  { value: 300, label: "5 分钟" },
+                  { value: 0, label: "无限制" },
+                ]}
+              />
+            </div>
           </div>
         </Show>
 

@@ -15,6 +15,22 @@ use crate::model::SqlResult;
 /// no cap (the caller must opt in explicitly via the UI).
 pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> AppResult<SqlResult> {
     let start = Instant::now();
+    let interrupt_handle = conn.interrupt_handle();
+    let timeout_secs = crate::agent::get_query_timeout().unwrap_or(60);
+
+    let timer_cancel = if timeout_secs > 0 {
+        let handle = interrupt_handle.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            if rx.recv_timeout(std::time::Duration::from_secs(timeout_secs)).is_err() {
+                println!("[timeout] Query execution exceeded {} seconds, interrupting connection...", timeout_secs);
+                handle.interrupt();
+            }
+        });
+        Some(tx)
+    } else {
+        None
+    };
 
     // Wrap the user's SQL as a subquery so an arbitrary statement (SELECT,
     // UNION, CTE, even one that already has LIMIT) can be safely capped.
@@ -25,38 +41,59 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
         None => format!("SELECT * FROM ({inner}) AS _lakemind_q"),
     };
 
-    let mut stmt = conn.prepare(&wrapped)?;
-    // Execute once to populate the statement's schema metadata; the schema is
-    // only available *after* execution. We then re-read rows via raw_query
-    // (which does not re-execute) so we can borrow stmt immutably for schema.
-    stmt.execute([])?;
-    let schema = stmt.schema();
-    let column_names: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
-    let column_types: Vec<String> = schema.fields().iter().map(|f| format!("{}", f.data_type())).collect();
-    let col_count = column_names.len();
+    let query_res = (|| -> AppResult<SqlResult> {
+        let mut stmt = conn.prepare(&wrapped)?;
+        // Execute once to populate the statement's schema metadata; the schema is
+        // only available *after* execution. We then re-read rows via raw_query
+        // (which does not re-execute) so we can borrow stmt immutably for schema.
+        stmt.execute([])?;
+        let schema = stmt.schema();
+        let column_names: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
+        let column_types: Vec<String> = schema.fields().iter().map(|f| format!("{}", f.data_type())).collect();
+        let col_count = column_names.len();
 
-    let mut rows_out: Vec<Vec<serde_json::Value>> = Vec::new();
-    let mut iter = stmt.raw_query();
-    while let Some(row) = iter.next()? {
-        let mut out = Vec::with_capacity(col_count);
-        for i in 0..col_count {
-            let val: DuckValue = row.get(i)?;
-            out.push(duck_value_to_json(val));
+        let mut rows_out: Vec<Vec<serde_json::Value>> = Vec::new();
+        let mut iter = stmt.raw_query();
+        while let Some(row) = iter.next()? {
+            let mut out = Vec::with_capacity(col_count);
+            for i in 0..col_count {
+                let val: DuckValue = row.get(i)?;
+                out.push(duck_value_to_json(val));
+            }
+            rows_out.push(out);
         }
-        rows_out.push(out);
+
+        let truncated = cap.map_or(false, |n| rows_out.len() >= n);
+        let row_count = rows_out.len();
+
+        Ok(SqlResult {
+            columns: column_names,
+            column_types,
+            rows: rows_out,
+            row_count,
+            truncated,
+            elapsed_ms: start.elapsed().as_millis() as u64,
+        })
+    })();
+
+    if let Some(tx) = timer_cancel {
+        let _ = tx.send(());
     }
 
-    let truncated = cap.map_or(false, |n| rows_out.len() >= n);
-    let row_count = rows_out.len();
-
-    Ok(SqlResult {
-        columns: column_names,
-        column_types,
-        rows: rows_out,
-        row_count,
-        truncated,
-        elapsed_ms: start.elapsed().as_millis() as u64,
-    })
+    match query_res {
+        Ok(res) => Ok(res),
+        Err(e) => {
+            let err_msg = e.to_string();
+            if err_msg.contains("interrupted") || err_msg.contains("Interrupt") {
+                Err(crate::error::AppError::new(format!(
+                    "查询超时已被自动中断（当前限制为 {} 秒）。可在“设置”->“常规”中调整该限制。",
+                    timeout_secs
+                )))
+            } else {
+                Err(e)
+            }
+        }
+    }
 }
 
 /// Map a DuckDB runtime value to JSON, preserving nulls and numeric precision.
