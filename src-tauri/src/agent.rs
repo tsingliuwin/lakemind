@@ -471,16 +471,18 @@ impl Tool for ListTablesTool {
                     if rec.is_sampled {
                         let full_rows_str = rec.full_row_count.map(|c: i64| c.to_string()).unwrap_or_else(|| "未知".to_string());
                         descriptions.push(format!(
-                            "{} (已本地物化采样 {} 行，外部全量大约 {} 行，全量直连路径为 \"{}\")",
+                            "{} (已本地物化采样 {} 行，外部全量大约 {} 行，类型是 \"{}\"，全量直连路径为 \"{}\")",
                             tname,
                             rec.row_count.unwrap_or(0),
                             full_rows_str,
+                            rec.kind,
                             rec.scan_path
                         ));
                     } else {
                         descriptions.push(format!(
-                            "{} (全量，行数: {})",
+                            "{} (全量，类型是 \"{}\"，行数: {})",
                             tname,
+                            rec.kind,
                             rec.row_count.map(|c: i64| c.to_string()).unwrap_or_else(|| "未知".to_string())
                         ));
                     }
@@ -608,15 +610,18 @@ impl Tool for DescribeTableTool {
                 if let Some(ref rec) = source_record {
                     if rec.is_sampled {
                         let full_rows_str = rec.full_row_count.map(|c| c.to_string()).unwrap_or_else(|| "未知".to_string());
+                        let db_alias = rec.scan_path.split('.').next().unwrap_or("db_conn");
                         header_info = format!(
-                            " [注意: 该表当前是本地物化采样缓存，包含 {} 行数据。外部生产数据库的全量总行数大约为 {} 行。如果你需要进行全量汇总或分析完整数据，请直接在 SQL 中查询外部表全量路径 \"{}\"]",
+                            " [注意: 该表当前是本地物化采样缓存，包含 {} 行数据，连接数据库类型为 \"{}\"。外部生产数据库的全量总行数大约为 {} 行。如果你需要进行全量汇总或分析完整数据，请优先使用原生下推函数，直接在 SQL 中查询 \"SELECT * FROM {}_query('{}', '...')\"]",
                             rec.row_count.unwrap_or(0),
+                            rec.kind,
                             full_rows_str,
-                            rec.scan_path
+                            rec.kind,
+                            db_alias
                         );
                     } else {
                         let rows_str = rec.row_count.map(|c| c.to_string()).unwrap_or_else(|| "未知".to_string());
-                        header_info = format!(" [全量数据表，行数: {}]", rows_str);
+                        header_info = format!(" [全量数据表，连接数据库类型为 \"{}\"，行数: {}]", rec.kind, rows_str);
                     }
                 }
                 
