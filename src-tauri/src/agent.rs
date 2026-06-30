@@ -1420,10 +1420,24 @@ impl Tool for MaterializeRemoteTableTool {
 
         let start = std::time::Instant::now();
 
-        // 1. Get SourceRecord from SQLite
-        let source_record_opt = tokio::task::spawn_blocking(move || {
+        // 1. Get SourceRecord from SQLite with fuzzy/fallback matching
+        let source_record_opt = tokio::task::spawn_blocking(move || -> Result<Option<crate::db::SourceRecord>, String> {
             let sqlite = crate::db::get_db_conn()?;
-            crate::db::get_source_by_table(&sqlite, &ws_path, &table_name_str)
+            // Try exact match first
+            if let Ok(Some(rec)) = crate::db::get_source_by_table(&sqlite, &ws_path, &table_name_str) {
+                return Ok(Some(rec));
+            }
+            // Fetch all sources to perform fallback fuzzy matching (e.g. user passes message_sending_notification, we match s_cdp_message_sending_notification)
+            let all_sources = crate::db::list_sources(&sqlite, &ws_path)?;
+            for src in all_sources {
+                if src.table_name.starts_with("s_") && (src.table_name.ends_with(&format!("_{}", table_name_str)) || src.table_name == table_name_str) {
+                    return Ok(Some(src));
+                }
+                if src.table_name == table_name_str || src.scan_path.ends_with(&format!(".{}", table_name_str)) {
+                    return Ok(Some(src));
+                }
+            }
+            Ok(None)
         })
         .await
         .map_err(|e| ToolError(format!("线程执行失败: {e}")))
@@ -1441,6 +1455,7 @@ impl Tool for MaterializeRemoteTableTool {
             }
         };
 
+        let actual_table_name = source_record.table_name.clone();
         let window_for_progress = self.window.clone();
         let task_id_for_progress = self.task_id.clone();
         let call_id_for_progress = call_id.clone();
@@ -1448,7 +1463,7 @@ impl Tool for MaterializeRemoteTableTool {
 
         // 2. Perform table drop & drop view, then CREATE TABLE AS SELECT * in chunks with progress reporting
         let full_path = source_record.scan_path.clone();
-        let table_name_clone = table_name.to_string();
+        let table_name_clone = actual_table_name.clone();
         let conn_clone = conn.clone();
 
         let exec_res = tokio::task::spawn_blocking(move || -> Result<i64, String> {
@@ -1519,7 +1534,7 @@ impl Tool for MaterializeRemoteTableTool {
             Ok(imported_rows) => {
                 // 3. Update metadata in SQLite
                 let ws_path = self.app_state.workspace_path.lock().await.clone();
-                let table_name_clone = table_name.to_string();
+                let table_name_clone = actual_table_name.clone();
                 let conn_clone = conn.clone();
                 let mut updated_record = source_record;
                 updated_record.storage = "table".to_string();
@@ -1549,7 +1564,7 @@ impl Tool for MaterializeRemoteTableTool {
                     return Err(err);
                 }
 
-                let summary = format!("成功将外部表 {} 完整物化到本地 DuckDB，共导入 {} 行数据。", table_name, imported_rows);
+                let summary = format!("成功将外部表 {} (本地表名: {}) 完整物化到本地 DuckDB，共导入 {} 行数据。", table_name, actual_table_name, imported_rows);
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "ok",
                     summary.clone(), None, None, Some(elapsed), None,
