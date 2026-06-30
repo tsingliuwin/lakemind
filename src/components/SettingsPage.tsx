@@ -129,6 +129,7 @@ export default function SettingsPage(props: {
   const [connections, setConnections] = createSignal<DbConnection[]>([]);
   const [editingConn, setEditingConn] = createSignal<DbConnection | null>(null);
   const [testStatus, setTestStatus] = createSignal<{ status: "idle" | "testing" | "success" | "error"; msg?: string }>({ status: "idle" });
+  const [copiedTestError, setCopiedTestError] = createSignal(false);
   const [linkedConns, setLinkedConns] = createSignal<Record<string, boolean>>({});
 
   const [formName, setFormName] = createSignal("");
@@ -1147,12 +1148,48 @@ export default function SettingsPage(props: {
                     </span>
                   </Show>
                   <Show when={testStatus().status === "error"}>
-                    <span 
-                      style="font-size: 12px; color: var(--text-danger); display: flex; align-items: center; gap: 4px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px;" 
-                      title={testStatus().msg}
-                    >
-                      ✕ {testStatus().msg}
-                    </span>
+                    <div style="display: flex; align-items: center; gap: 6px; max-width: 340px; min-width: 0;">
+                      <span 
+                        style="font-size: 12px; color: var(--text-danger); display: flex; align-items: center; gap: 4px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;" 
+                        title={testStatus().msg}
+                      >
+                        ✕ {testStatus().msg}
+                      </span>
+                      <button
+                        title={copiedTestError() ? "已复制" : "复制错误日志"}
+                        style="border: none; background: transparent; color: var(--text-dim); cursor: pointer; padding: 2px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.15s ease; flex-shrink: 0;"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          try {
+                            await navigator.clipboard.writeText(testStatus().msg || "");
+                            setCopiedTestError(true);
+                            setTimeout(() => setCopiedTestError(false), 1500);
+                          } catch {}
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.color = "var(--text-primary)";
+                          e.currentTarget.style.background = "var(--bg-hover)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.color = "var(--text-dim)";
+                          e.currentTarget.style.background = "transparent";
+                        }}
+                      >
+                        <Show
+                          when={copiedTestError()}
+                          fallback={
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                          }
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green, #10b981)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                          </svg>
+                        </Show>
+                      </button>
+                    </div>
                   </Show>
 
                   <button 
