@@ -1437,7 +1437,7 @@ export default function SettingsPage(props: {
               </div>
               <input
                 type="number"
-                class="ss-input"
+                class="sp-input"
                 style={{ width: "120px", "text-align": "right" }}
                 value={sampleLimit()}
                 onInput={(e) => handleUpdateSampleLimit(parseInt(e.currentTarget.value) || 0)}
