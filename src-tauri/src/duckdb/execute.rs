@@ -75,7 +75,17 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
         println!("[run_query] prepare ok: {} ms", t_prepare.elapsed().as_millis());
 
         let mut rows_out: Vec<Vec<serde_json::Value>> = Vec::new();
+        if let Some(cap_val) = cap {
+            rows_out.reserve(cap_val);
+        }
         let t_fetch = Instant::now();
+        // DuckDB's `schema()` only becomes available *after* the statement is
+        // executed, so we cannot know the column count before `query`. Instead
+        // we learn it from the first row (read with the old probe loop — read
+        // until a `get` fails) and then read every subsequent row by exact index.
+        // This removes the wasted failing `get` that the probe does once per row
+        // (N+1 gets → N gets for all rows after the first).
+        let mut ncol: usize = 0;
         {
             let mut iter = stmt.query([]).map_err(|e| {
                 println!("[run_query] query FAILED after {} ms: {}", t_fetch.elapsed().as_millis(), e);
@@ -90,22 +100,41 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
                     println!("[run_query] first row: {} ms", t_fetch.elapsed().as_millis());
                     logged_first = true;
                 }
-                
-                let mut out = Vec::new();
-                let mut idx = 0;
-                while let Ok(val) = row.get::<usize, DuckValue>(idx) {
-                    out.push(duck_value_to_json(val));
-                    idx += 1;
+
+                if ncol == 0 {
+                    // First row: probe the column count, collecting as we go.
+                    let mut out = Vec::new();
+                    let mut idx = 0;
+                    while let Ok(val) = row.get::<usize, DuckValue>(idx) {
+                        out.push(duck_value_to_json(val));
+                        idx += 1;
+                    }
+                    ncol = idx;
+                    rows_out.push(out);
+                } else {
+                    let mut out = Vec::with_capacity(ncol);
+                    for idx in 0..ncol {
+                        let val: DuckValue = row.get(idx).map_err(|e| {
+                            println!(
+                                "[run_query] col {} get FAILED after {} ms: {}",
+                                idx,
+                                t_fetch.elapsed().as_millis(),
+                                e
+                            );
+                            e
+                        })?;
+                        out.push(duck_value_to_json(val));
+                    }
+                    rows_out.push(out);
                 }
-                rows_out.push(out);
             }
         } // iter is dropped here, releasing the borrow on stmt
-        
-        // Extract schema now that the statement has been executed
+
+        // Now that the statement has been executed, its result schema is available.
         let schema = stmt.schema();
         let column_names: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
         let column_types: Vec<String> = schema.fields().iter().map(|f| format!("{}", f.data_type())).collect();
-        
+
         println!("[run_query] all rows: {} ms ({} rows)", t_fetch.elapsed().as_millis(), rows_out.len());
 
         let truncated = cap.map_or(false, |n| rows_out.len() >= n);
@@ -180,7 +209,12 @@ fn duck_value_to_json(v: DuckValue) -> serde_json::Value {
         DuckValue::Timestamp(unit, micros) => serde_json::Value::String(format_ts(unit, micros)),
         DuckValue::Text(s) => serde_json::Value::String(s),
         DuckValue::Blob(b) => {
-            let hex: String = b.iter().map(|byte| format!("{:02x}", byte)).collect();
+            // Render hex into one pre-sized String instead of one String per byte.
+            use std::fmt::Write as _;
+            let mut hex = String::with_capacity(b.len() * 2);
+            for byte in b.iter() {
+                let _ = write!(hex, "{:02x}", byte);
+            }
             serde_json::Value::String(hex)
         }
         DuckValue::Date32(days) => serde_json::Value::String(format_date(days)),

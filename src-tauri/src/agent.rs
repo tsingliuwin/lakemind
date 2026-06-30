@@ -1523,73 +1523,38 @@ impl Tool for MaterializeRemoteTableTool {
         };
 
         let actual_table_name = source_record.table_name.clone();
-        let window_for_progress = self.window.clone();
-        let task_id_for_progress = self.task_id.clone();
-        let call_id_for_progress = call_id.clone();
-        let approx_total = source_record.full_row_count.unwrap_or(0);
 
-        // 2. Perform table drop & drop view, then CREATE TABLE AS SELECT * in chunks with progress reporting
+        // 2. Drop any existing view/table, then bulk-materialize the whole remote
+        //    table in a single `CREATE TABLE AS SELECT *`. This replaces the former
+        //    row-by-row Appender (which did N+1 `row.get` + two Vec allocations per
+        //    row) with DuckDB's optimized bulk importer — large tables materialize
+        //    orders of magnitude faster. The trade-off is progress granularity: a
+        //    single CTAS exposes no intermediate row count, so we report only
+        //    start / finish (the user opted into this).
         let full_path = source_record.scan_path.clone();
         let table_name_clone = actual_table_name.clone();
         let conn_clone = conn.clone();
 
+        emit_tool_result(
+            &self.window, &self.task_id, &call_id, "running",
+            format!("正在将外部表「{}」全量物化到本地，数据量较大时可能需要一些时间...", table_name),
+            None, None, None, None,
+        );
+
         let exec_res = tokio::task::spawn_blocking(move || -> Result<i64, String> {
             let guard = conn_clone.blocking_lock();
-            // Drop view/table to clean up any existing sample view/table
             let _ = guard.execute(&format!("DROP VIEW IF EXISTS \"{}\";", table_name_clone), []);
             let _ = guard.execute(&format!("DROP TABLE IF EXISTS \"{}\";", table_name_clone), []);
-            
-            // Instantly create the empty table schema locally
-            let create_schema_sql = format!("CREATE TABLE \"{}\" AS SELECT * FROM {} LIMIT 0;", table_name_clone, full_path);
-            guard.execute(&create_schema_sql, []).map_err(|e| e.to_string())?;
 
-            // Retrieve data from remote
-            let select_sql = format!("SELECT * FROM {};", full_path);
-            let mut stmt = guard.prepare(&select_sql).map_err(|e| e.to_string())?;
-            let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+            let create_sql = format!("CREATE TABLE \"{}\" AS SELECT * FROM {};", table_name_clone, full_path);
+            guard.execute(&create_sql, []).map_err(|e| e.to_string())?;
 
-            let mut appender = guard.appender(&table_name_clone).map_err(|e| e.to_string())?;
-            
-            let mut count = 0;
-            let mut last_emit = std::time::Instant::now();
-
-            while let Some(row) = rows.next().map_err(|e| e.to_string())? {
-                let mut row_vals = Vec::new();
-                let mut idx = 0;
-                while let Ok(val) = row.get::<usize, duckdb::types::Value>(idx) {
-                    row_vals.push(val);
-                    idx += 1;
-                }
-
-                let to_sql_row: Vec<&dyn duckdb::ToSql> = row_vals.iter().map(|v| v as &dyn duckdb::ToSql).collect();
-                appender.append_row(duckdb::appender_params_from_iter(to_sql_row)).map_err(|e| e.to_string())?;
-
-                count += 1;
-
-                if count % 20000 == 0 || last_emit.elapsed() >= std::time::Duration::from_millis(500) {
-                    let pct_str = if approx_total > 0 {
-                        format!(" ({:.1}%)", (count as f64 / approx_total as f64) * 100.0)
-                    } else {
-                        String::new()
-                    };
-                    let prog_summary = format!("正在导入数据: 已物化 {} 行{}...", count, pct_str);
-                    emit_tool_result(
-                        &window_for_progress,
-                        &task_id_for_progress,
-                        &call_id_for_progress,
-                        "running",
-                        prog_summary,
-                        None,
-                        None,
-                        None,
-                        None,
-                    );
-                    last_emit = std::time::Instant::now();
-                }
-            }
-
-            std::mem::drop(appender);
-            Ok(count)
+            // Row count from the freshly materialized local table — DuckDB
+            // metadata pushdown makes this cheap even for large tables.
+            let n: i64 = guard
+                .query_row(&format!("SELECT count(*) FROM \"{}\"", table_name_clone), [], |r| r.get(0))
+                .map_err(|e| e.to_string())?;
+            Ok(n)
         })
         .await
         .map_err(|e| ToolError(format!("线程执行失败: {e}")))
@@ -1610,12 +1575,16 @@ impl Tool for MaterializeRemoteTableTool {
                 updated_record.full_row_count = Some(imported_rows);
 
                 let update_db_res = tokio::task::spawn_blocking(move || -> Result<(), String> {
-                    let sqlite = crate::db::get_db_conn()?;
-                    // Describe the new columns schema
-                    let guard = conn_clone.blocking_lock();
-                    if let Ok(new_cols) = crate::duckdb::schema::describe_view(&guard, &table_name_clone) {
-                        updated_record.columns = new_cols;
+                    // Describe columns under the DuckDB lock, then drop the guard
+                    // before touching SQLite so the two stores don't serialize.
+                    let new_cols = {
+                        let guard = conn_clone.blocking_lock();
+                        crate::duckdb::schema::describe_view(&guard, &table_name_clone).ok()
+                    };
+                    if let Some(cols) = new_cols {
+                        updated_record.columns = cols;
                     }
+                    let sqlite = crate::db::get_db_conn()?;
                     crate::db::upsert_source(&sqlite, &ws_path, &updated_record)?;
                     Ok(())
                 })

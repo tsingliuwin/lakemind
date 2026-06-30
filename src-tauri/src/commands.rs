@@ -134,46 +134,52 @@ pub async fn list_tables_fast(
     workspace_path: String,
     _state: State<'_, AppState>,
 ) -> Result<Vec<SourceTable>, String> {
-    let start = std::time::Instant::now();
-    let ws_dir = resolve_workspace_dir(&workspace_path)?;
-    let okf_views_dir = ws_dir.join("okf").join("views");
-    let okf_tables_dir = ws_dir.join("okf").join("tables");
+    // SQLite + per-def stat() calls: run on the blocking pool so the tokio
+    // worker thread stays free (this runs on startup / table-list refresh).
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<SourceTable>, String> {
+        let start = std::time::Instant::now();
+        let ws_dir = resolve_workspace_dir(&workspace_path)?;
+        let okf_views_dir = ws_dir.join("okf").join("views");
+        let okf_tables_dir = ws_dir.join("okf").join("tables");
 
-    // No lake attach, no DuckDB connection — just the SQLite caches.
-    let sqlite = db::get_db_conn()?;
-    let records = db::list_sources(&sqlite, &workspace_path)?;
-    let mut result: Vec<SourceTable> = records.iter().map(build_source_table_from_record).collect();
+        // No lake attach, no DuckDB connection — just the SQLite caches.
+        let sqlite = db::get_db_conn()?;
+        let records = db::list_sources(&sqlite, &workspace_path)?;
+        let mut result: Vec<SourceTable> = records.iter().map(build_source_table_from_record).collect();
 
-    // Agent-created views/tables from object_defs (cached columns + row count,
-    // valid as long as input_hash matches — verified later by warmup/sync).
-    let defs = db::list_object_defs(&sqlite, &workspace_path)?;
-    for d in &defs {
-        let view_okf = okf_views_dir.join(format!("{}.md", d.table_name));
-        let table_okf = okf_tables_dir.join(format!("{}.md", d.table_name));
-        if !view_okf.exists() && !table_okf.exists() {
-            continue;
+        // Agent-created views/tables from object_defs (cached columns + row count,
+        // valid as long as input_hash matches — verified later by warmup/sync).
+        let defs = db::list_object_defs(&sqlite, &workspace_path)?;
+        for d in &defs {
+            let view_okf = okf_views_dir.join(format!("{}.md", d.table_name));
+            let table_okf = okf_tables_dir.join(format!("{}.md", d.table_name));
+            if !view_okf.exists() && !table_okf.exists() {
+                continue;
+            }
+            result.push(SourceTable {
+                name: d.table_name.clone(),
+                label: d.table_name.clone(),
+                kind: SourceKind::View,
+                storage: StorageKind::Custom,
+                path: String::new(),
+                scan_path: String::new(),
+                partition_keys: Vec::new(),
+                row_count_estimate: d.row_count,
+                columns: d.columns.clone(),
+                is_sampled: false,
+                full_row_count: None,
+            });
         }
-        result.push(SourceTable {
-            name: d.table_name.clone(),
-            label: d.table_name.clone(),
-            kind: SourceKind::View,
-            storage: StorageKind::Custom,
-            path: String::new(),
-            scan_path: String::new(),
-            partition_keys: Vec::new(),
-            row_count_estimate: d.row_count,
-            columns: d.columns.clone(),
-            is_sampled: false,
-            full_row_count: None,
-        });
-    }
 
-    eprintln!(
-        "[boot] list_tables_fast: {} objects from SQLite in {}ms",
-        result.len(),
-        start.elapsed().as_millis()
-    );
-    Ok(result)
+        eprintln!(
+            "[boot] list_tables_fast: {} objects from SQLite in {}ms",
+            result.len(),
+            start.elapsed().as_millis()
+        );
+        Ok(result)
+    })
+    .await
+    .map_err(|e| format!("task join error: {e}"))?
 }
 
 /// All tables/views for the current workspace: registered sources (from the
@@ -413,26 +419,31 @@ pub async fn get_dependencies(
     state: State<'_, AppState>,
 ) -> Result<DepInfo, String> {
     let ws_path = state.workspace_path.lock().await.clone();
-    let sqlite = db::get_db_conn()?;
+    // SQLite queries (fingerprint graph): run on the blocking pool.
+    tauri::async_runtime::spawn_blocking(move || -> Result<DepInfo, String> {
+        let sqlite = db::get_db_conn()?;
 
-    // Try object_defs first (t_/v_ have select_sql → real upstreams).
-    let mut upstreams = fingerprint::get_upstreams(&sqlite, &ws_path, &table_name);
+        // Try object_defs first (t_/v_ have select_sql → real upstreams).
+        let mut upstreams = fingerprint::get_upstreams(&sqlite, &ws_path, &table_name);
 
-    // s_ source tables have no select_sql — their upstream is the source file.
-    if upstreams.is_empty() {
-        if let Ok(Some(rec)) = db::get_source_by_table(&sqlite, &ws_path, &table_name) {
-            if !rec.file_path.is_empty() {
-                let file_name = std::path::Path::new(&rec.file_path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(&rec.file_path);
-                upstreams.push(file_name.to_string());
+        // s_ source tables have no select_sql — their upstream is the source file.
+        if upstreams.is_empty() {
+            if let Ok(Some(rec)) = db::get_source_by_table(&sqlite, &ws_path, &table_name) {
+                if !rec.file_path.is_empty() {
+                    let file_name = std::path::Path::new(&rec.file_path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(&rec.file_path);
+                    upstreams.push(file_name.to_string());
+                }
             }
         }
-    }
 
-    let downstreams = fingerprint::get_downstreams(&sqlite, &ws_path, &table_name);
-    Ok(DepInfo { upstreams, downstreams })
+        let downstreams = fingerprint::get_downstreams(&sqlite, &ws_path, &table_name);
+        Ok(DepInfo { upstreams, downstreams })
+    })
+    .await
+    .map_err(|e| format!("task join error: {e}"))?
 }
 
 /// Delete a table/view safely. If the object has downstream dependencies, they
@@ -1138,44 +1149,50 @@ pub struct FileItem {
 /// Read the direct children of a workspace folder.
 #[tauri::command]
 pub async fn read_directory(path: String) -> Result<Vec<FileItem>, String> {
-    let resolved_path = resolve_workspace_dir(&path)?;
-    if !resolved_path.exists() {
-        return Err(format!("目录不存在: {}", resolved_path.display()));
-    }
+    // read_dir + per-entry stat(): run on the blocking pool so a tokio worker
+    // isn't stalled while the user browses the file tree.
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<FileItem>, String> {
+        let resolved_path = resolve_workspace_dir(&path)?;
+        if !resolved_path.exists() {
+            return Err(format!("目录不存在: {}", resolved_path.display()));
+        }
 
-    let mut items = Vec::new();
-    let entries = std::fs::read_dir(&resolved_path).map_err(|e| format!("读取目录失败: {e}"))?;
-    for entry in entries {
-        if let Ok(entry) = entry {
-            let name = entry.file_name().to_string_lossy().to_string();
-            // Hide dotfiles (the `.lake/` store) and any stray DuckDB/DuckLake
-            // artifacts so the Files tree shows only the user's data files.
-            if name.starts_with('.')
-                || name == "lake.duckdb"
-                || name == "lake.ducklake"
-                || name == "lake_data"
-                || name == "okf"
-                || name.ends_with(".ducklake.wal")
-            {
-                continue;
+        let mut items = Vec::new();
+        let entries = std::fs::read_dir(&resolved_path).map_err(|e| format!("读取目录失败: {e}"))?;
+        for entry in entries {
+            if let Ok(entry) = entry {
+                let name = entry.file_name().to_string_lossy().to_string();
+                // Hide dotfiles (the `.lake/` store) and any stray DuckDB/DuckLake
+                // artifacts so the Files tree shows only the user's data files.
+                if name.starts_with('.')
+                    || name == "lake.duckdb"
+                    || name == "lake.ducklake"
+                    || name == "lake_data"
+                    || name == "okf"
+                    || name.ends_with(".ducklake.wal")
+                {
+                    continue;
+                }
+                let p = entry.path();
+                let is_dir = p.is_dir();
+                items.push(FileItem {
+                    name,
+                    path: p.to_string_lossy().to_string(),
+                    is_dir,
+                });
             }
-            let p = entry.path();
-            let is_dir = p.is_dir();
-            items.push(FileItem {
-                name,
-                path: p.to_string_lossy().to_string(),
-                is_dir,
-            });
         }
-    }
-    items.sort_by(|a, b| {
-        if a.is_dir != b.is_dir {
-            b.is_dir.cmp(&a.is_dir)
-        } else {
-            a.name.cmp(&b.name)
-        }
-    });
-    Ok(items)
+        items.sort_by(|a, b| {
+            if a.is_dir != b.is_dir {
+                b.is_dir.cmp(&a.is_dir)
+            } else {
+                a.name.cmp(&b.name)
+            }
+        });
+        Ok(items)
+    })
+    .await
+    .map_err(|e| format!("task join error: {e}"))?
 }
 
 // ===========================================================================
@@ -1266,49 +1283,55 @@ pub struct QueryTask {
 
 #[tauri::command]
 pub async fn load_workspace_tasks(workspace_path: String) -> Result<Vec<QueryTask>, String> {
-    let conn = db::get_db_conn()?;
-    let mut stmt = conn
-        .prepare("SELECT id, name, kind, created_at, saved, model_id, token_usage FROM tasks WHERE workspace_path = ? ORDER BY created_at ASC")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([&workspace_path], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, i32>(4)? != 0,
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, Option<String>>(6)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
+    // SQLite + N file reads + N JSON parses: run on the blocking pool so we
+    // don't stall a tokio worker thread (this runs on every task-list render).
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<QueryTask>, String> {
+        let conn = db::get_db_conn()?;
+        let mut stmt = conn
+            .prepare("SELECT id, name, kind, created_at, saved, model_id, token_usage FROM tasks WHERE workspace_path = ? ORDER BY created_at ASC")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([&workspace_path], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i32>(4)? != 0,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
 
-    let lakemind_dir = db::get_lakemind_dir()?;
-    let mut tasks = Vec::new();
-    for r in rows {
-        if let Ok((id, name, kind, created_at, saved, model_id, token_usage_json)) = r {
-            let mut sql = String::new();
-            let mut messages = None;
-            if kind == "sql" {
-                let filepath = lakemind_dir.join("sqls").join(format!("{id}.sql"));
-                if filepath.exists() {
-                    sql = std::fs::read_to_string(filepath).unwrap_or_default();
+        let lakemind_dir = db::get_lakemind_dir()?;
+        let mut tasks = Vec::new();
+        for r in rows {
+            if let Ok((id, name, kind, created_at, saved, model_id, token_usage_json)) = r {
+                let mut sql = String::new();
+                let mut messages = None;
+                if kind == "sql" {
+                    let filepath = lakemind_dir.join("sqls").join(format!("{id}.sql"));
+                    if filepath.exists() {
+                        sql = std::fs::read_to_string(filepath).unwrap_or_default();
+                    }
+                } else if kind == "chat" {
+                    let filepath = lakemind_dir.join("chats").join(format!("{id}.json"));
+                    if filepath.exists() {
+                        let json_str = std::fs::read_to_string(filepath).unwrap_or_default();
+                        messages = serde_json::from_str(&json_str).ok();
+                    }
                 }
-            } else if kind == "chat" {
-                let filepath = lakemind_dir.join("chats").join(format!("{id}.json"));
-                if filepath.exists() {
-                    let json_str = std::fs::read_to_string(filepath).unwrap_or_default();
-                    messages = serde_json::from_str(&json_str).ok();
-                }
+                // Parse token_usage JSON if present.
+                let token_usage = token_usage_json
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+                tasks.push(QueryTask { id, name, sql, created_at, kind, messages, saved, model_id, token_usage });
             }
-            // Parse token_usage JSON if present.
-            let token_usage = token_usage_json
-                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
-            tasks.push(QueryTask { id, name, sql, created_at, kind, messages, saved, model_id, token_usage });
         }
-    }
-    Ok(tasks)
+        Ok(tasks)
+    })
+    .await
+    .map_err(|e| format!("task join error: {e}"))?
 }
 
 #[tauri::command]
@@ -2255,8 +2278,20 @@ pub async fn register_database_table(
     let ws_path_clone = workspace.clone();
     
     let res = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<SourceTable>> {
-        let guard = conn_clone.blocking_lock();
         let sqlite = db::get_db_conn()?;
+
+        // Read sampling config before taking the DuckDB lock — these SQLite
+        // reads don't need the connection and shouldn't block other queries.
+        let sample_enabled = db::get_config(&sqlite, "explore.materialized_sample_enabled")
+            .unwrap_or(None)
+            .map(|v| v == "true")
+            .unwrap_or(true);
+        let sample_limit = db::get_config(&sqlite, "explore.materialized_sample_limit")
+            .unwrap_or(None)
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(10000);
+
+        let guard = conn_clone.blocking_lock();
         
         let catalog_exists = guard.prepare(&format!("SELECT * FROM duckdb_databases() WHERE database_name = '{}'", catalog_name))?
             .query_row([], |_| Ok(()))
@@ -2334,15 +2369,7 @@ pub async fn register_database_table(
         
         let row_count_opt = if approx_rows > 0 { Some(approx_rows) } else { None };
 
-        // 2. Read the global config settings for sampling
-        let sample_enabled = db::get_config(&sqlite, "explore.materialized_sample_enabled")
-            .unwrap_or(None)
-            .map(|v| v == "true")
-            .unwrap_or(true);
-        let sample_limit = db::get_config(&sqlite, "explore.materialized_sample_limit")
-            .unwrap_or(None)
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(10000);
+        // 2. Sampling config was read above, before the DuckDB lock.
 
         // 3. Determine if we should materialize a local sample or create a view
         let do_sample = sample_enabled && (approx_rows > sample_limit as i64 || approx_rows <= 0);
@@ -2372,6 +2399,9 @@ pub async fn register_database_table(
         };
         
         let columns = schema::describe_view(&guard, &local_table_name)?;
+        // All DuckDB work is done — release the connection lock before the
+        // SQLite/OKF writes and cache refresh so they don't block other queries.
+        drop(guard);
 
         let now = now_ms();
         let record = db::SourceRecord {
