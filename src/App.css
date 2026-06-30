@@ -4634,6 +4634,13 @@ button.lm-select-trigger:hover:not(:disabled) {
   border-radius: var(--radius-pill);
   transition: background 0.12s, border-color 0.12s;
 }
+.chat-composer__pill-btn > span:not(.btn-caret):not(.btn-prefix) {
+  display: inline-block;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .chat-composer__pill-btn:hover {
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--border-strong);
@@ -4651,6 +4658,7 @@ button.lm-select-trigger:hover:not(:disabled) {
   border-radius: 8px;
   cursor: pointer;
   transition: opacity 0.12s, background-color 0.12s;
+  flex-shrink: 0;
 }
 .chat-composer__send-square svg {
   width: 14px;

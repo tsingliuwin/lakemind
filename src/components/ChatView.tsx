@@ -639,7 +639,7 @@ export default function ChatView(props: {
             rows={2}
           />
           <div class="chat-composer__toolbar">
-            <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
               <button
                 class="chat-composer__plus-btn"
                 style="background: transparent; border: none; padding: 4px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); cursor: pointer;"
@@ -651,7 +651,7 @@ export default function ChatView(props: {
               </button>
             </div>
 
-            <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex-shrink: 1;">
               {/* Token usage indicator — hover for details */}
               <div class="token-usage-wrap">
                 <div
