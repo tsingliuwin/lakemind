@@ -1578,6 +1578,18 @@ pub(crate) fn table_exists_in_lake(conn: &duckdb::Connection, name: &str) -> boo
 }
 
 fn count_rows(conn: &duckdb::Connection, name: &str) -> Option<i64> {
+    // If it's a view (either registered source view or custom view), do NOT count rows
+    // as it can trigger slow remote table scans or DuckDB optimizer crashes.
+    let is_view = conn.query_row(
+        "SELECT count(*) FROM duckdb_views() WHERE database_name='lake' AND schema_name='main' AND view_name=?",
+        [name],
+        |r| r.get::<_, i64>(0)
+    ).unwrap_or(0) > 0;
+
+    if is_view {
+        return None;
+    }
+
     let n = name.replace('"', "\"\"");
     conn.query_row(&format!("SELECT count(*) FROM \"{n}\""), [], |r| r.get::<_, i64>(0))
         .ok()
@@ -1613,7 +1625,9 @@ fn hydrate_custom_object(
     }
     // Cache miss or stale → live hydrate.
     let cols = schema::describe_view(conn, name).unwrap_or_default();
-    let count = count_rows(conn, name);
+    // Do NOT run count_rows for custom views/tables live, as they can be extremely slow
+    // or trigger optimizer bugs when querying large external database tables.
+    let count = None;
     SourceTable {
         name: name.to_string(),
         label: name.to_string(),
