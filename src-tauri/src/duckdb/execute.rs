@@ -40,10 +40,25 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
     // Wrap the user's SQL as a subquery so an arbitrary statement (SELECT,
     // UNION, CTE, even one that already has LIMIT) can be safely capped.
     // DuckDB folds the wrapper away during optimization.
+    // However, if the query already has a trailing LIMIT that is less than or equal
+    // to our cap, we bypass the wrapping to preserve database/external catalog optimization.
     let inner = sql.trim().trim_end_matches(';');
-    let wrapped = match cap {
-        Some(n) => format!("SELECT * FROM ({inner}) AS _lakemind_q LIMIT {n}"),
-        None => format!("SELECT * FROM ({inner}) AS _lakemind_q"),
+    let existing_limit = parse_trailing_limit(inner);
+
+    let wrapped = match (cap, existing_limit) {
+        (Some(cap_val), Some(limit_val)) => {
+            if limit_val <= cap_val as u64 {
+                inner.to_string()
+            } else {
+                format!("SELECT * FROM ({inner}) AS _lakemind_q LIMIT {cap_val}")
+            }
+        }
+        (Some(cap_val), None) => {
+            format!("SELECT * FROM ({inner}) AS _lakemind_q LIMIT {cap_val}")
+        }
+        (None, _) => {
+            inner.to_string()
+        }
     };
 
     // Phase-level timing so we can see WHERE a query spends its time. Each `?`
@@ -266,4 +281,43 @@ fn civil_from_secs(secs: i64, rem_us: i64) -> String {
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}",
         year, month, d, h, m, s, rem_us
     )
+}
+
+/// Parse the trailing limit value from a SQL query string if present.
+/// Supports both `LIMIT <n>` and `LIMIT <n> OFFSET <m>` at the end of the query.
+fn parse_trailing_limit(sql: &str) -> Option<u64> {
+    let sql_trimmed = sql.trim().trim_end_matches(';').trim();
+    let tokens: Vec<&str> = sql_trimmed.split_whitespace().collect();
+    let len = tokens.len();
+    if len >= 2 {
+        let last_token = tokens[len - 1];
+        let prev_token = tokens[len - 2];
+        if prev_token.eq_ignore_ascii_case("limit") {
+            return last_token.parse::<u64>().ok();
+        }
+        if len >= 4 {
+            let _offset_val = tokens[len - 1];
+            let offset_key = tokens[len - 2];
+            let limit_val = tokens[len - 3];
+            let limit_key = tokens[len - 4];
+            if limit_key.eq_ignore_ascii_case("limit") && offset_key.eq_ignore_ascii_case("offset") {
+                return limit_val.parse::<u64>().ok();
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_trailing_limit() {
+        assert_eq!(parse_trailing_limit("select * from table limit 50;"), Some(50));
+        assert_eq!(parse_trailing_limit("select * from table limit 1000"), Some(1000));
+        assert_eq!(parse_trailing_limit("select * from table;"), None);
+        assert_eq!(parse_trailing_limit("select * from table limit 50 offset 10;"), Some(50));
+        assert_eq!(parse_trailing_limit("select * from (select * from table limit 10);"), None);
+    }
 }
