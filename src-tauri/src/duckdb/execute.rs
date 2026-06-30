@@ -135,10 +135,12 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
                 // Total here is how long the query actually held execution before
                 // the interrupt *took effect* — the gap between this and
                 // timeout_secs is the uninterruptible phase we're diagnosing.
+                let hard = crate::agent::get_query_hard_timeout();
                 println!(
-                    "[run_query] interrupt resolved after {} ms (limit was {} s; uninterruptible gap ~{} ms)",
+                    "[run_query] interrupt resolved after {} ms (soft limit {} s, hard limit {} s; uninterruptible gap ~{} ms)",
                     start.elapsed().as_millis(),
                     timeout_secs,
+                    hard,
                     start.elapsed().as_millis().saturating_sub((timeout_secs as u128) * 1000)
                 );
                 Err(crate::error::AppError::new(format!(

@@ -46,6 +46,11 @@ pub struct AppState {
     /// In-memory DuckDB session with the current workspace's DuckLake attached
     /// as the default catalog (`USE lake`). Rebuilt on workspace switch.
     pub conn: Arc<Mutex<duckdb::Connection>>,
+    /// Pre-extracted interrupt handle for the current connection. Stored
+    /// separately so we can fire `interrupt()` without locking `conn` — which
+    /// is critical when a previous hard-timeout query's background thread is
+    /// still holding the conn lock.
+    pub interrupt_handle: Arc<std::sync::Mutex<std::sync::Arc<duckdb::InterruptHandle>>>,
     /// Cache of the current workspace's registered sources. The authoritative
     /// source of truth is the global SQLite `sources` table; this is a
     /// convenience mirror so the UI doesn't re-query on every render.
@@ -84,9 +89,11 @@ impl AppState {
     pub fn new() -> AppResult<Self> {
         let ws = default_workspace_dir();
         let conn = Self::open_workspace(&ws)?;
+        let ih = conn.interrupt_handle();
         let _ = crate::db::attach_workspace_connections(&conn, "DefaultProject");
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            interrupt_handle: Arc::new(std::sync::Mutex::new(ih)),
             sources: Arc::new(Mutex::new(Vec::new())),
             workspace_dir: Arc::new(Mutex::new(ws)),
             workspace_path: Arc::new(Mutex::new("DefaultProject".to_string())),

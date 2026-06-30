@@ -1402,7 +1402,7 @@ export default function SettingsPage(props: {
             <div class="settings-row-control">
               <div class="settings-row-info">
                 <span class="label-title">查询超时限制</span>
-                <p class="settings-row-desc">即席执行 SQL 或对话探索时单次查询的最大允许时间，超时自动中断以防卡顿。</p>
+                <p class="settings-row-desc">即席执行 SQL 或对话探索时单次查询的最大允许时间，超时后发送中断信号。</p>
               </div>
               <Select
                 value={String(settings().queryTimeout !== undefined ? settings().queryTimeout : 60)}
@@ -1413,6 +1413,26 @@ export default function SettingsPage(props: {
                   { value: "60", label: "1 分钟 (默认)" },
                   { value: "180", label: "3 分钟" },
                   { value: "300", label: "5 分钟" },
+                  { value: "0", label: "无限制" },
+                ]}
+              />
+            </div>
+            <div class="settings-row-control">
+              <div class="settings-row-info">
+                <span class="label-title">最大等待时间</span>
+                <p class="settings-row-desc">当查询超时后数据库引擎未能及时响应中断时，此限制确保请求在指定时间内必定返回，避免长时间卡顿。</p>
+              </div>
+              <Select
+                value={String(settings().queryHardTimeout !== undefined ? settings().queryHardTimeout : "auto")}
+                onChange={(v) => updateSetting("queryHardTimeout", v === "auto" ? undefined : Number(v))}
+                width="fit-content"
+                options={[
+                  { value: "auto", label: `自动（超时 ×2 = ${((settings().queryTimeout ?? 60) || 0) * 2} 秒）` },
+                  { value: "60", label: "1 分钟" },
+                  { value: "120", label: "2 分钟" },
+                  { value: "180", label: "3 分钟" },
+                  { value: "300", label: "5 分钟" },
+                  { value: "600", label: "10 分钟" },
                   { value: "0", label: "无限制" },
                 ]}
               />

@@ -124,26 +124,51 @@ struct SavedSettings {
     providers: Vec<ModelProvider>,
     #[serde(default)]
     query_timeout: Option<u64>,
+    /// Hard timeout: the maximum wall-clock seconds the caller will wait before
+    /// returning an error, regardless of whether the DuckDB interrupt has taken
+    /// effect. `None` means "derive from soft timeout".
+    #[serde(default)]
+    query_hard_timeout: Option<u64>,
 }
 
-pub(crate) fn get_query_timeout() -> Option<u64> {
+/// Read the settings.json file once and return the parsed struct.
+/// Centralises the file-read so both getters share the same snapshot.
+fn read_saved_settings() -> SavedSettings {
+    let fallback = SavedSettings {
+        providers: Vec::new(),
+        query_timeout: Some(60),
+        query_hard_timeout: None,
+    };
     let mut path = match crate::db::get_lakemind_dir() {
         Ok(p) => p,
-        Err(_) => return Some(60),
+        Err(_) => return fallback,
     };
     path.push("settings.json");
     if !path.exists() {
-        return Some(60);
+        return fallback;
     }
     let content = match std::fs::read_to_string(&path) {
         Ok(c) => c,
-        Err(_) => return Some(60),
+        Err(_) => return fallback,
     };
-    let settings: SavedSettings = match serde_json::from_str(&content) {
-        Ok(s) => s,
-        Err(_) => return Some(60),
-    };
-    settings.query_timeout.or(Some(60))
+    serde_json::from_str(&content).unwrap_or(fallback)
+}
+
+pub(crate) fn get_query_timeout() -> Option<u64> {
+    read_saved_settings().query_timeout.or(Some(60))
+}
+
+/// Hard timeout: the absolute wall-clock cap for any query execution.
+/// If not explicitly configured, defaults to `soft_timeout × 2`.
+/// Returns 0 when both soft and hard are disabled ("no limit").
+pub(crate) fn get_query_hard_timeout() -> u64 {
+    let settings = read_saved_settings();
+    let soft = settings.query_timeout.unwrap_or(60);
+    if soft == 0 {
+        // Soft timeout disabled — honour explicit hard timeout or disable too.
+        return settings.query_hard_timeout.unwrap_or(0);
+    }
+    settings.query_hard_timeout.unwrap_or(soft.saturating_mul(2))
 }
 
 #[allow(dead_code)]
@@ -567,10 +592,12 @@ impl Tool for DescribeTableTool {
 
         let start = std::time::Instant::now();
         let conn = self.app_state.conn.clone();
+        let ih = self.app_state.interrupt_handle.lock().unwrap().clone();
         let table_name_string = table_name.to_string();
         let ws_dir = self.app_state.workspace_dir.lock().await.to_string_lossy().to_string();
         let ws_path = self.app_state.workspace_path.lock().await.clone();
-        let desc_res = tokio::task::spawn_blocking(move || {
+        let hard_secs = get_query_hard_timeout();
+        let blocking_fut = tokio::task::spawn_blocking(move || {
             let guard = conn.blocking_lock();
             let sql = format!("DESCRIBE \"{}\"", table_name_string.replace('"', "\"\""));
             let query_res = execute::run_query(&guard, &sql, None).map_err(|e| e.to_string())?;
@@ -581,10 +608,22 @@ impl Tool for DescribeTableTool {
             let source_record = crate::db::get_source_by_table(&sqlite, &ws_path, &table_name_string).map_err(|e| e.to_string())?;
             
             Ok::<_, String>((query_res, okf_title, col_comments, relations, source_record))
-        })
-        .await
-        .map_err(|e| ToolError(format!("线程生成失败: {e}")))
-        .and_then(|res| res.map_err(|e| ToolError(format!("执行 DESCRIBE 失败: {e}"))));
+        });
+        let desc_res = if hard_secs > 0 {
+            match tokio::time::timeout(std::time::Duration::from_secs(hard_secs), blocking_fut).await {
+                Ok(r) => r
+                    .map_err(|e| ToolError(format!("线程生成失败: {e}")))
+                    .and_then(|res| res.map_err(|e| ToolError(format!("执行 DESCRIBE 失败: {e}")))),
+                Err(_) => {
+                    ih.interrupt();
+                    Err(ToolError(format!("查询已达到最大等待时间（{} 秒）被强制终止", hard_secs)))
+                }
+            }
+        } else {
+            blocking_fut.await
+                .map_err(|e| ToolError(format!("线程生成失败: {e}")))
+                .and_then(|res| res.map_err(|e| ToolError(format!("执行 DESCRIBE 失败: {e}"))))
+        };
 
         let elapsed = start.elapsed().as_millis() as u64;
         match desc_res {
@@ -1246,14 +1285,28 @@ impl Tool for ExecuteQueryTool {
 
         let start = std::time::Instant::now();
         let conn = self.app_state.conn.clone();
+        let ih = self.app_state.interrupt_handle.lock().unwrap().clone();
         let sql_string = sql.to_string();
-        let query_res = tokio::task::spawn_blocking(move || {
+        let hard_secs = get_query_hard_timeout();
+        let blocking_fut = tokio::task::spawn_blocking(move || {
             let guard = conn.blocking_lock();
             execute::run_query(&guard, &sql_string, Some(50))
-        })
-        .await
-        .map_err(|e| ToolError(format!("线程生成失败: {e}")))
-        .and_then(|res| res.map_err(|e| ToolError(format!("SQL 执行出错: {e}"))));
+        });
+        let query_res = if hard_secs > 0 {
+            match tokio::time::timeout(std::time::Duration::from_secs(hard_secs), blocking_fut).await {
+                Ok(r) => r
+                    .map_err(|e| ToolError(format!("线程生成失败: {e}")))
+                    .and_then(|res| res.map_err(|e| ToolError(format!("SQL 执行出错: {e}")))),
+                Err(_) => {
+                    ih.interrupt();
+                    Err(ToolError(format!("SQL 执行已达到最大等待时间（{} 秒）被强制终止", hard_secs)))
+                }
+            }
+        } else {
+            blocking_fut.await
+                .map_err(|e| ToolError(format!("线程生成失败: {e}")))
+                .and_then(|res| res.map_err(|e| ToolError(format!("SQL 执行出错: {e}"))))
+        };
 
         let elapsed = start.elapsed().as_millis() as u64;
         match query_res {
@@ -1333,15 +1386,29 @@ impl Tool for SampleDataTool {
 
         let start = std::time::Instant::now();
         let conn = self.app_state.conn.clone();
+        let ih = self.app_state.interrupt_handle.lock().unwrap().clone();
         let table_name_string = table_name.to_string();
-        let query_res = tokio::task::spawn_blocking(move || {
+        let hard_secs = get_query_hard_timeout();
+        let blocking_fut = tokio::task::spawn_blocking(move || {
             let guard = conn.blocking_lock();
             let sql = format!("SELECT * FROM {table_name_string} LIMIT 5");
             execute::run_query(&guard, &sql, Some(5))
-        })
-        .await
-        .map_err(|e| ToolError(format!("线程生成失败: {e}")))
-        .and_then(|res| res.map_err(|e| ToolError(format!("采样查询失败: {e}"))));
+        });
+        let query_res = if hard_secs > 0 {
+            match tokio::time::timeout(std::time::Duration::from_secs(hard_secs), blocking_fut).await {
+                Ok(r) => r
+                    .map_err(|e| ToolError(format!("线程生成失败: {e}")))
+                    .and_then(|res| res.map_err(|e| ToolError(format!("采样查询失败: {e}")))),
+                Err(_) => {
+                    ih.interrupt();
+                    Err(ToolError(format!("采样查询已达到最大等待时间（{} 秒）被强制终止", hard_secs)))
+                }
+            }
+        } else {
+            blocking_fut.await
+                .map_err(|e| ToolError(format!("线程生成失败: {e}")))
+                .and_then(|res| res.map_err(|e| ToolError(format!("采样查询失败: {e}"))))
+        };
 
         let elapsed = start.elapsed().as_millis() as u64;
         match query_res {
@@ -2115,13 +2182,24 @@ impl Tool for RenderChartTool {
 
         let start = std::time::Instant::now();
         let conn = self.app_state.conn.clone();
+        let ih = self.app_state.interrupt_handle.lock().unwrap().clone();
         let sql_string = sql.to_string();
-        let res = tokio::task::spawn_blocking(move || -> Result<SqlResult, ToolError> {
+        let hard_secs = get_query_hard_timeout();
+        let blocking_fut = tokio::task::spawn_blocking(move || -> Result<SqlResult, ToolError> {
             let guard = conn.blocking_lock();
             execute::run_query(&guard, &sql_string, Some(200)).map_err(|e| ToolError(e.to_string()))
-        })
-        .await
-        .map_err(|e| ToolError(format!("线程生成失败: {e}")))?;
+        });
+        let res = if hard_secs > 0 {
+            match tokio::time::timeout(std::time::Duration::from_secs(hard_secs), blocking_fut).await {
+                Ok(r) => r.map_err(|e| ToolError(format!("线程生成失败: {e}")))?,
+                Err(_) => {
+                    ih.interrupt();
+                    return Err(ToolError(format!("图表查询已达到最大等待时间（{} 秒）被强制终止", hard_secs)));
+                }
+            }
+        } else {
+            blocking_fut.await.map_err(|e| ToolError(format!("线程生成失败: {e}")))?
+        };
 
         let elapsed = start.elapsed().as_millis() as u64;
         match res {

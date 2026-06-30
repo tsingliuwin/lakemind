@@ -72,7 +72,29 @@ pub async fn describe_table(name: String, state: State<'_, AppState>) -> Result<
 /// Run an ad-hoc SELECT and return a row-capped [`SqlResult`].
 #[tauri::command]
 pub async fn execute_sql(sql: String, row_cap: Option<usize>, state: State<'_, AppState>) -> Result<SqlResult, String> {
-    run_blocking(state, move |conn| execute::run_query(conn, sql.trim(), row_cap)).await
+    let hard_secs = crate::agent::get_query_hard_timeout();
+    if hard_secs == 0 {
+        // No hard limit — just run normally.
+        return run_blocking(state, move |conn| execute::run_query(conn, sql.trim(), row_cap)).await;
+    }
+
+    // Read the interrupt handle from AppState — no conn lock needed.
+    let ih = state.interrupt_handle.lock().unwrap().clone();
+
+    // The entire run_blocking (including its internal conn lock acquisition)
+    // is inside the timeout, so even lock contention counts against the budget.
+    let fut = run_blocking(state, move |conn| execute::run_query(conn, sql.trim(), row_cap));
+    match tokio::time::timeout(std::time::Duration::from_secs(hard_secs), fut).await {
+        Ok(inner) => inner,
+        Err(_elapsed) => {
+            // Hard timeout reached — fire interrupt and return immediately.
+            ih.interrupt();
+            Err(format!(
+                "查询已达到最大等待时间（{} 秒）被强制终止。可在\u{201c}设置\u{201d}->\u{201c}常规\u{201d}中调整该限制。",
+                hard_secs
+            ))
+        }
+    }
 }
 
 /// Return the in-memory source cache for the current workspace.
@@ -1472,6 +1494,13 @@ async fn switch_workspace_lake(state: &AppState, workspace_path: String, ws_dir:
     // Auto-attach database connections for the switched workspace
     let _ = db::attach_workspace_connections(&new_conn, &workspace_path);
 
+    // Update interrupt handle BEFORE swapping the connection so it's always
+    // consistent (and available without locking conn).
+    {
+        let ih = new_conn.interrupt_handle();
+        let mut stored = state.interrupt_handle.lock().unwrap();
+        *stored = ih;
+    }
     {
         let mut c = state.conn.lock().await;
         *c = new_conn;
