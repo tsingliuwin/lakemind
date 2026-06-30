@@ -48,6 +48,8 @@ pub fn register(
         partition_keys: e.partition_keys.clone(),
         row_count_estimate,
         columns,
+        is_sampled: false,
+        full_row_count: None,
     })
 }
 

@@ -451,15 +451,45 @@ impl Tool for ListTablesTool {
             SELECT view_name as table_name FROM duckdb_views() WHERE database_name = 'lake' AND schema_name = 'main' AND NOT internal
         ";
         let conn = self.app_state.conn.clone();
+        let ws_path = self.app_state.workspace_path.lock().await.clone();
         let tables_res = tokio::task::spawn_blocking(move || {
             let guard = conn.blocking_lock();
-            let mut stmt = guard.prepare(sql)?;
-            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            let mut stmt = guard.prepare(sql).map_err(|e| e.to_string())?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
             let mut list = Vec::new();
             for r in rows {
-                list.push(r?);
+                list.push(r.map_err(|e| e.to_string())?);
             }
-            Ok::<_, duckdb::Error>(list)
+            
+            // Read sampling metadata from SQLite
+            let sqlite = crate::db::get_db_conn().map_err(|e| e.to_string())?;
+            let records = crate::db::list_sources(&sqlite, &ws_path).map_err(|e| e.to_string())?;
+            
+            let mut descriptions = Vec::new();
+            for tname in list {
+                if let Some(rec) = records.iter().find(|r| r.table_name == tname) {
+                    if rec.is_sampled {
+                        let full_rows_str = rec.full_row_count.map(|c: i64| c.to_string()).unwrap_or_else(|| "未知".to_string());
+                        descriptions.push(format!(
+                            "{} (已本地物化采样 {} 行，外部全量大约 {} 行，全量直连路径为 \"{}\")",
+                            tname,
+                            rec.row_count.unwrap_or(0),
+                            full_rows_str,
+                            rec.scan_path
+                        ));
+                    } else {
+                        descriptions.push(format!(
+                            "{} (全量，行数: {})",
+                            tname,
+                            rec.row_count.map(|c: i64| c.to_string()).unwrap_or_else(|| "未知".to_string())
+                        ));
+                    }
+                } else {
+                    descriptions.push(tname);
+                }
+            }
+            
+            Ok::<_, String>(descriptions)
         })
         .await
         .map_err(|e| ToolError(format!("线程生成失败: {e}")))
@@ -477,7 +507,7 @@ impl Tool for ListTablesTool {
                     &self.window, &self.task_id, &call_id, "ok",
                     summary, None, None, Some(elapsed), None,
                 );
-                Ok(format!("当前可用的数据库表列表为: {}", tables.join(", ")))
+                Ok(format!("当前可用的数据库表列表为: {}", tables.join("; ")))
             }
             Err(err) => {
                 emit_tool_result(
@@ -537,12 +567,18 @@ impl Tool for DescribeTableTool {
         let conn = self.app_state.conn.clone();
         let table_name_string = table_name.to_string();
         let ws_dir = self.app_state.workspace_dir.lock().await.to_string_lossy().to_string();
+        let ws_path = self.app_state.workspace_path.lock().await.clone();
         let desc_res = tokio::task::spawn_blocking(move || {
             let guard = conn.blocking_lock();
             let sql = format!("DESCRIBE \"{}\"", table_name_string.replace('"', "\"\""));
             let query_res = execute::run_query(&guard, &sql, None).map_err(|e| e.to_string())?;
             let (okf_title, col_comments, relations) = crate::okf::parse_column_semantics(&ws_dir, &table_name_string);
-            Ok::<_, String>((query_res, okf_title, col_comments, relations))
+            
+            // Read SQLite cache for details
+            let sqlite = crate::db::get_db_conn().map_err(|e| e.to_string())?;
+            let source_record = crate::db::get_source_by_table(&sqlite, &ws_path, &table_name_string).map_err(|e| e.to_string())?;
+            
+            Ok::<_, String>((query_res, okf_title, col_comments, relations, source_record))
         })
         .await
         .map_err(|e| ToolError(format!("线程生成失败: {e}")))
@@ -550,7 +586,7 @@ impl Tool for DescribeTableTool {
 
         let elapsed = start.elapsed().as_millis() as u64;
         match desc_res {
-            Ok((res, okf_title, col_comments, relations)) => {
+            Ok((res, okf_title, col_comments, relations, source_record)) => {
                 let col_lines: Vec<String> = res.rows.iter().map(|r| {
                     let name = r.get(0).map(|v| v.to_string()).unwrap_or_default();
                     let ty = r.get(1).map(|v| v.to_string()).unwrap_or_default();
@@ -567,7 +603,24 @@ impl Tool for DescribeTableTool {
                 if !relations.is_empty() {
                     rels_part = format!("\n\n关联关系:\n{}", relations.iter().map(|r| format!("- {}", r)).collect::<Vec<_>>().join("\n"));
                 }
-                let summary = format!("结构分析完成，{}{}, 共 {} 个字段", table_name, title_part, n);
+                
+                let mut header_info = String::new();
+                if let Some(ref rec) = source_record {
+                    if rec.is_sampled {
+                        let full_rows_str = rec.full_row_count.map(|c| c.to_string()).unwrap_or_else(|| "未知".to_string());
+                        header_info = format!(
+                            " [注意: 该表当前是本地物化采样缓存，包含 {} 行数据。外部生产数据库的全量总行数大约为 {} 行。如果你需要进行全量汇总或分析完整数据，请直接在 SQL 中查询外部表全量路径 \"{}\"]",
+                            rec.row_count.unwrap_or(0),
+                            full_rows_str,
+                            rec.scan_path
+                        );
+                    } else {
+                        let rows_str = rec.row_count.map(|c| c.to_string()).unwrap_or_else(|| "未知".to_string());
+                        header_info = format!(" [全量数据表，行数: {}]", rows_str);
+                    }
+                }
+                
+                let summary = format!("结构分析完成，{}{}{}, 共 {} 个字段", table_name, title_part, header_info, n);
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "ok",
                     summary, None, Some(res), Some(elapsed), None,

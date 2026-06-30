@@ -93,6 +93,10 @@ pub struct SourceTable {
     /// Fast estimate (parquet row-group metadata) or full count; `None` until computed.
     pub row_count_estimate: Option<i64>,
     pub columns: Vec<ColumnInfo>,
+    /// Whether this table is a materialized sample of a larger remote table.
+    pub is_sampled: bool,
+    /// The full row count on the remote database, if this is a sample.
+    pub full_row_count: Option<i64>,
 }
 
 /// Result of an ad-hoc SQL execution. Mirrors PRD §4.1 `SqlResult`.

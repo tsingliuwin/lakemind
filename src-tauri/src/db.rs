@@ -89,6 +89,10 @@ pub struct SourceRecord {
     /// Cached row count. Valid as long as the fingerprint matches; refreshed on
     /// rebuild. `None` when never computed.
     pub row_count: Option<i64>,
+    /// Whether this source is a materialized sample of a larger remote table.
+    pub is_sampled: bool,
+    /// The full row count on the remote database, if this is a sample.
+    pub full_row_count: Option<i64>,
 }
 
 /// Insert or update a source mapping (keyed by `(workspace_path, table_name)`).
@@ -96,15 +100,20 @@ pub fn upsert_source(conn: &Connection, ws_path: &str, r: &SourceRecord) -> Resu
     let keys = serde_json::to_string(&r.partition_keys).unwrap_or_else(|_| "[]".into());
     let cols = serde_json::to_string(&r.columns).unwrap_or_else(|_| "[]".into());
     conn.execute(
-        "INSERT INTO sources (workspace_path, table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO sources (workspace_path, table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(workspace_path, table_name) DO UPDATE SET
             label=excluded.label, kind=excluded.kind, storage=excluded.storage,
             file_path=excluded.file_path, scan_path=excluded.scan_path,
             partition_keys=excluded.partition_keys, name_source=excluded.name_source,
             file_mtime=excluded.file_mtime, file_size=excluded.file_size,
-            columns=excluded.columns, row_count=excluded.row_count",
-        rusqlite::params![ws_path, r.table_name, r.label, r.kind, r.storage, r.file_path, r.scan_path, keys, r.created_at, r.name_source, r.file_mtime, r.file_size, cols, r.row_count],
+            columns=excluded.columns, row_count=excluded.row_count,
+            is_sampled=excluded.is_sampled, full_row_count=excluded.full_row_count",
+        rusqlite::params![
+            ws_path, r.table_name, r.label, r.kind, r.storage, r.file_path, r.scan_path, keys,
+            r.created_at, r.name_source, r.file_mtime, r.file_size, cols, r.row_count,
+            if r.is_sampled { 1 } else { 0 }, r.full_row_count
+        ],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -114,7 +123,7 @@ pub fn upsert_source(conn: &Connection, ws_path: &str, r: &SourceRecord) -> Resu
 pub fn list_sources(conn: &Connection, ws_path: &str) -> Result<Vec<SourceRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count
+            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count
              FROM sources WHERE workspace_path = ? ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -126,6 +135,7 @@ pub fn list_sources(conn: &Connection, ws_path: &str) -> Result<Vec<SourceRecord
             let cols_json: String = row.get(11).unwrap_or_else(|_| "[]".to_string());
             let columns: Vec<crate::model::ColumnInfo> =
                 serde_json::from_str(&cols_json).unwrap_or_default();
+            let is_sampled_val: i32 = row.get(13).unwrap_or(0);
             Ok(SourceRecord {
                 table_name: row.get(0)?,
                 label: row.get(1)?,
@@ -140,6 +150,8 @@ pub fn list_sources(conn: &Connection, ws_path: &str) -> Result<Vec<SourceRecord
                 file_size: row.get(10).unwrap_or(0),
                 columns,
                 row_count: row.get(12).ok(),
+                is_sampled: is_sampled_val != 0,
+                full_row_count: row.get(14).ok(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -161,7 +173,7 @@ pub fn get_source_by_table(
 ) -> Result<Option<SourceRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count
+            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count
              FROM sources WHERE workspace_path = ? AND table_name = ?",
         )
         .map_err(|e| e.to_string())?;
@@ -173,6 +185,7 @@ pub fn get_source_by_table(
             let cols_json: String = row.get(11).unwrap_or_else(|_| "[]".to_string());
             let columns: Vec<crate::model::ColumnInfo> =
                 serde_json::from_str(&cols_json).unwrap_or_default();
+            let is_sampled_val: i32 = row.get(13).unwrap_or(0);
             Ok(SourceRecord {
                 table_name: row.get(0)?,
                 label: row.get(1)?,
@@ -187,6 +200,8 @@ pub fn get_source_by_table(
                 file_size: row.get(10).unwrap_or(0),
                 columns,
                 row_count: row.get(12).ok(),
+                is_sampled: is_sampled_val != 0,
+                full_row_count: row.get(14).ok(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -434,12 +449,18 @@ pub fn init_global_db() -> Result<(), String> {
             file_size      INTEGER NOT NULL DEFAULT 0,
             columns        TEXT NOT NULL DEFAULT '[]',
             row_count      INTEGER,
+            is_sampled     INTEGER NOT NULL DEFAULT 0,
+            full_row_count INTEGER,
             PRIMARY KEY (workspace_path, table_name),
             FOREIGN KEY(workspace_path) REFERENCES workspaces(path) ON DELETE CASCADE
         )",
         [],
     )
     .map_err(|e| format!("Failed to create sources table: {e}"))?;
+
+    // Migrate sources table to add is_sampled / full_row_count columns if they don't exist
+    let _ = conn.execute("ALTER TABLE sources ADD COLUMN is_sampled INTEGER NOT NULL DEFAULT 0;", []);
+    let _ = conn.execute("ALTER TABLE sources ADD COLUMN full_row_count INTEGER;", []);
 
     // config: key/value user settings (NEW)
     conn.execute(

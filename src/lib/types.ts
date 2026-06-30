@@ -62,6 +62,8 @@ export interface SourceTable {
   /** Fast estimate (parquet row-group metadata) or full count; null until computed. */
   rowCountEstimate: number | null;
   columns: ColumnInfo[];
+  isSampled?: boolean;
+  fullRowCount?: number | null;
 }
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };

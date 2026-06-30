@@ -71,7 +71,12 @@ pub fn estimate_row_count(conn: &Connection, e: &ScanEntry) -> AppResult<Option<
             }
         }
         SourceKind::Delta => count_view(conn, &e.view_name).map(Some),
-        SourceKind::Csv | SourceKind::Json | SourceKind::Excel | SourceKind::Table | SourceKind::View | SourceKind::Postgres | SourceKind::Mysql => count_view(conn, &e.view_name).map(Some),
+        SourceKind::Csv | SourceKind::Json | SourceKind::Excel | SourceKind::Table | SourceKind::View => count_view(conn, &e.view_name).map(Some),
+        SourceKind::Postgres | SourceKind::Mysql => {
+            // Do NOT fall back to count_view (SELECT count(*)) on remote databases.
+            // Return None if stats are not already cached during registration.
+            Ok(None)
+        }
     }
 }
 

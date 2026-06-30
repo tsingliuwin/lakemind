@@ -20,10 +20,15 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
 
     let timer_cancel = if timeout_secs > 0 {
         let handle = interrupt_handle.clone();
+        let query_start = start;
         let (tx, rx) = std::sync::mpsc::channel::<()>();
         std::thread::spawn(move || {
             if rx.recv_timeout(std::time::Duration::from_secs(timeout_secs)).is_err() {
-                println!("[timeout] Query execution exceeded {} seconds, interrupting connection...", timeout_secs);
+                println!(
+                    "[timeout] Query exceeded {} s — firing interrupt at +{} ms after query start",
+                    timeout_secs,
+                    query_start.elapsed().as_millis()
+                );
                 handle.interrupt();
             }
         });
@@ -41,27 +46,52 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
         None => format!("SELECT * FROM ({inner}) AS _lakemind_q"),
     };
 
+    // Phase-level timing so we can see WHERE a query spends its time. Each `?`
+    // logs the elapsed time on failure too, so an interrupted query reveals
+    // exactly which phase (prepare / execute / fetch) was stuck and for how long.
+    println!("[run_query] START cap={:?} timeout={}s sql: {}", cap, timeout_secs, wrapped);
+
     let query_res = (|| -> AppResult<SqlResult> {
-        let mut stmt = conn.prepare(&wrapped)?;
-        // Execute once to populate the statement's schema metadata; the schema is
-        // only available *after* execution. We then re-read rows via raw_query
-        // (which does not re-execute) so we can borrow stmt immutably for schema.
-        stmt.execute([])?;
+        let t_prepare = Instant::now();
+        let mut stmt = conn.prepare(&wrapped).map_err(|e| {
+            println!("[run_query] prepare FAILED after {} ms: {}", t_prepare.elapsed().as_millis(), e);
+            e
+        })?;
+        println!("[run_query] prepare ok: {} ms", t_prepare.elapsed().as_millis());
+
+        let mut rows_out: Vec<Vec<serde_json::Value>> = Vec::new();
+        let t_fetch = Instant::now();
+        {
+            let mut iter = stmt.query([]).map_err(|e| {
+                println!("[run_query] query FAILED after {} ms: {}", t_fetch.elapsed().as_millis(), e);
+                e
+            })?;
+            let mut logged_first = false;
+            while let Some(row) = iter.next().map_err(|e| {
+                println!("[run_query] row fetch FAILED after {} ms: {}", t_fetch.elapsed().as_millis(), e);
+                e
+            })? {
+                if !logged_first {
+                    println!("[run_query] first row: {} ms", t_fetch.elapsed().as_millis());
+                    logged_first = true;
+                }
+                
+                let mut out = Vec::new();
+                let mut idx = 0;
+                while let Ok(val) = row.get::<usize, DuckValue>(idx) {
+                    out.push(duck_value_to_json(val));
+                    idx += 1;
+                }
+                rows_out.push(out);
+            }
+        } // iter is dropped here, releasing the borrow on stmt
+        
+        // Extract schema now that the statement has been executed
         let schema = stmt.schema();
         let column_names: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
         let column_types: Vec<String> = schema.fields().iter().map(|f| format!("{}", f.data_type())).collect();
-        let col_count = column_names.len();
-
-        let mut rows_out: Vec<Vec<serde_json::Value>> = Vec::new();
-        let mut iter = stmt.raw_query();
-        while let Some(row) = iter.next()? {
-            let mut out = Vec::with_capacity(col_count);
-            for i in 0..col_count {
-                let val: DuckValue = row.get(i)?;
-                out.push(duck_value_to_json(val));
-            }
-            rows_out.push(out);
-        }
+        
+        println!("[run_query] all rows: {} ms ({} rows)", t_fetch.elapsed().as_millis(), rows_out.len());
 
         let truncated = cap.map_or(false, |n| rows_out.len() >= n);
         let row_count = rows_out.len();
@@ -76,6 +106,8 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
         })
     })();
 
+    println!("[run_query] END total: {} ms", start.elapsed().as_millis());
+
     if let Some(tx) = timer_cancel {
         let _ = tx.send(());
     }
@@ -85,6 +117,15 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
         Err(e) => {
             let err_msg = e.to_string();
             if err_msg.contains("interrupted") || err_msg.contains("Interrupt") {
+                // Total here is how long the query actually held execution before
+                // the interrupt *took effect* — the gap between this and
+                // timeout_secs is the uninterruptible phase we're diagnosing.
+                println!(
+                    "[run_query] interrupt resolved after {} ms (limit was {} s; uninterruptible gap ~{} ms)",
+                    start.elapsed().as_millis(),
+                    timeout_secs,
+                    start.elapsed().as_millis().saturating_sub((timeout_secs as u128) * 1000)
+                );
                 Err(crate::error::AppError::new(format!(
                     "查询超时已被自动中断（当前限制为 {} 秒）。可在“设置”->“常规”中调整该限制。",
                     timeout_secs

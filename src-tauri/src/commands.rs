@@ -141,6 +141,8 @@ pub async fn list_tables_fast(
             partition_keys: Vec::new(),
             row_count_estimate: d.row_count,
             columns: d.columns.clone(),
+            is_sampled: false,
+            full_row_count: None,
         });
     }
 
@@ -927,6 +929,8 @@ async fn sync_entries(
                         partition_keys: e.partition_keys.clone(),
                         row_count_estimate: count,
                         columns: cols,
+                        is_sampled: false,
+                        full_row_count: None,
                     };
                     let rec = source_record_from(&t, e, now, src);
                     let _ = db::upsert_source(&sqlite, &ws_path, &rec);
@@ -1620,6 +1624,8 @@ fn hydrate_custom_object(
                 partition_keys: Vec::new(),
                 row_count_estimate: def.row_count,
                 columns: def.columns,
+                is_sampled: false,
+                full_row_count: None,
             };
         }
     }
@@ -1638,6 +1644,8 @@ fn hydrate_custom_object(
         partition_keys: Vec::new(),
         row_count_estimate: count,
         columns: cols,
+        is_sampled: false,
+        full_row_count: None,
     }
 }
 
@@ -1670,6 +1678,8 @@ fn build_source_table_from_record(rec: &SourceRecord) -> SourceTable {
         partition_keys: rec.partition_keys.clone(),
         row_count_estimate: rec.row_count,
         columns: rec.columns.clone(),
+        is_sampled: rec.is_sampled,
+        full_row_count: rec.full_row_count,
     }
 }
 
@@ -1692,6 +1702,8 @@ fn source_record_from(t: &SourceTable, e: &scan::ScanEntry, created_at: i64, nam
         file_size: e.file_size as i64,
         columns: t.columns.clone(),
         row_count: t.row_count_estimate,
+        is_sampled: t.is_sampled,
+        full_row_count: t.full_row_count,
     }
 }
 
@@ -2245,17 +2257,11 @@ pub async fn register_database_table(
             guard.execute(&attach_sql, [])?;
         }
         
-        let create_view_sql = format!("CREATE OR REPLACE VIEW \"{}\" AS SELECT * FROM {};", local_table_name, full_path);
-        guard.execute(&create_view_sql, [])?;
-        
-        let columns = schema::describe_view(&guard, &local_table_name)?;
-        
-        // Estimate the row count for the external table. Postgres' planner
+        // 1. Estimate the row count for the external table. Postgres' planner
         // statistics (pg_class.reltuples / pg_stat_all_tables.n_live_tup) are
-        // instant, but return -1/0 for tables never ANALYZE'd. When both are
-        // missing, fall back to a real SELECT COUNT(*) so the user still sees a
-        // number instead of "unknown". MySQL's information_schema.table_rows is
-        // an estimate that's effectively always present, so no fallback there.
+        // instant, but return -1/0 for tables never ANALYZE'd.
+        // We do NOT fall back to a remote SELECT COUNT(*) because that will cause timeouts on large tables.
+        // MySQL's information_schema.table_rows is an estimate that's effectively always present.
         let (write_count, approx_rows) = if conn_record.db_type == "postgres" {
             let stats_sql = format!(
                 "SELECT reltuples::BIGINT,
@@ -2284,14 +2290,6 @@ pub async fn register_database_table(
             if rows <= 0 {
                 rows = n_live_tup;
             }
-            // Statistics unavailable — fall back to an exact count.
-            if rows <= 0 {
-                let count_sql = format!(
-                    "SELECT COUNT(*)::BIGINT FROM {catalog_name}.\"{}\".\"{}\";",
-                    schema_name, table_name
-                );
-                rows = guard.query_row(&count_sql, [], |row| row.get::<_, i64>(0)).unwrap_or(0);
-            }
             (writes, rows)
         } else {
             let stats_sql = format!(
@@ -2305,15 +2303,53 @@ pub async fn register_database_table(
                 .unwrap_or((0, 0))
         };
         
-        // A non-positive estimate still means "unknown" (e.g. MySQL returned 0).
         let row_count_opt = if approx_rows > 0 { Some(approx_rows) } else { None };
+
+        // 2. Read the global config settings for sampling
+        let sample_enabled = db::get_config(&sqlite, "explore.materialized_sample_enabled")
+            .unwrap_or(None)
+            .map(|v| v == "true")
+            .unwrap_or(true);
+        let sample_limit = db::get_config(&sqlite, "explore.materialized_sample_limit")
+            .unwrap_or(None)
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(1000);
+
+        // 3. Determine if we should materialize a local sample or create a view
+        let do_sample = sample_enabled && (approx_rows > sample_limit as i64 || approx_rows <= 0);
+        let (storage_kind, is_sampled, row_count_to_save) = if do_sample {
+            let _ = guard.execute(&format!("DROP VIEW IF EXISTS \"{}\";", local_table_name), []);
+            let _ = guard.execute(&format!("DROP TABLE IF EXISTS \"{}\";", local_table_name), []);
+            
+            let create_table_sql = format!(
+                "CREATE TABLE \"{}\" AS SELECT * FROM {} LIMIT {};",
+                local_table_name, full_path, sample_limit
+            );
+            guard.execute(&create_table_sql, [])?;
+            
+            // Get actual number of rows imported locally
+            let count_sql = format!("SELECT COUNT(*)::BIGINT FROM \"{}\";", local_table_name);
+            let imported_rows = guard.query_row(&count_sql, [], |row| row.get::<_, i64>(0)).unwrap_or(0);
+            
+            ("table".to_string(), true, Some(imported_rows))
+        } else {
+            let _ = guard.execute(&format!("DROP VIEW IF EXISTS \"{}\";", local_table_name), []);
+            let _ = guard.execute(&format!("DROP TABLE IF EXISTS \"{}\";", local_table_name), []);
+            
+            let create_view_sql = format!("CREATE VIEW \"{}\" AS SELECT * FROM {};", local_table_name, full_path);
+            guard.execute(&create_view_sql, [])?;
+            
+            ("view".to_string(), false, row_count_opt)
+        };
+        
+        let columns = schema::describe_view(&guard, &local_table_name)?;
 
         let now = now_ms();
         let record = db::SourceRecord {
             table_name: local_table_name.clone(),
             label: format!("{}.{}.{}", conn_record.name, schema_name, table_name),
             kind: db_type.clone(),
-            storage: "view".to_string(),
+            storage: storage_kind,
             file_path: format!("db://{}/{}/{}", connection_id, schema_name, table_name),
             scan_path: full_path.clone(),
             partition_keys: Vec::new(),
@@ -2322,7 +2358,9 @@ pub async fn register_database_table(
             file_mtime: write_count,
             file_size: row_count_opt.unwrap_or(0),
             columns: columns.clone(),
-            row_count: row_count_opt,
+            row_count: row_count_to_save,
+            is_sampled,
+            full_row_count: row_count_opt,
         };
         
         db::upsert_source(&sqlite, &ws_path_clone, &record)?;
@@ -2344,6 +2382,8 @@ pub async fn register_database_table(
                 partition_keys: Vec::new(),
                 row_count_estimate: d.row_count,
                 columns: d.columns.clone(),
+                is_sampled: false,
+                full_row_count: None,
             });
         }
         
