@@ -3962,6 +3962,7 @@ button.lm-select-trigger:hover:not(:disabled) {
   height: 100%;
   min-height: 0;
   background: var(--bg-base);
+  container-type: inline-size;
 }
 
 .chat-header {
@@ -5630,5 +5631,24 @@ button.lm-select-trigger:hover:not(:disabled) {
 @keyframes slideUpModalBox {
   from { transform: translateY(12px) scale(0.98); }
   to { transform: translateY(0) scale(1); }
+}
+
+/* Chat Composer Responsive Container Queries (Minimalist Icon Mode) */
+@container (max-width: 560px) {
+  .chat-composer__confirm-btn > span:not(.btn-prefix):not(.btn-caret) {
+    display: none !important;
+  }
+}
+
+@container (max-width: 470px) {
+  .chat-composer__priority-btn > span:not(.btn-prefix):not(.btn-caret) {
+    display: none !important;
+  }
+}
+
+@container (max-width: 380px) {
+  .chat-composer__model-btn > span:not(.btn-prefix):not(.btn-caret) {
+    display: none !important;
+  }
 }
 

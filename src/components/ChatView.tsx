@@ -746,9 +746,15 @@ export default function ChatView(props: {
               {/* Model Selector Dropdown */}
               <div class="dropdown-wrapper" ref={modelRef} style="position: relative;">
                 <button
-                  class="chat-composer__pill-btn select-btn"
+                  class="chat-composer__pill-btn select-btn chat-composer__model-btn"
                   onClick={() => setModelDropdownOpen(!modelDropdownOpen())}
                 >
+                  <span class="btn-prefix">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+                      <circle cx="12" cy="12" r="4" />
+                    </svg>
+                  </span>
                   <span>{props.selectedModel || "选择模型"}</span>
                   <span class="btn-caret">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
@@ -781,13 +787,15 @@ export default function ChatView(props: {
               {/* Priority Selector Dropdown */}
               <div class="dropdown-wrapper" ref={priorityRef} style="position: relative;">
                 <button
-                  class="chat-composer__pill-btn select-btn"
+                  class="chat-composer__pill-btn select-btn chat-composer__priority-btn"
                   onClick={() => setPriorityDropdownOpen(!priorityDropdownOpen())}
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
-                    <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1 0-3.12 3 3 0 0 1 0-4.88 2.5 2.5 0 0 1 0-3.12A2.5 2.5 0 0 1 9.5 2Z" />
-                    <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 0-3.12 3 3 0 0 0 0-4.88 2.5 2.5 0 0 0 0-3.12A2.5 2.5 0 0 0 14.5 2Z" />
-                  </svg>
+                  <span class="btn-prefix">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                      <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1 0-3.12 3 3 0 0 1 0-4.88 2.5 2.5 0 0 1 0-3.12A2.5 2.5 0 0 1 9.5 2Z" />
+                      <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 0-3.12 3 3 0 0 0 0-4.88 2.5 2.5 0 0 0 0-3.12A2.5 2.5 0 0 0 14.5 2Z" />
+                    </svg>
+                  </span>
                   <span>{props.selectedPriority}</span>
                   <span class="btn-caret">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
@@ -807,7 +815,7 @@ export default function ChatView(props: {
               {/* Confirmation Mode Selector Dropdown */}
               <div class="dropdown-wrapper" ref={confirmRef} style="position: relative;">
                 <button
-                  class="chat-composer__pill-btn select-btn"
+                  class="chat-composer__pill-btn select-btn chat-composer__confirm-btn"
                   onClick={() => setConfirmDropdownOpen(!confirmDropdownOpen())}
                 >
                   <span class="btn-prefix">
