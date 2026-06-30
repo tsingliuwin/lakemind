@@ -1436,7 +1436,12 @@ impl Tool for MaterializeRemoteTableTool {
             }
         };
 
-        // 2. Perform table drop & drop view, then CREATE TABLE AS SELECT *
+        let window_for_progress = self.window.clone();
+        let task_id_for_progress = self.task_id.clone();
+        let call_id_for_progress = call_id.clone();
+        let approx_total = source_record.full_row_count.unwrap_or(0);
+
+        // 2. Perform table drop & drop view, then CREATE TABLE AS SELECT * in chunks with progress reporting
         let full_path = source_record.scan_path.clone();
         let table_name_clone = table_name.to_string();
         let conn_clone = conn.clone();
@@ -1447,14 +1452,57 @@ impl Tool for MaterializeRemoteTableTool {
             let _ = guard.execute(&format!("DROP VIEW IF EXISTS \"{}\";", table_name_clone), []);
             let _ = guard.execute(&format!("DROP TABLE IF EXISTS \"{}\";", table_name_clone), []);
             
-            // Materialize the full remote table locally
-            let create_sql = format!("CREATE TABLE \"{}\" AS SELECT * FROM {};", table_name_clone, full_path);
-            guard.execute(&create_sql, []).map_err(|e| e.to_string())?;
+            // Instantly create the empty table schema locally
+            let create_schema_sql = format!("CREATE TABLE \"{}\" AS SELECT * FROM {} LIMIT 0;", table_name_clone, full_path);
+            guard.execute(&create_schema_sql, []).map_err(|e| e.to_string())?;
 
-            // Retrieve the imported row count
-            let count_sql = format!("SELECT COUNT(*)::BIGINT FROM \"{}\";", table_name_clone);
-            let imported_rows = guard.query_row(&count_sql, [], |row| row.get::<_, i64>(0)).unwrap_or(0);
-            Ok(imported_rows)
+            // Retrieve data from remote
+            let select_sql = format!("SELECT * FROM {};", full_path);
+            let mut stmt = guard.prepare(&select_sql).map_err(|e| e.to_string())?;
+            let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+
+            let mut appender = guard.appender(&table_name_clone).map_err(|e| e.to_string())?;
+            
+            let mut count = 0;
+            let mut last_emit = std::time::Instant::now();
+
+            while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+                let mut row_vals = Vec::new();
+                let mut idx = 0;
+                while let Ok(val) = row.get::<usize, duckdb::types::Value>(idx) {
+                    row_vals.push(val);
+                    idx += 1;
+                }
+
+                let to_sql_row: Vec<&dyn duckdb::ToSql> = row_vals.iter().map(|v| v as &dyn duckdb::ToSql).collect();
+                appender.append_row(duckdb::appender_params_from_iter(to_sql_row)).map_err(|e| e.to_string())?;
+
+                count += 1;
+
+                if count % 20000 == 0 || last_emit.elapsed() >= std::time::Duration::from_millis(500) {
+                    let pct_str = if approx_total > 0 {
+                        format!(" ({:.1}%)", (count as f64 / approx_total as f64) * 100.0)
+                    } else {
+                        String::new()
+                    };
+                    let prog_summary = format!("正在导入数据: 已物化 {} 行{}...", count, pct_str);
+                    emit_tool_result(
+                        &window_for_progress,
+                        &task_id_for_progress,
+                        &call_id_for_progress,
+                        "running",
+                        prog_summary,
+                        None,
+                        None,
+                        None,
+                        None,
+                    );
+                    last_emit = std::time::Instant::now();
+                }
+            }
+
+            std::mem::drop(appender);
+            Ok(count)
         })
         .await
         .map_err(|e| ToolError(format!("线程执行失败: {e}")))

@@ -119,7 +119,7 @@ export function mergeToolResult(
   segments: Segment[],
   result: {
     id: string;
-    status: "ok" | "error" | "awaiting";
+    status: "ok" | "error" | "awaiting" | "running";
     summary?: string;
     sql?: string;
     table?: SqlResult;
