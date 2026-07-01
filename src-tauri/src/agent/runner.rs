@@ -58,19 +58,36 @@ enum RunOutcome {
     RateLimited,
 }
 
-/// `true` if the error string looks like a rate-limit / 429 that is worth
-/// retrying after a short wait. Matches the common shapes across providers:
-/// "429", "Too Many Requests", "rate_limit", "TPM", "RPM", "quota".
+/// `true` if the error string looks like a rate-limit / throttling that is
+/// worth retrying after a short wait.
+///
+/// **Primary signal — HTTP 429:** rig's `http_client` formats every non-2xx
+/// response as `"Invalid status code {status} with message: {body}"` (see
+/// `http_client::non_success_status_error`). The status code is the HTTP
+/// `StatusCode` (a number, stable across all providers), while the body text
+/// is provider-specific ("总prefill TPM超过限制" / "rate_limit_exceeded" /
+/// etc.). So matching `429` (optionally anchored to the `Invalid status code`
+/// prefix) is the reliable cross-provider signal — we don't have to guess each
+/// provider's wording.
+///
+/// **Fallback — keyword match:** some non-standard gateways/proxies express
+/// throttling as 503 + "overloaded", or even 200 with a rate-limit body. The
+/// keyword list catches those, but the 429 path above handles the common case.
 fn is_rate_limit_error(msg: &str) -> bool {
     let m = msg.to_lowercase();
-    m.contains("429")
-        || m.contains("too many requests")
+    // Primary: HTTP 429 (rig formats as "Invalid status code 429 ...").
+    if m.contains("status code 429") {
+        return true;
+    }
+    // Fallback: provider-specific wording on non-429 statuses.
+    m.contains("too many requests")
         || m.contains("rate_limit")
         || m.contains("ratelimit")
+        || m.contains("overloaded")
+        || m.contains("throttl")
         || m.contains("tpm")
         || m.contains("rpm")
         || m.contains("quota")
-        || m.contains("throttl")
 }
 
 /// Drive the rig multi-turn stream: map each `MultiTurnStreamItem` to a frontend
