@@ -328,44 +328,76 @@ impl Tool for MaterializeRemoteTableTool {
                     }
                 }
                 Strategy::Time { col } => {
-                    // Day buckets via DuckDB date arithmetic (no Rust date lib).
-                    // bounds: [min_day, max_day] as YYYY-MM-DD strings + day span.
-                    let (min_day, max_day, total_days) = day_bounds(&guard, &full_path_c, col)?;
-                    if let (Some(lo), Some(hi), total) = (min_day, max_day, total_days) {
-                        // Iterate integer day offsets; DuckDB builds each boundary.
-                        let mut day_idx: i64 = 0;
+                    // Time buckets via DuckDB DATE arithmetic. The bucket width
+                    // is chosen adaptively so the total number of buckets (and
+                    // thus remote scans) stays bounded (~≤120), regardless of
+                    // the table's time span: <200d → daily, <3y → weekly,
+                    // <10y → monthly, else quarterly. Each bucket is one INSERT
+                    // …WHERE >= start AND < end, pushed down to the remote.
+                    let (min_day, max_day, day_span) = day_bounds(&guard, &full_path_c, col)?;
+                    if let (Some(lo), Some(hi)) = (min_day, max_day) {
+                        let (bucket_days, bucket_label) = pick_bucket_width(day_span);
+                        let total_buckets = ((day_span as f64) / bucket_days as f64).ceil() as u64;
+                        let mut bucket_idx: i64 = 0;
                         loop {
-                            let start_expr = format!("CAST('{lo}' AS DATE) + INTERVAL '{d} days'", lo = lo, d = day_idx);
-                            let end_expr = format!("CAST('{lo}' AS DATE) + INTERVAL '{d} days'", lo = lo, d = day_idx + 1);
-                            // Stop when this bucket's start is past max_day.
-                            let past_max_sql = format!("SELECT CAST(({start}) AS DATE) > CAST('{hi}' AS DATE)", start = start_expr, hi = hi);
-                            let past_max: bool = guard.query_row(&past_max_sql, [], |r| r.get::<_, bool>(0)).unwrap_or(true);
+                            let offset_days = bucket_idx * bucket_days;
+                            // start = min_day + offset; DuckDB: DATE + INTEGER = DATE.
+                            let start_expr = format!("CAST('{lo}' AS DATE) + {offset_days}", lo = lo, offset_days = offset_days);
+                            // Is this bucket's start already past max_day? (tail bucket)
+                            let past_max_sql = format!(
+                                "SELECT (CAST('{lo}' AS DATE) + {offset_days}) > CAST('{hi}' AS DATE);",
+                                lo = lo, offset_days = offset_days, hi = hi
+                            );
+                            let past_max: bool = guard
+                                .query_row(&past_max_sql, [], |r| r.get::<_, bool>(0))
+                                .unwrap_or(true);
                             if past_max {
-                                // Last bucket: pull the tail (>= start, no upper bound).
-                                let sql = format!(
-                                    "INSERT INTO \"{n}\" SELECT * FROM {p} WHERE \"{c}\" >= ({start});",
-                                    n = local_name, p = full_path_c, c = col.replace('"', "\"\""), start = start_expr
-                                );
-                                let n = guard.execute(&sql, []).map_err(|e| {
-                                    format!("拉取时间分区 {lo}+{d}天 失败: {e}。已落盘 {w} 行。", lo = lo, d = day_idx, e = e, w = written)
-                                })? as i64;
-                                written += n;
+                                // No rows left in range — we're done.
                                 break;
                             }
-                            let sql = format!(
-                                "INSERT INTO \"{n}\" SELECT * FROM {p} WHERE \"{c}\" >= ({start}) AND \"{c}\" < ({end});",
-                                n = local_name, p = full_path_c, c = col.replace('"', "\"\""), start = start_expr, end = end_expr
+                            // end = min_day + (offset + bucket_days). Compare
+                            // timestamps with the TIMESTAMP-typed `DATE + INTERVAL`
+                            // so it matches a TIMESTAMP column like task_time.
+                            let next_offset = offset_days + bucket_days;
+                            let end_past_max_sql = format!(
+                                "SELECT (CAST('{lo}' AS DATE) + {next_offset}) > CAST('{hi}' AS DATE);",
+                                lo = lo, next_offset = next_offset, hi = hi
                             );
-                            let n = guard.execute(&sql, []).map_err(|e| {
-                                format!("拉取时间分区 {lo}+{d}天 失败: {e}。已落盘 {w} 行。", lo = lo, d = day_idx, e = e, w = written)
-                            })? as i64;
+                            let end_past_max: bool = guard
+                                .query_row(&end_past_max_sql, [], |r| r.get::<_, bool>(0))
+                                .unwrap_or(true);
+                            let n = if end_past_max {
+                                // Final bucket: upper-bounded by max, pull to the end.
+                                let sql = format!(
+                                    "INSERT INTO \"{n}\" SELECT * FROM {p} WHERE \"{c}\" >= (CAST('{lo}' AS DATE) + INTERVAL '{offset_days} days') AND \"{c}\" <= CAST('{hi}' AS DATE);",
+                                    n = local_name, p = full_path_c, c = col.replace('"', "\"\""),
+                                    lo = lo, offset_days = offset_days, hi = hi
+                                );
+                                guard.execute(&sql, []).map_err(|e| {
+                                    format!("拉取时间分区(bucket {bi}) 失败: {e}。已落盘 {w} 行。", bi = bucket_idx, e = e, w = written)
+                                })? as i64
+                            } else {
+                                let sql = format!(
+                                    "INSERT INTO \"{n}\" SELECT * FROM {p} WHERE \"{c}\" >= (CAST('{lo}' AS DATE) + INTERVAL '{offset_days} days') AND \"{c}\" < (CAST('{lo}' AS DATE) + INTERVAL '{next_offset} days');",
+                                    n = local_name, p = full_path_c, c = col.replace('"', "\"\""),
+                                    lo = lo, offset_days = offset_days, next_offset = next_offset
+                                );
+                                guard.execute(&sql, []).map_err(|e| {
+                                    format!("拉取时间分区(bucket {bi}) 失败: {e}。已落盘 {w} 行。", bi = bucket_idx, e = e, w = written)
+                                })? as i64
+                            };
+                            let _ = start_expr; // kept for clarity; the INSERTs use the INTERVAL form
                             written += n;
-                            day_idx += 1;
-                            let done = day_idx as u64;
-                            let pct = if total > 0 { (done * 100 / total as u64).min(100) } else { 100 };
+                            bucket_idx += 1;
+                            let done = bucket_idx as u64;
+                            let pct = if total_buckets > 0 {
+                                (done * 100 / total_buckets).min(100)
+                            } else {
+                                100
+                            };
                             emit_tool_result(&window_c, &task_c, &call_c, "running",
-                                format!("物化中（时间分区 {c}）：{done}/{total} 天 ({pct}%)，已写入 {w} 行",
-                                    c = col, done = done, total = total, pct = pct, w = written),
+                                format!("物化中（时间分区 {c}，{bl}）：{done}/{total} ({pct}%)，已写入 {w} 行",
+                                    c = col, bl = bucket_label, done = done, total = total_buckets, pct = pct, w = written),
                                 None, None, None, None);
                         }
                     }
@@ -483,30 +515,41 @@ fn range_min_max(guard: &duckdb::Connection, full_path: &str, col: &str) -> Resu
 /// `(min_day_str, max_day_str, day_span)` where each `*_day_str` is `YYYY-MM-DD`
 /// and `day_span` is the number of day buckets (max_day - min_day + 1).
 /// `(None, None, 0)` means the table is empty / all-null.
+///
+/// Only MIN/MAX are fetched remotely (both are aggregates the scanner pushes
+/// down); the day span is computed locally in Rust to avoid DuckDB's
+/// `DATE - DATE = BIGINT` (which can't be added to an `INTERVAL`).
 fn day_bounds(guard: &duckdb::Connection, full_path: &str, col: &str) -> Result<(Option<String>, Option<String>, i64), String> {
     // CAST to DATE truncates to the day; this also works across TIMESTAMP /
     // DATETIME / DATE column types in DuckDB's scanner.
     let sql = format!(
-        "SELECT CAST(CAST(MIN(\"{c}\") AS DATE) AS VARCHAR), CAST(CAST(MAX(\"{c}\") AS DATE) AS VARCHAR), CAST(CAST(MAX(\"{c}\") AS DATE) AS DATE) - CAST(CAST(MIN(\"{c}\") AS DATE) AS DATE) + INTERVAL '1 day' FROM {p};",
+        "SELECT CAST(CAST(MIN(\"{c}\") AS DATE) AS VARCHAR), CAST(CAST(MAX(\"{c}\") AS DATE) AS VARCHAR) FROM {p};",
         c = col.replace('"', "\"\""), p = full_path
     );
-    guard
-        .query_row(&sql, [], |r| {
-            let lo: Option<String> = r.get(0)?;
-            let hi: Option<String> = r.get(1)?;
-            // DuckDB returns a DATE - DATE + INTERVAL as an interval; cast the
-            // whole expression's day count by reading it back as i64 days.
-            // Simpler: re-derive the span in Rust from the two day strings.
-            Ok((lo, hi, 0))
-        })
-        .map_err(|e| format!("查询时间分区列 {c} 的 MIN/MAX 失败: {e}", c = col))
-        .and_then(|(lo, hi, _)| {
-            let span = match (&lo, &hi) {
-                (Some(l), Some(h)) => days_between(l, h),
-                _ => 0,
-            };
-            Ok((lo, hi, span))
-        })
+    let (lo, hi): (Option<String>, Option<String>) = guard
+        .query_row(&sql, [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(|e| format!("查询时间分区列 {c} 的 MIN/MAX 失败: {e}", c = col))?;
+    let span = match (&lo, &hi) {
+        (Some(l), Some(h)) => days_between(l, h),
+        _ => 0,
+    };
+    Ok((lo, hi, span))
+}
+
+/// Choose a bucket width (in days) and a human label for a time-span, so the
+/// total number of buckets stays bounded (~≤120). Narrow spans get daily
+/// buckets (fine-grained progress); wide spans coarsen to weeks/months to keep
+/// the number of remote scans reasonable.
+fn pick_bucket_width(day_span: i64) -> (i64, &'static str) {
+    if day_span <= 120 {
+        (1, "按天")
+    } else if day_span <= 365 * 3 {
+        (7, "按周")
+    } else if day_span <= 365 * 10 {
+        (30, "按月")
+    } else {
+        (90, "按季")
+    }
 }
 
 /// Inclusive day count between two `YYYY-MM-DD` strings, computed without a
