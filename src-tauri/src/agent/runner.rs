@@ -58,36 +58,75 @@ enum RunOutcome {
     RateLimited,
 }
 
-/// `true` if the error string looks like a rate-limit / throttling that is
-/// worth retrying after a short wait.
+/// Classify a provider error string into one of three buckets so the runner
+/// knows whether retrying is worthwhile.
 ///
-/// **Primary signal — HTTP 429:** rig's `http_client` formats every non-2xx
-/// response as `"Invalid status code {status} with message: {body}"` (see
-/// `http_client::non_success_status_error`). The status code is the HTTP
-/// `StatusCode` (a number, stable across all providers), while the body text
-/// is provider-specific ("总prefill TPM超过限制" / "rate_limit_exceeded" /
-/// etc.). So matching `429` (optionally anchored to the `Invalid status code`
-/// prefix) is the reliable cross-provider signal — we don't have to guess each
-/// provider's wording.
+/// rig's `http_client` formats every non-2xx response uniformly as
+/// `"Invalid status code {StatusCode} with message: {body}"`. The status code
+/// is a stable number, but providers overload 429 to mean two very different
+/// things:
+///   - **Transient throttling** (TPM/RPM exceeded, too_many_requests) — wait a
+///     few seconds and the request will succeed. RETRY.
+///   - **Quota/balance exhausted** (insufficient_quota, credit_balance_too_low,
+///     余额不足) — no amount of waiting helps; the account is out of money.
+///     DON'T RETRY (just surface the error so the user can top up).
 ///
-/// **Fallback — keyword match:** some non-standard gateways/proxies express
-/// throttling as 503 + "overloaded", or even 200 with a rate-limit body. The
-/// keyword list catches those, but the 429 path above handles the common case.
-fn is_rate_limit_error(msg: &str) -> bool {
+/// Both return 429, so the status code alone can't tell them apart. We look at
+/// the body wording: quota/balance/credit keywords → `Unretriable` (checked
+/// first), otherwise a 429 or throttle keyword → `Retriable`.
+#[derive(Debug, PartialEq, Eq)]
+enum RateLimitKind {
+    /// Transient rate limit — retrying after a backoff is worthwhile.
+    Retriable,
+    /// Quota/balance exhausted — retrying won't help; surface to the user.
+    Unretriable,
+    /// Not a rate-limit error at all.
+    No,
+}
+
+fn classify_rate_limit_error(msg: &str) -> RateLimitKind {
     let m = msg.to_lowercase();
-    // Primary: HTTP 429 (rig formats as "Invalid status code 429 ...").
-    if m.contains("status code 429") {
-        return true;
+
+    // --- Unretriable: account out of quota / balance / credit. These may still
+    // carry 429 (providers are inconsistent), so check BEFORE the 429 rule.
+    // (Matching is conservative: "quota" alone could be a transient RPM quota,
+    //  so we require a stronger signal — "insufficient", "exhausted", "balance",
+    //  "credit", "billing", "payment", "充值", "余额", "用尽".)
+    const UNRETRIABLE: &[&str] = &[
+        "insufficient_quota", "insufficient quota", "insufficient balance",
+        "quota exhausted", "quota_exhausted", "exceeded your current quota",
+        "credit_balance", "credit balance", "balance is too low", "balance too low",
+        "billing", "payment", "no credit", "out of credit",
+        "额度已用尽", "额度不足", "余额不足", "余额已尽", "余额耗尽",
+        "充值", "欠费", "计费",
+    ];
+    if UNRETRIABLE.iter().any(|k| m.contains(k)) {
+        return RateLimitKind::Unretriable;
     }
-    // Fallback: provider-specific wording on non-429 statuses.
-    m.contains("too many requests")
+
+    // --- Retriable: transient throttling. Primary signal is the HTTP 429
+    // status code (rig formats as "Invalid status code 429 ..."), stable across
+    // all providers. The body wording ("TPM超过限制" / "rate_limit_exceeded")
+    // is provider-specific but we don't need to parse it — 429 + not-unretriable
+    // (checked above) is enough to justify a retry.
+    if m.contains("status code 429") {
+        return RateLimitKind::Retriable;
+    }
+
+    // Fallback: non-standard gateways that express throttling via 503 or 200
+    // with a rate-limit body (no 429). Match provider throttle wording.
+    if m.contains("too many requests")
         || m.contains("rate_limit")
         || m.contains("ratelimit")
         || m.contains("overloaded")
         || m.contains("throttl")
         || m.contains("tpm")
         || m.contains("rpm")
-        || m.contains("quota")
+    {
+        return RateLimitKind::Retriable;
+    }
+
+    RateLimitKind::No
 }
 
 /// Drive the rig multi-turn stream: map each `MultiTurnStreamItem` to a frontend
@@ -219,11 +258,14 @@ async fn run_stream_loop<R>(
             Ok(_) => { emitted_any = true; }
             Err(e) => {
                 let msg = e.to_string();
-                // A rate-limit (429) that arrived BEFORE any content was emitted
-                // is retriable: the caller will wait and rebuild the stream.
-                // If content already streamed out, the multi-turn state has
-                // advanced and we can't safely retry — surface the error.
-                if !emitted_any && is_rate_limit_error(&msg) {
+                // Classify the error: a *transient* rate-limit (TPM/RPM) that
+                // arrived BEFORE any content was emitted is retriable — the
+                // caller waits and rebuilds the stream. A *quota/balance*
+                // exhaustion is not retriable (waiting won't add credits), so
+                // surface it as a normal error. If content already streamed out,
+                // the multi-turn state has advanced and we can't safely retry
+                // regardless.
+                if !emitted_any && classify_rate_limit_error(&msg) == RateLimitKind::Retriable {
                     return RunOutcome::RateLimited;
                 }
                 emit_event(&window, &task_id, "error", Some(msg.clone()), None);
@@ -513,4 +555,80 @@ pub(crate) async fn run_agent_chat_stream(
     emit_event(&window, &task_id, "done", None, None);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests_rate_limit_classify {
+    use super::*;
+
+    // ---- Retriable: transient throttling (should retry) ----
+
+    #[test]
+    fn longcat_tpm_429_is_retriable() {
+        // The exact error the user hit.
+        let msg = "CompletionError: ProviderError: Invalid status code 429 Too Many Requests with message: {\"error\":{\"message\":\"服务端模型:LongCat-2.0 总prefill TPM超过限制\",\"type\":\"rate_limit_error\",\"code\":\"too_many_requests\"}}";
+        assert_eq!(classify_rate_limit_error(msg), RateLimitKind::Retriable);
+    }
+
+    #[test]
+    fn openai_rate_limit_429_is_retriable() {
+        let msg = "Invalid status code 429 Too Many Requests with message: {\"error\":{\"type\":\"rate_limit_exceeded\"}}";
+        assert_eq!(classify_rate_limit_error(msg), RateLimitKind::Retriable);
+    }
+
+    #[test]
+    fn anthropic_overloaded_is_retriable() {
+        // Anthropic sometimes returns 503 + "overloaded".
+        let msg = "Invalid status code 503 Service Unavailable with message: {\"error\":{\"type\":\"overloaded_error\"}}";
+        assert_eq!(classify_rate_limit_error(msg), RateLimitKind::Retriable);
+    }
+
+    // ---- Unretriable: quota / balance exhausted (must NOT retry) ----
+
+    #[test]
+    fn openai_insufficient_quota_is_unretriable() {
+        // Even though it may carry 429, it's a billing issue — no retry.
+        let msg = "Invalid status code 429 with message: {\"error\":{\"code\":\"insufficient_quota\",\"message\":\"You exceeded your current quota\"}}";
+        assert_eq!(classify_rate_limit_error(msg), RateLimitKind::Unretriable);
+    }
+
+    #[test]
+    fn anthropic_credit_balance_too_low_is_unretriable() {
+        let msg = "Invalid status code 400 with message: {\"error\":{\"type\":\"credit_balance_too_low\",\"message\":\"Your credit balance is too low\"}}";
+        assert_eq!(classify_rate_limit_error(msg), RateLimitKind::Unretriable);
+    }
+
+    #[test]
+    fn deepseek_insufficient_balance_is_unretriable() {
+        let msg = "Invalid status code 402 with message: Insufficient Balance";
+        assert_eq!(classify_rate_limit_error(msg), RateLimitKind::Unretriable);
+    }
+
+    #[test]
+    fn chinese_quota_exhausted_is_unretriable() {
+        let msg = "Invalid status code 429 with message: 额度已用尽，请充值";
+        assert_eq!(classify_rate_limit_error(msg), RateLimitKind::Unretriable);
+    }
+
+    // ---- Not a rate-limit error at all ----
+
+    #[test]
+    fn auth_error_is_not_rate_limit() {
+        let msg = "Invalid status code 401 Unauthorized with message: Invalid API key";
+        assert_eq!(classify_rate_limit_error(msg), RateLimitKind::No);
+    }
+
+    #[test]
+    fn server_error_is_not_rate_limit() {
+        let msg = "Invalid status code 500 Internal Server Error";
+        assert_eq!(classify_rate_limit_error(msg), RateLimitKind::No);
+    }
+
+    // ---- Edge case: "quota" in a transient context should still be retriable ----
+    // (e.g. "RPM quota exceeded" is transient, not a billing exhaustion.)
+    #[test]
+    fn rpm_quota_429_is_retriable_not_unretriable() {
+        let msg = "Invalid status code 429 with message: RPM quota exceeded, too many requests";
+        assert_eq!(classify_rate_limit_error(msg), RateLimitKind::Retriable);
+    }
 }
