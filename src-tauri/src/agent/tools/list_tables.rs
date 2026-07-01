@@ -60,7 +60,19 @@ impl Tool for ListTablesTool {
             let mut descriptions = Vec::new();
             for tname in list {
                 if let Some(rec) = records.iter().find(|r| r.table_name == tname) {
-                    if rec.is_sampled {
+                    let is_partial = matches!(rec.materialize_status.as_deref(), Some("partial"));
+                    if is_partial {
+                        // Partially materialized (resume / on-demand): incomplete
+                        // local data — aggregation still misleads.
+                        descriptions.push(format!(
+                            "{} (部分物化，已落盘 {} 行；远程全量约 {} 行，类型是 \"{}\"，全量直连路径为 \"{}\"。聚合需先续传完成或用原生下推)",
+                            tname,
+                            rec.row_count.unwrap_or(0),
+                            rec.full_row_count.map(|c: i64| c.to_string()).unwrap_or_else(|| "未知".to_string()),
+                            rec.kind,
+                            rec.scan_path
+                        ));
+                    } else if rec.aggregation_misleads() {
                         let full_rows_str = rec.full_row_count.map(|c: i64| c.to_string()).unwrap_or_else(|| "未知".to_string());
                         descriptions.push(format!(
                             "{} (已本地物化采样 {} 行，外部全量大约 {} 行，类型是 \"{}\"，全量直连路径为 \"{}\")",

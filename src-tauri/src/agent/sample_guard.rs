@@ -43,33 +43,46 @@ fn sampled_aggregation_target<'a>(
     sampled.iter().find(|r| sql_contains_ident(sql, &r.table_name)).copied()
 }
 
-/// Build the error string returned when an aggregation over a sampled table is
-/// intercepted — points the agent at the native pushdown function or
-/// `materialize_remote_table` so it reruns against full data.
+/// Build the error string returned when an aggregation over an incomplete
+/// (sampled or partially-materialized) table is intercepted — points the agent
+/// at the native pushdown function or `materialize_remote_table` so it reruns
+/// against full data.
 fn build_intercept_message(rec: &crate::db::SourceRecord) -> String {
     let db_alias = rec.scan_path.split('.').next().unwrap_or("");
     let kind = rec.kind.as_str();
-    let sampled_rows = rec.row_count.unwrap_or(0);
+    let local_rows = rec.row_count.unwrap_or(0);
     let full_rows = rec.full_row_count.unwrap_or(0);
+    let is_partial = matches!(rec.materialize_status.as_deref(), Some("partial"));
+    let intro = if is_partial {
+        format!("检测到对本地表 `{table}` 的聚合查询，但该表当前仅部分物化（已落盘 {local} 行 / 远程全量约 {full} 行），直接聚合会导致指标失真，已拒绝执行。",
+            table = rec.table_name, local = local_rows, full = full_rows)
+    } else {
+        format!("检测到对本地采样缓存表 `{table}` 的聚合查询。该采样表仅含 {local} 行，而远程全量约 {full} 行——在采样表上聚合会导致指标严重失真（如 COUNT 远小于真实值），已拒绝执行。",
+            table = rec.table_name, local = local_rows, full = full_rows)
+    };
+    let mat_hint = if is_partial {
+        "2) 或再次调用 `materialize_remote_table` 续传至完成（已物化部分会自动跳过），再做本地聚合分析。"
+    } else {
+        "2) 或调用 `materialize_remote_table` 工具，将该表全量物化到本地后再做本地聚合分析。"
+    };
     format!(
-        "[已拦截] 检测到对本地采样缓存表 `{table}` 的聚合查询。该采样表仅含 {sampled} 行，而远程全量约 {full} 行——在采样表上聚合会导致指标严重失真（如 COUNT 远小于真实值），已拒绝执行。\n\n请改用全量路径之一：\n1) 原生下推（推荐，最快）：将聚合下推到远程库执行，只拉回结果，形如：\n   SELECT * FROM {kind}_query('{alias}', '<你的聚合 SQL；FROM 用该表在远程库的 schema.table>')\n2) 或调用 `materialize_remote_table` 工具，将该表全量物化到本地后再做本地聚合分析。",
-        table = rec.table_name,
-        sampled = sampled_rows,
-        full = full_rows,
-        kind = kind,
-        alias = db_alias,
+        "[已拦截] {intro}\n\n请改用全量路径之一：\n1) 原生下推（推荐，最快）：将聚合下推到远程库执行，只拉回结果，形如：\n   SELECT * FROM {kind}_query('{alias}', '<你的聚合 SQL；FROM 用该表在远程库的 schema.table>')\n{mat_hint}",
+        intro = intro, kind = kind, alias = db_alias, mat_hint = mat_hint,
     )
 }
 
-/// Refuse to run `sql` if it aggregates over a locally-cached *sampled* table.
-/// Shared by `execute_query` and `render_chart` so neither can be used to
-/// aggregate a sampled cache table (which would produce misleading metrics).
-/// Must be called from the blocking pool (touches SQLite).
+/// Refuse to run `sql` if it aggregates over a locally-cached table whose local
+/// copy would mislead — i.e. a *sampled* or *partially-materialized* table.
+/// Shared by `execute_query` and `render_chart`. Must be called from the
+/// blocking pool (touches SQLite).
 pub(super) fn check_sampled_aggregation(sql: &str, ws_path: &str) -> Result<(), String> {
     let sqlite = crate::db::get_db_conn()?;
     let all = crate::db::list_sources(&sqlite, ws_path)?;
-    let sampled: Vec<&crate::db::SourceRecord> = all.iter().filter(|r| r.is_sampled).collect();
-    if let Some(rec) = sampled_aggregation_target(sql, &sampled) {
+    // A table misleads aggregation when it is sampled OR only partially
+    // materialized — both have incomplete local data. Fully-materialized tables
+    // (materialize_status = "full") pass through.
+    let incomplete: Vec<&crate::db::SourceRecord> = all.iter().filter(|r| r.aggregation_misleads()).collect();
+    if let Some(rec) = sampled_aggregation_target(sql, &incomplete) {
         return Err(build_intercept_message(rec));
     }
     Ok(())
@@ -96,7 +109,30 @@ mod tests_sampled_intercept {
             row_count: Some(1000),
             is_sampled: true,
             full_row_count: Some(1_000_000),
+            materialize_status: Some(crate::db::mat_status::SAMPLED.to_string()),
         }
+    }
+
+    #[test]
+    fn full_status_not_intercepted_partial_is() {
+        // A fully-materialized table does NOT mislead aggregation.
+        let mut full = rec("s_done");
+        full.materialize_status = Some(crate::db::mat_status::FULL.to_string());
+        full.is_sampled = false;
+        assert!(!full.aggregation_misleads());
+
+        // A partially-materialized table DOES mislead (incomplete local data).
+        let mut partial = rec("s_partial");
+        partial.materialize_status = Some(crate::db::mat_status::PARTIAL.to_string());
+        partial.is_sampled = false;
+        assert!(partial.aggregation_misleads());
+
+        // Legacy NULL status falls back to is_sampled.
+        let mut legacy = rec("s_legacy");
+        legacy.materialize_status = None;
+        assert!(legacy.aggregation_misleads()); // is_sampled=true
+        legacy.is_sampled = false;
+        assert!(!legacy.aggregation_misleads());
     }
 
     #[test]

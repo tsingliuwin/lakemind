@@ -1756,6 +1756,11 @@ fn source_record_from(t: &SourceTable, e: &scan::ScanEntry, created_at: i64, nam
         row_count: t.row_count_estimate,
         is_sampled: t.is_sampled,
         full_row_count: t.full_row_count,
+        materialize_status: if t.is_sampled {
+            Some(db::mat_status::SAMPLED.to_string())
+        } else {
+            Some(db::mat_status::FULL.to_string())
+        },
     }
 }
 
@@ -2420,6 +2425,11 @@ pub async fn register_database_table(
             row_count: row_count_to_save,
             is_sampled,
             full_row_count: row_count_opt,
+            materialize_status: if is_sampled {
+                Some(db::mat_status::SAMPLED.to_string())
+            } else {
+                Some(db::mat_status::FULL.to_string())
+            },
         };
         
         db::upsert_source(&sqlite, &ws_path_clone, &record)?;

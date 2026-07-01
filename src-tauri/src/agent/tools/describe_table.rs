@@ -108,7 +108,18 @@ impl Tool for DescribeTableTool {
 
                 let mut header_info = String::new();
                 if let Some(ref rec) = source_record {
-                    if rec.is_sampled {
+                    let is_partial = matches!(rec.materialize_status.as_deref(), Some("partial"));
+                    if is_partial {
+                        let full_rows_str = rec.full_row_count.map(|c: i64| c.to_string()).unwrap_or_else(|| "未知".to_string());
+                        let db_alias = rec.scan_path.split('.').next().unwrap_or("db_conn");
+                        header_info = format!(
+                            " [注意: 该表当前仅部分物化（已落盘 {} 行 / 远程全量约 {} 行），数据不完整，聚合会失真。如需全量汇总，请再次调用 materialize_remote_table 续传至完成（自动跳过已物化部分），或用原生下推 \"SELECT * FROM {}_query('{}', '...')\"]",
+                            rec.row_count.unwrap_or(0),
+                            full_rows_str,
+                            rec.kind,
+                            db_alias
+                        );
+                    } else if rec.aggregation_misleads() {
                         let full_rows_str = rec.full_row_count.map(|c: i64| c.to_string()).unwrap_or_else(|| "未知".to_string());
                         let db_alias = rec.scan_path.split('.').next().unwrap_or("db_conn");
                         header_info = format!(

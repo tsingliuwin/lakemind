@@ -93,6 +93,38 @@ pub struct SourceRecord {
     pub is_sampled: bool,
     /// The full row count on the remote database, if this is a sample.
     pub full_row_count: Option<i64>,
+    /// Materialization status of this source:
+    /// `"sampled"` — a small sample of a remote table (aggregation misleads).
+    /// `"partial"` — partially materialized (resume / on-demand); still
+    ///   incomplete, so aggregation still misleads.
+    /// `"full"`    — fully materialized; aggregation is safe.
+    /// `None`/empty is treated as `sampled` (when `is_sampled`) or `full`.
+    pub materialize_status: Option<String>,
+}
+
+/// Status strings stored in `sources.materialize_status`.
+pub mod mat_status {
+    pub const SAMPLED: &str = "sampled";
+    pub const PARTIAL: &str = "partial";
+    pub const FULL: &str = "full";
+}
+
+impl SourceRecord {
+    /// True iff aggregating this table's local copy would mislead — i.e. it is
+    /// a sample OR only partially materialized. `full` returns false.
+    pub fn aggregation_misleads(&self) -> bool {
+        let full = mat_status::FULL;
+        let partial = mat_status::PARTIAL;
+        let sampled = mat_status::SAMPLED;
+        match self.materialize_status.as_deref() {
+            Some(s) if s == full => false,
+            Some(s) if s == partial || s == sampled => true,
+            // Legacy rows (NULL status): fall back to the is_sampled flag.
+            None => self.is_sampled,
+            // Unknown status string: treat as misleading to be safe.
+            Some(_) => true,
+        }
+    }
 }
 
 /// Insert or update a source mapping (keyed by `(workspace_path, table_name)`).
@@ -100,19 +132,20 @@ pub fn upsert_source(conn: &Connection, ws_path: &str, r: &SourceRecord) -> Resu
     let keys = serde_json::to_string(&r.partition_keys).unwrap_or_else(|_| "[]".into());
     let cols = serde_json::to_string(&r.columns).unwrap_or_else(|_| "[]".into());
     conn.execute(
-        "INSERT INTO sources (workspace_path, table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO sources (workspace_path, table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count, materialize_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(workspace_path, table_name) DO UPDATE SET
             label=excluded.label, kind=excluded.kind, storage=excluded.storage,
             file_path=excluded.file_path, scan_path=excluded.scan_path,
             partition_keys=excluded.partition_keys, name_source=excluded.name_source,
             file_mtime=excluded.file_mtime, file_size=excluded.file_size,
             columns=excluded.columns, row_count=excluded.row_count,
-            is_sampled=excluded.is_sampled, full_row_count=excluded.full_row_count",
+            is_sampled=excluded.is_sampled, full_row_count=excluded.full_row_count,
+            materialize_status=excluded.materialize_status",
         rusqlite::params![
             ws_path, r.table_name, r.label, r.kind, r.storage, r.file_path, r.scan_path, keys,
             r.created_at, r.name_source, r.file_mtime, r.file_size, cols, r.row_count,
-            if r.is_sampled { 1 } else { 0 }, r.full_row_count
+            if r.is_sampled { 1 } else { 0 }, r.full_row_count, r.materialize_status
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -123,7 +156,7 @@ pub fn upsert_source(conn: &Connection, ws_path: &str, r: &SourceRecord) -> Resu
 pub fn list_sources(conn: &Connection, ws_path: &str) -> Result<Vec<SourceRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count
+            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count, materialize_status
              FROM sources WHERE workspace_path = ? ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -152,6 +185,7 @@ pub fn list_sources(conn: &Connection, ws_path: &str) -> Result<Vec<SourceRecord
                 row_count: row.get(12).ok(),
                 is_sampled: is_sampled_val != 0,
                 full_row_count: row.get(14).ok(),
+                materialize_status: row.get(15).ok(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -173,7 +207,7 @@ pub fn get_source_by_table(
 ) -> Result<Option<SourceRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count
+            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count, materialize_status
              FROM sources WHERE workspace_path = ? AND table_name = ?",
         )
         .map_err(|e| e.to_string())?;
@@ -202,6 +236,7 @@ pub fn get_source_by_table(
                 row_count: row.get(12).ok(),
                 is_sampled: is_sampled_val != 0,
                 full_row_count: row.get(14).ok(),
+                materialize_status: row.get(15).ok(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -451,6 +486,7 @@ pub fn init_global_db() -> Result<(), String> {
             row_count      INTEGER,
             is_sampled     INTEGER NOT NULL DEFAULT 0,
             full_row_count INTEGER,
+            materialize_status TEXT,
             PRIMARY KEY (workspace_path, table_name),
             FOREIGN KEY(workspace_path) REFERENCES workspaces(path) ON DELETE CASCADE
         )",
@@ -461,6 +497,15 @@ pub fn init_global_db() -> Result<(), String> {
     // Migrate sources table to add is_sampled / full_row_count columns if they don't exist
     let _ = conn.execute("ALTER TABLE sources ADD COLUMN is_sampled INTEGER NOT NULL DEFAULT 0;", []);
     let _ = conn.execute("ALTER TABLE sources ADD COLUMN full_row_count INTEGER;", []);
+    // materialize_status: 'sampled' | 'partial' | 'full'. Added for resume /
+    // on-demand materialization. Backfills existing rows from is_sampled so the
+    // status reflects reality on first read after migration.
+    if conn.execute("ALTER TABLE sources ADD COLUMN materialize_status TEXT;", []).is_ok() {
+        let _ = conn.execute(
+            "UPDATE sources SET materialize_status = CASE WHEN is_sampled = 1 THEN 'sampled' ELSE 'full' END WHERE materialize_status IS NULL;",
+            [],
+        );
+    }
 
     // config: key/value user settings (NEW)
     conn.execute(
