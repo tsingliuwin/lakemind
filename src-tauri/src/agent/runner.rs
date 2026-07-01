@@ -47,6 +47,35 @@ fn get_message_text(msg: &ChatMessageDto) -> String {
 /// Drive the rig multi-turn stream: map each `MultiTurnStreamItem` to a frontend
 /// event. Tool calls/results are NOT taken from rig's stream — each tool emits
 /// its own richer `tool_call`/`tool_result` from inside `call()` (real status +
+/// Outcome of one streaming run. `RateLimited` is returned only when a 429 /
+/// rate-limit error arrives *before* any content was emitted to the frontend,
+/// so the caller can rebuild the stream and retry with backoff. Once content
+/// has been emitted we can no longer safely retry (the multi-turn state has
+/// advanced), so any later error is terminal (reported via the error event
+/// inside the loop and returns `Done`).
+enum RunOutcome {
+    Done,
+    RateLimited,
+}
+
+/// `true` if the error string looks like a rate-limit / 429 that is worth
+/// retrying after a short wait. Matches the common shapes across providers:
+/// "429", "Too Many Requests", "rate_limit", "TPM", "RPM", "quota".
+fn is_rate_limit_error(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    m.contains("429")
+        || m.contains("too many requests")
+        || m.contains("rate_limit")
+        || m.contains("ratelimit")
+        || m.contains("tpm")
+        || m.contains("rpm")
+        || m.contains("quota")
+        || m.contains("throttl")
+}
+
+/// Drive the rig multi-turn stream: map each `MultiTurnStreamItem` to a frontend
+/// event. Tool calls/results are NOT taken from rig's stream — each tool emits
+/// its own richer `tool_call`/`tool_result` from inside `call()` (real status +
 /// structured SqlResult). Rig's tool stream items are therefore ignored.
 ///
 /// Generic over `R` (the provider's streaming-response type) so OpenAI
@@ -60,7 +89,7 @@ async fn run_stream_loop<R>(
     api_format: &str,
     preamble_raw: u64,
     tools_raw: u64,
-) {
+) -> RunOutcome {
     use futures_util::StreamExt;
     // Wall-clock start of this run (one user turn, possibly many LLM calls) —
     // used at run end to compute the generation speed (tok/s).
@@ -78,6 +107,11 @@ async fn run_stream_loop<R>(
     // so the live tok/s and "本轮输出" stay consistent with the final real
     // usage that arrives at FinalResponse.
     let mut output_buf = String::new();
+    // Tracks whether any content (text/reasoning/tool/usage) has been emitted
+    // to the frontend this run. A 429 that arrives before anything is emitted
+    // is safe to retry (the multi-turn state hasn't advanced); one that arrives
+    // mid-stream is not (rig's internal tool-result state has moved on).
+    let mut emitted_any = false;
     // Check the abort flag before processing each chunk. If set, stop early and
     // emit a "done" so the frontend unlocks the input.
     {
@@ -86,7 +120,7 @@ async fn run_stream_loop<R>(
             drop(aborted);
             state.aborted_tasks.lock().await.remove(&task_id);
             emit_event(&window, &task_id, "done", None, None);
-            return;
+            return RunOutcome::Done;
         }
     }
     while let Some(chunk) = stream.next().await {
@@ -97,11 +131,12 @@ async fn run_stream_loop<R>(
                 drop(aborted);
                 state.aborted_tasks.lock().await.remove(&task_id);
                 emit_event(&window, &task_id, "done", None, None);
-                return;
+                return RunOutcome::Done;
             }
         }
         match chunk {
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text_struct))) => {
+                emitted_any = true;
                 output_buf.push_str(&text_struct.text);
                 emit_delta(&window, &task_id, "text", &text_struct.text);
                 // Live output estimate = prior calls' real completion + this
@@ -111,6 +146,7 @@ async fn run_stream_loop<R>(
                 emit_usage_estimate(&window, &task_id, input_tokens_est, completion_est, preamble_raw, tools_raw);
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ReasoningDelta { reasoning, .. })) => {
+                emitted_any = true;
                 // Reasoning counts toward output tokens (the API bills it as
                 // output), so feed it into the same accumulator as text.
                 output_buf.push_str(&reasoning);
@@ -119,6 +155,7 @@ async fn run_stream_loop<R>(
                 emit_usage_estimate(&window, &task_id, input_tokens_est, completion_est, preamble_raw, tools_raw);
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(reasoning_struct))) => {
+                emitted_any = true;
                 let t = reasoning_struct.display_text();
                 output_buf.push_str(&t);
                 emit_delta(&window, &task_id, "reasoning", &t);
@@ -127,6 +164,7 @@ async fn run_stream_loop<R>(
             }
             // FinalResponse: carries the API's exact per-call token usage.
             Ok(MultiTurnStreamItem::FinalResponse(final_resp)) => {
+                emitted_any = true;
                 let rig_usage = final_resp.usage();
                 // Collapse provider-specific fields into one honest shape
                 // (Anthropic's input_tokens excludes cache, OpenAI's includes
@@ -161,11 +199,18 @@ async fn run_stream_loop<R>(
             }
             // Tool calls arrive here too, but the tools emit their own events
             // (with structured args/status/SqlResult). Ignore rig's variants.
-            Ok(_) => {}
+            Ok(_) => { emitted_any = true; }
             Err(e) => {
                 let msg = e.to_string();
+                // A rate-limit (429) that arrived BEFORE any content was emitted
+                // is retriable: the caller will wait and rebuild the stream.
+                // If content already streamed out, the multi-turn state has
+                // advanced and we can't safely retry — surface the error.
+                if !emitted_any && is_rate_limit_error(&msg) {
+                    return RunOutcome::RateLimited;
+                }
                 emit_event(&window, &task_id, "error", Some(msg.clone()), None);
-                return;
+                return RunOutcome::Done;
             }
         }
     }
@@ -180,6 +225,7 @@ async fn run_stream_loop<R>(
         run_output_tokens,
         run_start.elapsed().as_millis() as u64,
     );
+    RunOutcome::Done
 }
 
 pub(crate) async fn run_agent_chat_stream(
@@ -225,62 +271,35 @@ pub(crate) async fn run_agent_chat_stream(
         }
     }
 
-    // The pre-stream usage estimate is emitted AFTER the tool instances are
-    // created below, so the tool-definition token cost uses rig's real
-    // `ToolDefinition`s (not a hardcoded approximation).
-    let list_tool = ListTablesTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-    let desc_tool = DescribeTableTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-    let exec_tool = ExecuteQueryTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-    let sample_tool = SampleDataTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-
-    // OKF Tools (Instantiated for each format branch due to rig's ownership rules)
-    let load_okf_1 = LoadOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-    let load_okf_2 = LoadOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-    let load_okf_3 = LoadOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-
-    let write_okf_1 = WriteOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-    let write_okf_2 = WriteOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-    let write_okf_3 = WriteOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-
-    let search_okf_1 = SearchOkfRecipesTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-    let search_okf_2 = SearchOkfRecipesTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-    let search_okf_3 = SearchOkfRecipesTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-
-    let check_okf_1 = CheckSourceFingerprintTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-    let check_okf_2 = CheckSourceFingerprintTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-    let check_okf_3 = CheckSourceFingerprintTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-
-    let tidy_okf_1 = TidyOkfKnowledgeTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone(), model_id: model_id.clone() };
-    let tidy_okf_2 = TidyOkfKnowledgeTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone(), model_id: model_id.clone() };
-    let tidy_okf_3 = TidyOkfKnowledgeTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone(), model_id: model_id.clone() };
-
-    let materialize_tool_1 = MaterializeRemoteTableTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-    let materialize_tool_2 = MaterializeRemoteTableTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-    let materialize_tool_3 = MaterializeRemoteTableTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() };
-
-    let ddl_shared = DdlToolShared {
-        app_state: app_state.clone(),
-        task_id: task_id.clone(),
-        window: window.clone(),
-        confirm_mode: confirm_mode.clone(),
-    };
-    let create_table_tool = CreateTableTool { shared: ddl_shared.clone() };
-    let create_view_tool = CreateViewTool { shared: ddl_shared.clone() };
-    let drop_object_tool = DropObjectTool { shared: ddl_shared };
-    let render_chart_tool = RenderChartTool {
-        app_state: app_state.clone(),
-        task_id: task_id.clone(),
-        window: window.clone(),
-    };
-    let render_chart_tool_2 = RenderChartTool {
-        app_state: app_state.clone(),
-        task_id: task_id.clone(),
-        window: window.clone(),
-    };
-    let render_chart_tool_3 = RenderChartTool {
-        app_state: app_state.clone(),
-        task_id: task_id.clone(),
-        window: window.clone(),
+    // Factory closure that builds a fresh set of the 14 tool instances. Called
+    // once per provider branch AND once per 429-retry (rig consumes the tools
+    // when building the agent, so each retry needs a fresh set).
+    let build_tools = || -> (ListTablesTool, DescribeTableTool, ExecuteQueryTool, SampleDataTool,
+        LoadOkfBlockTool, WriteOkfBlockTool, SearchOkfRecipesTool, CheckSourceFingerprintTool,
+        TidyOkfKnowledgeTool, MaterializeRemoteTableTool,
+        CreateTableTool, CreateViewTool, DropObjectTool, RenderChartTool) {
+        let ddl_shared = DdlToolShared {
+            app_state: app_state.clone(),
+            task_id: task_id.clone(),
+            window: window.clone(),
+            confirm_mode: confirm_mode.clone(),
+        };
+        (
+            ListTablesTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
+            DescribeTableTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
+            ExecuteQueryTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
+            SampleDataTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
+            LoadOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
+            WriteOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
+            SearchOkfRecipesTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
+            CheckSourceFingerprintTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
+            TidyOkfKnowledgeTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone(), model_id: model_id.clone() },
+            MaterializeRemoteTableTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
+            CreateTableTool { shared: ddl_shared.clone() },
+            CreateViewTool { shared: ddl_shared.clone() },
+            DropObjectTool { shared: ddl_shared },
+            RenderChartTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
+        )
     };
 
     // Estimate the input token cost before the stream starts so the UI panel
@@ -292,8 +311,10 @@ pub(crate) async fn run_agent_chat_stream(
     // The tool cost is estimated from rig's *actual* `ToolDefinition`s
     // (name + full description + JSON-Schema parameters), serialized to JSON —
     // not a minimal hardcoded approximation — so the "系统工具" slice reflects
-    // what the model really receives. (`render_chart_tool_2`/`_3` are identical
-    // duplicates for the other provider branches, so one definition suffices.)
+    // what the model really receives.
+    let (list_tool, desc_tool, exec_tool, sample_tool,
+        load_okf, write_okf, search_okf, check_okf, tidy_okf, materialize_tool,
+        create_table_tool, create_view_tool, drop_object_tool, render_chart_tool) = build_tools();
     let tool_defs = vec![
         list_tool.definition(String::new()).await,
         desc_tool.definition(String::new()).await,
@@ -303,12 +324,12 @@ pub(crate) async fn run_agent_chat_stream(
         create_view_tool.definition(String::new()).await,
         drop_object_tool.definition(String::new()).await,
         render_chart_tool.definition(String::new()).await,
-        load_okf_1.definition(String::new()).await,
-        write_okf_1.definition(String::new()).await,
-        search_okf_1.definition(String::new()).await,
-        check_okf_1.definition(String::new()).await,
-        tidy_okf_1.definition(String::new()).await,
-        materialize_tool_1.definition(String::new()).await,
+        load_okf.definition(String::new()).await,
+        write_okf.definition(String::new()).await,
+        search_okf.definition(String::new()).await,
+        check_okf.definition(String::new()).await,
+        tidy_okf.definition(String::new()).await,
+        materialize_tool.definition(String::new()).await,
     ];
     let tools_json = serde_json::to_string(&tool_defs).unwrap_or_default();
     let ws_dir = app_state.workspace_dir.lock().await.to_string_lossy().to_string();
@@ -327,144 +348,148 @@ pub(crate) async fn run_agent_chat_stream(
     let input_est = preamble_raw + tools_raw + prompt_t + history_t;
     emit_usage_estimate(&window, &task_id, input_est, 0, preamble_raw, tools_raw);
 
+    // Retry loop for rate-limit (429) errors. Up to MAX_RETRIES attempts with
+    // exponential backoff. Only retries when the 429 arrives before any content
+    // was streamed (preflight rate-limit); mid-stream 429s can't be safely
+    // retried because rig's multi-turn state has already advanced.
+    const MAX_RETRIES: usize = 4;
+    const BASE_DELAY_SECS: u64 = 5;
     let format = provider.api_format.to_lowercase();
-    if format == "openai" {
-        let base_url = sanitize_endpoint(&provider.endpoint);
-        let client: rig_core::providers::openai::Client = rig_core::providers::openai::Client::builder()
-            .api_key(&provider.api_key)
-            .base_url(&base_url)
-            .build()
-            .map_err(|e| format!("构建 OpenAI 客户端失败: {e}"))?;
+    let mut attempt: usize = 0;
+    loop {
+        attempt += 1;
+        // Build a fresh tool set each attempt (rig consumes them on .build()).
+        let (list_tool, desc_tool, exec_tool, sample_tool,
+            load_okf, write_okf, search_okf, check_okf, tidy_okf, materialize_tool,
+            create_table_tool, create_view_tool, drop_object_tool, render_chart_tool) = build_tools();
 
-        let mut agent_builder = client
-            .completions_api()
-            .agent(&model_id)
-            .preamble(&combined_preamble)
-            .max_tokens(max_tokens_limit)
-            .tool(list_tool)
-            .tool(desc_tool)
-            .tool(exec_tool)
-            .tool(sample_tool)
-            .tool(create_table_tool)
-            .tool(create_view_tool)
-            .tool(drop_object_tool)
-            .tool(render_chart_tool)
-            .tool(load_okf_1)
-            .tool(write_okf_1)
-            .tool(search_okf_1)
-            .tool(check_okf_1)
-            .tool(tidy_okf_1)
-            .tool(materialize_tool_1);
+        let outcome = if format == "openai" {
+            let base_url = sanitize_endpoint(&provider.endpoint);
+            let client: rig_core::providers::openai::Client = rig_core::providers::openai::Client::builder()
+                .api_key(&provider.api_key)
+                .base_url(&base_url)
+                .build()
+                .map_err(|e| format!("构建 OpenAI 客户端失败: {e}"))?;
+            let mut agent_builder = client
+                .completions_api()
+                .agent(&model_id)
+                .preamble(&combined_preamble)
+                .max_tokens(max_tokens_limit)
+                .tool(list_tool)
+                .tool(desc_tool)
+                .tool(exec_tool)
+                .tool(sample_tool)
+                .tool(create_table_tool)
+                .tool(create_view_tool)
+                .tool(drop_object_tool)
+                .tool(render_chart_tool)
+                .tool(load_okf)
+                .tool(write_okf)
+                .tool(search_okf)
+                .tool(check_okf)
+                .tool(tidy_okf)
+                .tool(materialize_tool);
+            if model_id.starts_with("o1") || model_id.starts_with("o3") {
+                agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
+            }
+            let agent = agent_builder.build();
+            let stream = agent.stream_chat(prompt.clone(), rig_history.clone())
+                .multi_turn(100)
+                .await;
+            run_stream_loop(
+                window.clone(), task_id.clone(), &app_state, stream,
+                input_est, &provider.api_format, preamble_raw, tools_raw,
+            ).await
+        } else if format == "responses" {
+            let base_url = sanitize_endpoint(&provider.endpoint);
+            let client: rig_core::providers::openai::Client = rig_core::providers::openai::Client::builder()
+                .api_key(&provider.api_key)
+                .base_url(&base_url)
+                .build()
+                .map_err(|e| format!("构建 OpenAI 客户端失败: {e}"))?;
+            let mut agent_builder = client
+                .agent(&model_id)
+                .preamble(&combined_preamble)
+                .max_tokens(max_tokens_limit)
+                .tool(list_tool)
+                .tool(desc_tool)
+                .tool(exec_tool)
+                .tool(sample_tool)
+                .tool(create_table_tool)
+                .tool(create_view_tool)
+                .tool(drop_object_tool)
+                .tool(render_chart_tool)
+                .tool(load_okf)
+                .tool(write_okf)
+                .tool(search_okf)
+                .tool(check_okf)
+                .tool(tidy_okf)
+                .tool(materialize_tool);
+            if model_id.starts_with("o1") || model_id.starts_with("o3") {
+                agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
+            }
+            let agent = agent_builder.build();
+            let stream = agent.stream_chat(prompt.clone(), rig_history.clone())
+                .multi_turn(100)
+                .await;
+            run_stream_loop(
+                window.clone(), task_id.clone(), &app_state, stream,
+                input_est, &provider.api_format, preamble_raw, tools_raw,
+            ).await
+        } else if format == "anthropic" {
+            let base_url = sanitize_endpoint(&provider.endpoint);
+            let client: rig_core::providers::anthropic::Client = rig_core::providers::anthropic::Client::builder()
+                .api_key(provider.api_key.clone())
+                .base_url(&base_url)
+                .build()
+                .map_err(|e| format!("构建 Anthropic 客户端失败: {e}"))?;
+            let agent = client
+                .agent(&model_id)
+                .preamble(&combined_preamble)
+                .max_tokens(4096)
+                .tool(list_tool)
+                .tool(desc_tool)
+                .tool(exec_tool)
+                .tool(sample_tool)
+                .tool(create_table_tool)
+                .tool(create_view_tool)
+                .tool(drop_object_tool)
+                .tool(render_chart_tool)
+                .tool(load_okf)
+                .tool(write_okf)
+                .tool(search_okf)
+                .tool(check_okf)
+                .tool(tidy_okf)
+                .tool(materialize_tool)
+                .build();
+            let stream = agent.stream_chat(prompt.clone(), rig_history.clone())
+                .multi_turn(100)
+                .await;
+            run_stream_loop(
+                window.clone(), task_id.clone(), &app_state, stream,
+                input_est, &provider.api_format, preamble_raw, tools_raw,
+            ).await
+        } else {
+            return Err(format!("不支持的 API 格式: {}", provider.api_format));
+        };
 
-        if model_id.starts_with("o1") || model_id.starts_with("o3") {
-            agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
+        match outcome {
+            RunOutcome::Done => break,
+            RunOutcome::RateLimited if attempt <= MAX_RETRIES => {
+                // Exponential backoff: 5s, 10s, 20s, 40s.
+                let delay = BASE_DELAY_SECS * (1 << (attempt - 1));
+                emit_event(
+                    &window, &task_id, "text",
+                    Some(format!("（遇到速率限制，{} 秒后自动重试…第 {}/{} 次）", delay, attempt, MAX_RETRIES)),
+                    None,
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                continue;
+            }
+            // Exhausted retries or a mid-stream 429: the loop already emitted
+            // an error event; just stop.
+            RunOutcome::RateLimited => break,
         }
-
-        let agent = agent_builder.build();
-        let stream = agent.stream_chat(prompt.clone(), rig_history)
-            .multi_turn(100)
-            .await;
-        run_stream_loop(
-            window.clone(),
-            task_id.clone(),
-            &app_state,
-            stream,
-            input_est,
-            &provider.api_format,
-            preamble_raw,
-            tools_raw,
-        )
-        .await;
-    } else if format == "responses" {
-        let base_url = sanitize_endpoint(&provider.endpoint);
-        let client: rig_core::providers::openai::Client = rig_core::providers::openai::Client::builder()
-            .api_key(&provider.api_key)
-            .base_url(&base_url)
-            .build()
-            .map_err(|e| format!("构建 OpenAI 客户端失败: {e}"))?;
-
-        let mut agent_builder = client
-            .agent(&model_id)
-            .preamble(&combined_preamble)
-            .max_tokens(max_tokens_limit)
-            .tool(list_tool)
-            .tool(desc_tool)
-            .tool(exec_tool)
-            .tool(sample_tool)
-            .tool(create_table_tool)
-            .tool(create_view_tool)
-            .tool(drop_object_tool)
-            .tool(render_chart_tool_2)
-            .tool(load_okf_2)
-            .tool(write_okf_2)
-            .tool(search_okf_2)
-            .tool(check_okf_2)
-            .tool(tidy_okf_2)
-            .tool(materialize_tool_2);
-
-        if model_id.starts_with("o1") || model_id.starts_with("o3") {
-            agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
-        }
-
-        let agent = agent_builder.build();
-        let stream = agent.stream_chat(prompt.clone(), rig_history)
-            .multi_turn(100)
-            .await;
-        run_stream_loop(
-            window.clone(),
-            task_id.clone(),
-            &app_state,
-            stream,
-            input_est,
-            &provider.api_format,
-            preamble_raw,
-            tools_raw,
-        )
-        .await;
-    } else if format == "anthropic" {
-        let base_url = sanitize_endpoint(&provider.endpoint);
-        let client: rig_core::providers::anthropic::Client = rig_core::providers::anthropic::Client::builder()
-            .api_key(provider.api_key.clone())
-            .base_url(&base_url)
-            .build()
-            .map_err(|e| format!("构建 Anthropic 客户端失败: {e}"))?;
-
-        let agent = client
-            .agent(&model_id)
-            .preamble(&combined_preamble)
-            .max_tokens(4096)
-            .tool(list_tool)
-            .tool(desc_tool)
-            .tool(exec_tool)
-            .tool(sample_tool)
-            .tool(create_table_tool)
-            .tool(create_view_tool)
-            .tool(drop_object_tool)
-            .tool(render_chart_tool_3)
-            .tool(load_okf_3)
-            .tool(write_okf_3)
-            .tool(search_okf_3)
-            .tool(check_okf_3)
-            .tool(tidy_okf_3)
-            .tool(materialize_tool_3)
-            .build();
-
-        let stream = agent.stream_chat(prompt.clone(), rig_history)
-            .multi_turn(100)
-            .await;
-        run_stream_loop(
-            window.clone(),
-            task_id.clone(),
-            &app_state,
-            stream,
-            input_est,
-            &provider.api_format,
-            preamble_raw,
-            tools_raw,
-        )
-        .await;
-    } else {
-        return Err(format!("不支持的 API 格式: {}", provider.api_format));
     }
 
     // Emit done event
