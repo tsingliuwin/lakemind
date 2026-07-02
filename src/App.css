@@ -3578,6 +3578,14 @@ button.lm-select-trigger:hover:not(:disabled) {
   max-width: 200px;
 }
 
+/* + 按钮在底栏左侧，下拉面板需左对齐向右展开（默认 right:0 会向左挤出）。
+ * 独立 min-width，容纳「选择文件夹扫描…」文案。 */
+.source-menu-wrapper .custom-dropdown-list {
+  right: auto;
+  left: 0;
+  min-width: 168px;
+}
+
 /* Send task button */
 .send-btn {
   width: 26px;

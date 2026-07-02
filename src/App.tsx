@@ -10,7 +10,7 @@ import RightInspector from "./components/RightInspector";
 import BottomConsole, { type ConsoleState } from "./components/BottomConsole";
 import SettingsPage from "./components/SettingsPage";
 import HomePanel from "./components/HomePanel";
-import { executeSql, importFileToWorkspace } from "./lib/duckdb";
+import { executeSql, importFileToWorkspace, selectDirectory, selectFile } from "./lib/duckdb";
 import { tryFormatDuckdbSql } from "./lib/sqlFormat";
 import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage, RegisterStatus, ImportProgress, DepInfo } from "./lib/types";
 import ChatView from "./components/ChatView";
@@ -997,8 +997,13 @@ export default function App() {
     setConsoleState((s) => (s === "folded" ? "default" : s === "default" ? "expanded" : "folded"));
   }
 
-  async function handleDropFiles(paths: string[]) {
-    if (busy()) return;
+  /** Shared import path for drag-drop, the file picker, and the folder picker.
+   *  Loops the given paths through `importFileToWorkspace` and refreshes the
+   *  source list when anything landed. Per-path progress + failures (including
+   *  "no recognizable data files") are surfaced by the backend via the
+   *  `import-progress` event banner — no silent no-op. */
+  async function importPaths(paths: string[]) {
+    if (busy() || paths.length === 0) return;
     setBusy(true);
     try {
       let imported = false;
@@ -1011,11 +1016,16 @@ export default function App() {
         setSources(dbTables);
         setFileTrigger((t) => t + 1);
       }
+      refreshRegisterStatus(currentWorkspace().path);
     } catch (e) {
-      console.error("Failed to drop files:", e);
+      console.error("Failed to import data source:", e);
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleDropFiles(paths: string[]) {
+    await importPaths(paths);
   }
 
   async function handleImportFile(filePath: string) {
@@ -1040,27 +1050,21 @@ export default function App() {
     }
   }
 
-  async function handleSelectAndRegisterSource() {
+  async function handleSelectFile() {
     if (busy()) return;
     try {
-      const { selectDirectory } = await import("./lib/duckdb");
-      const path = await selectDirectory();
-      if (path) {
-        setBusy(true);
-        try {
-          const res = await importFileToWorkspace(currentWorkspace().path, path);
-          if (res.length > 0) {
-            const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
-            setSources(dbTables);
-            setFileTrigger((t) => t + 1);
-          }
-          refreshRegisterStatus(currentWorkspace().path);
-        } catch (e) {
-          console.error("Failed to register folder source:", e);
-        } finally {
-          setBusy(false);
-        }
-      }
+      const path = await selectFile();
+      if (path) await importPaths([path]);
+    } catch (e) {
+      console.error("Failed to select file:", e);
+    }
+  }
+
+  async function handleSelectFolder() {
+    if (busy()) return;
+    try {
+      const path = await selectDirectory("请选择要扫描的数据文件夹");
+      if (path) await importPaths([path]);
     } catch (e) {
       console.error("Failed to select directory:", e);
     }
@@ -1413,7 +1417,8 @@ export default function App() {
                         void createChatTaskAndSend(prompt, modelId);
                       }
                     }}
-                    onAddSource={handleSelectAndRegisterSource}
+                    onAddFile={handleSelectFile}
+                    onAddFolder={handleSelectFolder}
                     availableModels={availableModels()}
                     selectedModel={selectedModel()}
                     onSelectModel={(model) => {

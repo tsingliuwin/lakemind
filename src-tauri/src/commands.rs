@@ -647,8 +647,13 @@ pub async fn import_file_to_workspace(
                     error: None,
                 });
             } else {
+                // Nothing recognizable was found under the imported path. This
+                // is the common "picked a folder/file with no supported data
+                // files" case — surface it as an error so the user understands
+                // why no table appeared, instead of a silent misleading "done".
                 let _ = window.emit("import-progress", ImportProgress {
-                    file: file_name.clone(), stage: "done".into(), table: None, columns: None, rows: None, error: None,
+                    file: file_name.clone(), stage: "error".into(), table: None, columns: None, rows: None,
+                    error: Some("未找到可识别的数据文件（支持 csv/tsv/json/ndjson/parquet/parq/xlsx/xls）".to_string()),
                 });
             }
         }
@@ -1134,9 +1139,25 @@ pub async fn save_settings_json(json: String) -> Result<(), String> {
 // ===========================================================================
 
 /// Open a native platform directory picker and return the selected path.
+/// `prompt` overrides the dialog title; when `None`, a workspace-oriented
+/// default is used (this command is also used to add a workspace).
 #[tauri::command]
-pub async fn select_directory() -> Result<Option<String>, String> {
-    Ok(select_directory_native())
+pub async fn select_directory(prompt: Option<String>) -> Result<Option<String>, String> {
+    let prompt = prompt.unwrap_or_else(|| "请选择工作区目录".to_string());
+    // The native pickers shell out to osascript/powershell/zenity, which block
+    // for as long as the dialog is open. Run them on a blocking worker so the
+    // Tauri async runtime isn't stalled while the user browses.
+    tauri::async_runtime::spawn_blocking(move || select_directory_native(&prompt))
+        .await
+        .map_err(|e| format!("目录选择器任务失败: {e}"))
+}
+
+/// Open a native platform file picker and return the selected file path.
+#[tauri::command]
+pub async fn select_file() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || select_file_native("请选择数据文件"))
+        .await
+        .map_err(|e| format!("文件选择器任务失败: {e}"))
 }
 
 #[derive(serde::Serialize)]
@@ -1842,13 +1863,14 @@ fn resolve_workspace_dir(workspace: &str) -> Result<PathBuf, String> {
     Ok(home)
 }
 
-fn select_directory_native() -> Option<String> {
+fn select_directory_native(prompt: &str) -> Option<String> {
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
+        let script = format!("POSIX path of (choose folder with prompt \"{prompt}\")");
         let output = Command::new("osascript")
             .arg("-e")
-            .arg("POSIX path of (choose folder with prompt \"请选择工作区目录\")")
+            .arg(&script)
             .output()
             .ok()?;
         if output.status.success() {
@@ -1861,7 +1883,9 @@ fn select_directory_native() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
         use std::process::Command;
-        let ps_script = "[System.Reflection.Assembly]::LoadWithPartialName('System.windows.forms') | Out-Null; $g = New-Object System.Windows.Forms.FolderBrowserDialog; $g.ShowDialog() | Out-Null; $g.SelectedPath";
+        let ps_script = format!(
+            "[System.Reflection.Assembly]::LoadWithPartialName('System.windows.forms') | Out-Null; $g = New-Object System.Windows.Forms.FolderBrowserDialog; $g.Description = '{prompt}'; $g.ShowDialog() | Out-Null; $g.SelectedPath"
+        );
         let output = Command::new("powershell")
             .arg("-Command")
             .arg(ps_script)
@@ -1877,10 +1901,11 @@ fn select_directory_native() -> Option<String> {
     #[cfg(target_os = "linux")]
     {
         use std::process::Command;
+        let title = format!("--title={prompt}");
         let output = Command::new("zenity")
             .arg("--file-selection")
             .arg("--directory")
-            .arg("--title=请选择工作区目录")
+            .arg(&title)
             .output()
             .ok()?;
         if output.status.success() {
@@ -1890,6 +1915,65 @@ fn select_directory_native() -> Option<String> {
             }
         }
     }
+    let _ = prompt;
+    None
+}
+
+/// Native single-file picker. Mirrors [`select_directory_native`] but opens an
+/// open-file dialog. No extension filter is enforced — the scan layer classifies
+/// the file, and unrecognized types surface a clear error upstream.
+fn select_file_native(prompt: &str) -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        let script = format!("POSIX path of (choose file with prompt \"{prompt}\")");
+        let output = Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+            .ok()?;
+        if output.status.success() {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path_str.is_empty() {
+                return Some(path_str);
+            }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        let ps_script = format!(
+            "[System.Reflection.Assembly]::LoadWithPartialName('System.windows.forms') | Out-Null; $g = New-Object System.Windows.Forms.OpenFileDialog; $g.Title = '{prompt}'; $g.ShowDialog() | Out-Null; $g.FileName"
+        );
+        let output = Command::new("powershell")
+            .arg("-Command")
+            .arg(ps_script)
+            .output()
+            .ok()?;
+        if output.status.success() {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path_str.is_empty() {
+                return Some(path_str);
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+        let title = format!("--title={prompt}");
+        let output = Command::new("zenity")
+            .arg("--file-selection")
+            .arg(&title)
+            .output()
+            .ok()?;
+        if output.status.success() {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path_str.is_empty() {
+                return Some(path_str);
+            }
+        }
+    }
+    let _ = prompt;
     None
 }
 

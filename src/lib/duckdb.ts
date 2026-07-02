@@ -35,9 +35,16 @@ export async function importFileToWorkspace(workspace: string, path: string): Pr
   return invoke<SourceTable[]>("import_file_to_workspace", { workspace, path });
 }
 
-/** Open a native folder picker and return the selected absolute path. */
-export async function selectDirectory(): Promise<string | null> {
-  return invoke<string | null>("select_directory");
+/** Open a native folder picker and return the selected absolute path.
+ *  `prompt` overrides the dialog title (defaults to a workspace-oriented prompt
+ *  on the backend; pass a data-source-specific prompt when used for importing). */
+export async function selectDirectory(prompt?: string): Promise<string | null> {
+  return invoke<string | null>("select_directory", prompt ? { prompt } : undefined);
+}
+
+/** Open a native single-file picker and return the selected absolute path. */
+export async function selectFile(): Promise<string | null> {
+  return invoke<string | null>("select_file");
 }
 
 
