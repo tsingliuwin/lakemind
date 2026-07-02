@@ -55,7 +55,11 @@ fn get_message_text(msg: &ChatMessageDto) -> String {
 /// inside the loop and returns `Done`).
 enum RunOutcome {
     Done,
-    RateLimited,
+    /// Carries the last rate-limit error string so that when retries are
+    /// exhausted the caller can surface *why* (the preflight path below
+    /// intentionally skips emitting an error so it can retry — without this
+    /// payload the final failure would be silent).
+    RateLimited(String),
 }
 
 /// Classify a provider error string into one of three buckets so the runner
@@ -266,7 +270,7 @@ async fn run_stream_loop<R>(
                 // the multi-turn state has advanced and we can't safely retry
                 // regardless.
                 if !emitted_any && classify_rate_limit_error(&msg) == RateLimitKind::Retriable {
-                    return RunOutcome::RateLimited;
+                    return RunOutcome::RateLimited(msg.clone());
                 }
                 emit_event(&window, &task_id, "error", Some(msg.clone()), None);
                 return RunOutcome::Done;
@@ -534,7 +538,7 @@ pub(crate) async fn run_agent_chat_stream(
 
         match outcome {
             RunOutcome::Done => break,
-            RunOutcome::RateLimited if attempt <= MAX_RETRIES => {
+            RunOutcome::RateLimited(_) if attempt <= MAX_RETRIES => {
                 // Exponential backoff: 5s, 10s, 20s, 40s.
                 let delay = BASE_DELAY_SECS * (1 << (attempt - 1));
                 emit_event(
@@ -545,9 +549,20 @@ pub(crate) async fn run_agent_chat_stream(
                 tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                 continue;
             }
-            // Exhausted retries or a mid-stream 429: the loop already emitted
-            // an error event; just stop.
-            RunOutcome::RateLimited => break,
+            // Retries exhausted on a preflight rate-limit. The preflight path
+            // in run_stream_loop returns RateLimited WITHOUT emitting an error
+            // event (so it could retry), so without this the run would end
+            // silently after the countdown. Surface the final cause now.
+            RunOutcome::RateLimited(last) => {
+                emit_event(
+                    &window, &task_id, "error",
+                    Some(format!(
+                        "已自动重试 {MAX_RETRIES} 次仍被速率限制（429），请稍候降低请求频率或更换模型后重试。\n{last}"
+                    )),
+                    None,
+                );
+                break;
+            }
         }
     }
 
@@ -629,6 +644,19 @@ mod tests_rate_limit_classify {
     #[test]
     fn rpm_quota_429_is_retriable_not_unretriable() {
         let msg = "Invalid status code 429 with message: RPM quota exceeded, too many requests";
+        assert_eq!(classify_rate_limit_error(msg), RateLimitKind::Retriable);
+    }
+
+    // The provider error the user actually hit: message "rpm exhausted" with
+    // type "quota_exceeded_error" on a 429. Despite "quota" in the type name,
+    // "rpm exhausted" is a per-minute (RPM) throttle that resets on its own, so
+    // it is retriable — NOT a billing/quota depletion. Keep this retriable so
+    // the runner's backoff can ride it out. (If a provider ever uses this exact
+    // type for a *hard* quota, revisit — but the message wording is the signal
+    // we trust here.)
+    #[test]
+    fn rpm_exhausted_quota_exceeded_429_is_retriable() {
+        let msg = "CompletionError: ProviderError: Invalid status code 429 Too Many Requests with message: {\"error\":{\"message\":\"rpm exhausted\",\"type\":\"quota_exceeded_error\",\"code\":\"8\"}}";
         assert_eq!(classify_rate_limit_error(msg), RateLimitKind::Retriable);
     }
 }
