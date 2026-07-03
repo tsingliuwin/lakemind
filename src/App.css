@@ -3577,6 +3577,7 @@ button.lm-select-trigger:hover:not(:disabled) {
   font-size: 10px;
   font-weight: 600;
   color: var(--text-dim);
+  text-align: left;
   text-transform: none;
   letter-spacing: 0.02em;
   pointer-events: none;
