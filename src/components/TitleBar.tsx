@@ -58,19 +58,6 @@ export default function TitleBar(props: {
                 </svg>
               </button>
               
-              {/* History arrows */}
-              <button class="ln-arrow-btn" title="后退" disabled={props.busy}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="19" y1="12" x2="5" y2="12"></line>
-                  <polyline points="12 19 5 12 12 5"></polyline>
-                </svg>
-              </button>
-              <button class="ln-arrow-btn" title="前进" disabled={props.busy}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                  <polyline points="12 5 19 12 12 19"></polyline>
-                </svg>
-              </button>
             </div>
           }>
             <span class="tb-logo" data-tauri-drag-region><img src={logoSrc()} alt="LakeMind" style="width: 14px; height: 14px; object-fit: contain; vertical-align: middle;" /></span>
