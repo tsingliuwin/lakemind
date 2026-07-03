@@ -722,7 +722,6 @@ export default function ChatView(props: {
                       </Show>
                     </svg>
                   </span>
-                  <span class="token-usage-pct">{capPct().toFixed(0)}%</span>
                 </div>
                 <div class="token-usage-panel">
                   <Show
