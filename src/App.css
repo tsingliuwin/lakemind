@@ -4632,7 +4632,7 @@ button.lm-select-trigger:hover:not(:disabled) {
 }
 .chat-composer__pill-btn {
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border-faint);
+  border: none;
   padding: 4px 8px;
   font-size: 11px;
   display: flex;
@@ -4641,7 +4641,7 @@ button.lm-select-trigger:hover:not(:disabled) {
   color: var(--text-secondary);
   cursor: pointer;
   border-radius: var(--radius-pill);
-  transition: background 0.12s, border-color 0.12s;
+  transition: background 0.12s;
 }
 .chat-composer__pill-btn > span:not(.btn-caret):not(.btn-prefix) {
   display: inline-block;
@@ -4652,7 +4652,6 @@ button.lm-select-trigger:hover:not(:disabled) {
 }
 .chat-composer__pill-btn:hover {
   background: rgba(255, 255, 255, 0.06);
-  border-color: var(--border-strong);
   color: var(--text-normal);
 }
 .chat-composer__send-square {
