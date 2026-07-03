@@ -861,7 +861,7 @@ export default function ChatView(props: {
                   </span>
                 </button>
                 <Show when={priorityDropdownOpen()}>
-                  <div class="custom-dropdown-list" style="bottom: calc(100% + 6px); right: 0; left: auto;">
+                  <div class="custom-dropdown-list fit-trigger">
                     <button class="dropdown-item" onClick={() => { props.onSelectPriority("最高"); setPriorityDropdownOpen(false); }}>最高</button>
                     <button class="dropdown-item" onClick={() => { props.onSelectPriority("均衡"); setPriorityDropdownOpen(false); }}>均衡</button>
                     <button class="dropdown-item" onClick={() => { props.onSelectPriority("最快"); setPriorityDropdownOpen(false); }}>最快</button>
@@ -896,7 +896,7 @@ export default function ChatView(props: {
                   </span>
                 </button>
                 <Show when={confirmDropdownOpen()}>
-                  <div class="custom-dropdown-list" style="bottom: calc(100% + 6px); right: 0; left: auto;">
+                  <div class="custom-dropdown-list fit-trigger">
                     <button class="dropdown-item" onClick={() => { props.onSelectConfirm("变更前确认"); setConfirmDropdownOpen(false); }}>
                       <span class="btn-prefix">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
