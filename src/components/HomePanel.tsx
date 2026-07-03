@@ -200,12 +200,13 @@ export default function HomePanel(props: HomePanelProps) {
                 {/* Attachment Button — opens a menu to pick a data file or a folder to scan */}
                 <div class="dropdown-wrapper source-menu-wrapper" ref={sourceRef}>
                   <button
-                    class="pill-btn attachment-btn"
+                    class="chat-composer__pill-btn chat-composer__plus-btn"
                     title="添加数据文件 / 文件夹"
                     onClick={() => setSourceMenuOpen(!sourceMenuOpen())}
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M12 5v14M5 12h14"/>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                      <line x1="12" y1="5" x2="12" y2="19"></line>
+                      <line x1="5" y1="12" x2="19" y2="12"></line>
                     </svg>
                   </button>
                   <Show when={sourceMenuOpen()}>
@@ -228,17 +229,88 @@ export default function HomePanel(props: HomePanelProps) {
                     </div>
                   </Show>
                 </div>
+              </div>
+
+              <div class="footer-right">
+                {/* Model Selector Dropdown */}
+                <div class="dropdown-wrapper" ref={modelRef}>
+                  <button class="chat-composer__pill-btn select-btn chat-composer__model-btn" onClick={() => setModelDropdownOpen(!modelDropdownOpen())}>
+                    <span class="btn-prefix">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+                        <circle cx="12" cy="12" r="4" />
+                      </svg>
+                    </span>
+                    <span>{props.selectedModel || "选择模型"}</span>
+                    <span class="btn-caret">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </span>
+                  </button>
+                  <Show when={modelDropdownOpen()}>
+                    <div class="custom-dropdown-list">
+                      <Show
+                        when={props.availableModels.length > 0}
+                        fallback={
+                          <div class="dropdown-item muted" style="font-size: 11px; pointer-events: none; padding: 6px 12px;">
+                            无可用模型，请先去设置配置
+                          </div>
+                        }
+                      >
+                        <For each={props.availableModels}>
+                          {(model) => (
+                            <button class="dropdown-item" onClick={() => { props.onSelectModel(model); setModelDropdownOpen(false); }}>
+                              {model}
+                            </button>
+                          )}
+                        </For>
+                      </Show>
+                    </div>
+                  </Show>
+                </div>
+
+                {/* Priority Selector Dropdown */}
+                <div class="dropdown-wrapper" ref={priorityRef}>
+                  <button class="chat-composer__pill-btn select-btn chat-composer__priority-btn" onClick={() => setPriorityDropdownOpen(!priorityDropdownOpen())}>
+                    <span class="btn-prefix">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                        <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1 0-3.12 3 3 0 0 1 0-4.88 2.5 2.5 0 0 1 0-3.12A2.5 2.5 0 0 1 9.5 2Z" />
+                        <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 0-3.12 3 3 0 0 0 0-4.88 2.5 2.5 0 0 0 0-3.12A2.5 2.5 0 0 0 14.5 2Z" />
+                      </svg>
+                    </span>
+                    <span>{props.selectedPriority}</span>
+                    <span class="btn-caret">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </span>
+                  </button>
+                  <Show when={priorityDropdownOpen()}>
+                    <div class="custom-dropdown-list fit-trigger">
+                      <button class="dropdown-item" onClick={() => { props.onSelectPriority("最高"); setPriorityDropdownOpen(false); }}>
+                        最高
+                      </button>
+                      <button class="dropdown-item" onClick={() => { props.onSelectPriority("均衡"); setPriorityDropdownOpen(false); }}>
+                        均衡
+                      </button>
+                      <button class="dropdown-item" onClick={() => { props.onSelectPriority("最快"); setPriorityDropdownOpen(false); }}>
+                        最快
+                      </button>
+                    </div>
+                  </Show>
+                </div>
 
                 {/* Confirmation Mode Selector Dropdown */}
                 <div class="dropdown-wrapper" ref={confirmRef}>
-                  <button class="pill-btn select-btn" onClick={() => setConfirmDropdownOpen(!confirmDropdownOpen())}>
+                  <button class="chat-composer__pill-btn select-btn chat-composer__confirm-btn" onClick={() => setConfirmDropdownOpen(!confirmDropdownOpen())}>
                     <span class="btn-prefix">
                       {props.selectedConfirm === "自动执行" ? (
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
                           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
                         </svg>
                       ) : (
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
                           <path d="M9 11V6a2 2 0 0 1 4 0v5"></path>
                           <path d="M13 6a2 2 0 0 1 4 0v5"></path>
                           <path d="M17 6a2 2 0 0 1 4 0v8a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path>
@@ -247,7 +319,7 @@ export default function HomePanel(props: HomePanelProps) {
                     </span>
                     <span>{props.selectedConfirm}</span>
                     <span class="btn-caret">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
                         <polyline points="6 9 12 15 18 9"></polyline>
                       </svg>
                     </span>
@@ -273,89 +345,10 @@ export default function HomePanel(props: HomePanelProps) {
                     </div>
                   </Show>
                 </div>
-              </div>
-
-              <div class="footer-right">
-                {/* Model Selector Dropdown */}
-                <div class="dropdown-wrapper" ref={modelRef}>
-                  <button class="pill-btn select-btn" onClick={() => setModelDropdownOpen(!modelDropdownOpen())}>
-                    <span class="model-icon">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
-                        <rect x="4" y="4" width="16" height="16" rx="2"></rect>
-                        <rect x="9" y="9" width="6" height="6"></rect>
-                        <line x1="9" y1="1" x2="9" y2="4"></line>
-                        <line x1="15" y1="1" x2="15" y2="4"></line>
-                        <line x1="9" y1="20" x2="9" y2="23"></line>
-                        <line x1="15" y1="20" x2="15" y2="23"></line>
-                        <line x1="20" y1="9" x2="23" y2="9"></line>
-                        <line x1="20" y1="14" x2="23" y2="14"></line>
-                        <line x1="1" y1="9" x2="4" y2="9"></line>
-                        <line x1="1" y1="14" x2="4" y2="14"></line>
-                      </svg>
-                    </span>
-                    <span>{props.selectedModel || "选择模型"}</span>
-                    <span class="btn-caret">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                        <polyline points="6 9 12 15 18 9"></polyline>
-                      </svg>
-                    </span>
-                  </button>
-                  <Show when={modelDropdownOpen()}>
-                    <div class="custom-dropdown-list">
-                      <Show
-                        when={props.availableModels.length > 0}
-                        fallback={
-                          <div class="dropdown-item muted" style="font-size: 12px; pointer-events: none; padding: 6px 12px;">
-                            无可用模型，请先去设置配置
-                          </div>
-                        }
-                      >
-                        <For each={props.availableModels}>
-                          {(model) => (
-                            <button class="dropdown-item" onClick={() => { props.onSelectModel(model); setModelDropdownOpen(false); }}>
-                              {model}
-                            </button>
-                          )}
-                        </For>
-                      </Show>
-                    </div>
-                  </Show>
-                </div>
-
-                {/* Priority Selector Dropdown */}
-                <div class="dropdown-wrapper" ref={priorityRef}>
-                  <button class="pill-btn select-btn" onClick={() => setPriorityDropdownOpen(!priorityDropdownOpen())}>
-                    <span class="btn-prefix">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
-                        <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 0 0 12 18a3 3 0 0 0 0-6 3 3 0 0 0 0-6Z"></path>
-                        <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 0 1 12 18"></path>
-                      </svg>
-                    </span>
-                    <span>{props.selectedPriority}</span>
-                    <span class="btn-caret">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                        <polyline points="6 9 12 15 18 9"></polyline>
-                      </svg>
-                    </span>
-                  </button>
-                  <Show when={priorityDropdownOpen()}>
-                    <div class="custom-dropdown-list fit-trigger">
-                      <button class="dropdown-item" onClick={() => { props.onSelectPriority("最高"); setPriorityDropdownOpen(false); }}>
-                        最高
-                      </button>
-                      <button class="dropdown-item" onClick={() => { props.onSelectPriority("均衡"); setPriorityDropdownOpen(false); }}>
-                        均衡
-                      </button>
-                      <button class="dropdown-item" onClick={() => { props.onSelectPriority("最快"); setPriorityDropdownOpen(false); }}>
-                        最快
-                      </button>
-                    </div>
-                  </Show>
-                </div>
 
                 {/* Send Button */}
-                <button 
-                  class="send-btn" 
+                <button
+                  class="send-btn"
                   classList={{ active: inputValue().trim().length > 0 }}
                   disabled={inputValue().trim().length === 0}
                   onClick={handleSubmit}

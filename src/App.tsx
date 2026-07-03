@@ -1499,6 +1499,8 @@ export default function App() {
                           onConfirmTool={(toolCallId, approved) =>
                             resolveToolConfirmation(id(), toolCallId, approved)
                           }
+                          onAddFile={handleSelectFile}
+                          onAddFolder={handleSelectFolder}
                         />
                       )}
                     </Show>
