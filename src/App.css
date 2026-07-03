@@ -4651,7 +4651,7 @@ button.lm-select-trigger:hover:not(:disabled) {
   white-space: nowrap;
 }
 .chat-composer__pill-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bg-hover);
   color: var(--text-normal);
 }
 .chat-composer__send-square {
@@ -4685,7 +4685,7 @@ button.lm-select-trigger:hover:not(:disabled) {
 /* Token usage pill (capsule button style) in the composer. */
 .token-usage-pill {
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border-faint);
+  border: none;
   padding: 4px 8px;
   font-size: 11px;
   display: flex;
@@ -4694,35 +4694,30 @@ button.lm-select-trigger:hover:not(:disabled) {
   color: var(--text-secondary);
   cursor: pointer;
   border-radius: var(--radius-pill, 100px);
-  transition: all 0.12s ease;
+  transition: background 0.12s ease;
   user-select: none;
 }
 .token-usage-pill:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: var(--border-strong);
+  background: var(--bg-hover);
   color: var(--text-primary);
 }
 
 /* Color states for capacity warning */
 .token-usage-pill--warn {
   color: #f6bd16;
-  border-color: rgba(246, 189, 22, 0.3);
-  background: rgba(246, 189, 22, 0.03);
+  background: rgba(246, 189, 22, 0.08);
 }
 .token-usage-pill--warn:hover {
-  background: rgba(246, 189, 22, 0.06);
-  border-color: rgba(246, 189, 22, 0.6);
+  background: rgba(246, 189, 22, 0.14);
   color: #f6bd16;
 }
 
 .token-usage-pill--danger {
   color: #ef4444;
-  border-color: rgba(239, 68, 68, 0.3);
-  background: rgba(239, 68, 68, 0.03);
+  background: rgba(239, 68, 68, 0.08);
 }
 .token-usage-pill--danger:hover {
-  background: rgba(239, 68, 68, 0.06);
-  border-color: rgba(239, 68, 68, 0.6);
+  background: rgba(239, 68, 68, 0.14);
   color: #ef4444;
 }
 
