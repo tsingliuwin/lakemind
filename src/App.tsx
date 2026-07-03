@@ -8,7 +8,7 @@ import SqlEditor from "./components/SqlEditor";
 import ResultTable from "./components/ResultTable";
 import RightInspector from "./components/RightInspector";
 import BottomConsole, { type ConsoleState } from "./components/BottomConsole";
-import SettingsPage from "./components/SettingsPage";
+import SettingsPage, { type SettingsTab } from "./components/SettingsPage";
 import HomePanel from "./components/HomePanel";
 import { executeSql, importFileToWorkspace, selectDirectory, selectFile } from "./lib/duckdb";
 import { tryFormatDuckdbSql } from "./lib/sqlFormat";
@@ -69,6 +69,10 @@ export default function App() {
   const [inspectorOpen, setInspectorOpen] = createSignal<boolean>(false);
   const [consoleState, setConsoleState] = createSignal<ConsoleState>("folded");
   const [settingsOpen, setSettingsOpen] = createSignal<boolean>(false);
+  // Sub-section to land on when settings opens (e.g. "databases" from the
+  // workspace sidebar empty-state link). Reset on close so the next generic
+  // open falls back to the default "general" tab.
+  const [settingsTab, setSettingsTab] = createSignal<SettingsTab>("general");
   const [leftOpen, setLeftOpen] = createSignal<boolean>(true);
 
   const [leftWidth, setLeftWidth] = createSignal<number>(240);
@@ -1271,7 +1275,8 @@ export default function App() {
     }
   }
 
-  function onSettings() {
+  function onSettings(tab?: SettingsTab) {
+    setSettingsTab(tab ?? "general");
     setSettingsOpen(true);
   }
 
@@ -1302,9 +1307,10 @@ export default function App() {
       <Show 
         when={!settingsOpen()}
         fallback={
-          <SettingsPage 
+          <SettingsPage
             workspacePath={currentWorkspace().path}
-            onClose={() => setSettingsOpen(false)} 
+            initialTab={settingsTab()}
+            onClose={() => { setSettingsOpen(false); setSettingsTab("general"); }}
             titleBar={
               <TitleBar
                 inspectorOpen={inspectorOpen()}

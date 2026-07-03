@@ -12,7 +12,7 @@ import type { DbConnection } from "../lib/types";
 
 const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
-type SettingsTab =
+export type SettingsTab =
   | "general"
   | "databases"
   | "codePreview"
@@ -90,8 +90,11 @@ export default function SettingsPage(props: {
   onClose: () => void;
   onOpenSettings?: () => void;
   titleBar?: any;
+  /** Initial sub-section to land on when settings opens (defaults to "general").
+   * Lets callers deep-link to a specific tab, e.g. "databases". */
+  initialTab?: SettingsTab;
 }) {
-  const [activeTab, setActiveTab] = createSignal<SettingsTab>("general");
+  const [activeTab, setActiveTab] = createSignal<SettingsTab>(props.initialTab ?? "general");
 
   // Selection signals
   const [selectedProvider, setSelectedProvider] = createSignal<string>("");

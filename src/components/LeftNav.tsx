@@ -1,6 +1,7 @@
 import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import type { SourceTable, QueryTask, Workspace, FileItem, RegisterStatus, ImportProgress, DbConnection } from "../lib/types";
+import type { SettingsTab } from "./SettingsPage";
 import { t } from "../lib/i18n";
 import { logoSrc } from "../lib/theme";
 
@@ -102,7 +103,7 @@ export default function LeftNav(props: {
   selected: string | null;
   busy: boolean;
   onSelect: (table: SourceTable) => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (tab?: SettingsTab) => void;
   onNewQuery?: () => void;
   onNewChat?: () => void;
   onImportFile?: (filePath: string) => void;
@@ -933,7 +934,7 @@ export default function LeftNav(props: {
                       <Show when={workspaceConns().length === 0}>
                         <div style="padding: 10px; text-align: center; color: var(--text-dim); font-size: 11px; font-style: italic;">
                           {t("noLinkedConns")}
-                          <a href="#" style="color: var(--brand); text-decoration: underline; margin-left: 4px;" onClick={(e) => { e.preventDefault(); props.onOpenSettings(); }}>
+                          <a href="#" style="color: var(--brand); text-decoration: underline; margin-left: 4px;" onClick={(e) => { e.preventDefault(); props.onOpenSettings("databases"); }}>
                             {t("settingsPageLink")}
                           </a>
                         </div>
