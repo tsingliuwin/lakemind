@@ -121,6 +121,12 @@ export default function App() {
     setImportStatus(null);
     setStreamingTaskId(null);
     setCurrentWorkspace(ws);
+    // Remember the last workspace so the next launch reopens it instead of
+    // always falling back to DefaultProject. Fire-and-forget; the config store
+    // is the app's existing key/value persistence layer.
+    invoke("set_app_config", { key: "workspace.last", value: ws.path }).catch((e) =>
+      console.error("Failed to persist last workspace:", e)
+    );
   }
 
 
@@ -354,7 +360,19 @@ export default function App() {
       const list = await invoke<Workspace[]>("load_workspaces");
       if (list && list.length > 0) {
         setWorkspaces(list);
-        const defaultWS = list.find((w) => w.path === "DefaultProject") || list[0];
+        // Prefer the last-used workspace, falling back to DefaultProject, then
+        // the first entry. The persisted key may point at a workspace that was
+        // since removed, so we validate it against the list before using it.
+        let last: string | null = null;
+        try {
+          last = await invoke<string | null>("get_app_config", { key: "workspace.last" });
+        } catch {
+          /* config read is best-effort; fall through to defaults */
+        }
+        const defaultWS =
+          (last && list.find((w) => w.path === last)) ||
+          list.find((w) => w.path === "DefaultProject") ||
+          list[0];
         // Only switch if the resolved default differs from the current workspace
         // — otherwise the unchanged-value set would re-trigger the workspace-load
         // effect (duplicate scan/sync + list_tables_fast on startup).
