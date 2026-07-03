@@ -819,14 +819,25 @@ export default function ChatView(props: {
                           <>
                             <div class="dropdown-group-label">{group.providerName}</div>
                             <For each={group.models}>
-                              {(m) => (
-                                <button
-                                  class="dropdown-item"
-                                  onClick={() => { props.onSelectModel(modelKeyOf(m)); setModelDropdownOpen(false); }}
-                                >
-                                  {m.modelId}
-                                </button>
-                              )}
+                              {(m) => {
+                                const isSelected = () => modelKeyOf(m) === props.selectedModel;
+                                return (
+                                  <button
+                                    class="dropdown-item"
+                                    classList={{ selected: isSelected() }}
+                                    onClick={() => { props.onSelectModel(modelKeyOf(m)); setModelDropdownOpen(false); }}
+                                  >
+                                    <span class="dropdown-item__check">
+                                      <Show when={isSelected()}>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
+                                          <polyline points="20 6 9 17 4 12"></polyline>
+                                        </svg>
+                                      </Show>
+                                    </span>
+                                    {m.modelId}
+                                  </button>
+                                );
+                              }}
                             </For>
                           </>
                         )}

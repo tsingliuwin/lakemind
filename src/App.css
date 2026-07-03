@@ -3587,6 +3587,21 @@ button.lm-select-trigger:hover:not(:disabled) {
   border-top: 1px solid var(--border-faint);
 }
 
+/* A fixed-width check slot so selected and unselected rows align, with the
+ * check glyph shown only for the active option. */
+.dropdown-item__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--brand);
+}
+.dropdown-item.selected {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
 /* 下拉面板宽度跟触发按钮等宽（与按钮左右对齐），
  * 覆盖共用的 min-width:120px。变更前确认 / 思考等级共用。 */
 .custom-dropdown-list.fit-trigger {
