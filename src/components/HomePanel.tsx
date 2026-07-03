@@ -285,13 +285,6 @@ export default function HomePanel(props: HomePanelProps) {
                                       title={`${m.providerName} · ${m.modelId}`}
                                       onClick={() => { props.onSelectModel(modelKeyOf(m)); setModelDropdownOpen(false); }}
                                     >
-                                      <span class="dropdown-item__check">
-                                        <Show when={isSelected()}>
-                                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
-                                            <polyline points="20 6 9 17 4 12"></polyline>
-                                          </svg>
-                                        </Show>
-                                      </span>
                                       {m.modelId}
                                     </button>
                                   );

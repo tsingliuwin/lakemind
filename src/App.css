@@ -3587,17 +3587,10 @@ button.lm-select-trigger:hover:not(:disabled) {
   border-top: 1px solid var(--border-faint);
 }
 
-/* A fixed-width check slot so selected and unselected rows align, with the
- * check glyph shown only for the active option. */
-.dropdown-item__check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  flex-shrink: 0;
-  color: var(--brand);
-}
+/* The active option in a dropdown — highlighted with a brand tint and full
+ * text color. No check glyph; the highlight alone marks the selection. */
 .dropdown-item.selected {
+  background: var(--bg-active);
   color: var(--text-primary);
   font-weight: 500;
 }
