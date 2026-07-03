@@ -3570,6 +3570,23 @@ button.lm-select-trigger:hover:not(:disabled) {
   color: var(--text-primary);
 }
 
+/* Non-interactive section header inside a dropdown — groups models by
+ * provider so duplicate model ids stay distinguishable. */
+.dropdown-group-label {
+  padding: 6px 10px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: none;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  user-select: none;
+}
+.dropdown-group-label:not(:first-child) {
+  margin-top: 2px;
+  border-top: 1px solid var(--border-faint);
+}
+
 /* 下拉面板宽度跟触发按钮等宽（与按钮左右对齐），
  * 覆盖共用的 min-width:120px。变更前确认 / 思考等级共用。 */
 .custom-dropdown-list.fit-trigger {

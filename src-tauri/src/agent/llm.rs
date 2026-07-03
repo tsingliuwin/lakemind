@@ -16,8 +16,16 @@ use super::config::{get_provider_for_model, sanitize_endpoint};
 
 /// One-shot LLM completion: stream the model's reply but gather all text locally
 /// (no window events, no tools). Returns the concatenated assistant text.
-pub(crate) async fn complete_one_shot(prompt: &str, model_id: &str) -> Result<String, String> {
-    let provider = get_provider_for_model(model_id)?;
+///
+/// `provider_id` optionally pins the provider to disambiguate duplicate model
+/// ids; `None` falls back to first-match (used by background tasks like naming
+/// that just want any enabled model).
+pub(crate) async fn complete_one_shot(
+    prompt: &str,
+    model_id: &str,
+    provider_id: Option<&str>,
+) -> Result<String, String> {
+    let provider = get_provider_for_model(model_id, provider_id)?;
     let format = provider.api_format.to_lowercase();
     let max_tokens: u64 = 64;
 

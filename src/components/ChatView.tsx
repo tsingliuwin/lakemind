@@ -1,5 +1,6 @@
 import { For, Index, Show, Switch, Match, createSignal, createEffect, createMemo, onMount, onCleanup, untrack } from "solid-js";
-import type { ChatMessage, Segment, TokenUsage } from "../lib/types";
+import type { ChatMessage, Segment, TokenUsage, ModelOption } from "../lib/types";
+import { modelKeyOf, modelIdOfKey } from "../lib/types";
 import { derivePanelMetrics, fmtCap, fmtPct } from "../lib/metrics";
 import ToolSegment from "./ToolSegment";
 import ChartSegment from "./ChartSegment";
@@ -33,7 +34,7 @@ export default function ChatView(props: {
   contextWindow?: number;
   onOpenInSqlPanel: (sql: string) => void;
   onDelete?: () => void;
-  availableModels: string[];
+  availableModels: ModelOption[];
   selectedModel: string;
   onSelectModel: (model: string) => void;
   selectedPriority: string;
@@ -52,6 +53,17 @@ export default function ChatView(props: {
   const [priorityDropdownOpen, setPriorityDropdownOpen] = createSignal(false);
   const [confirmDropdownOpen, setConfirmDropdownOpen] = createSignal(false);
   const [sourceMenuOpen, setSourceMenuOpen] = createSignal(false);
+  // Group selectable models by provider so duplicate model ids across
+  // providers stay distinguishable (each group shows its provider name).
+  const groupedModels = createMemo(() => {
+    const map = new Map<string, { providerName: string; models: ModelOption[] }>();
+    for (const m of props.availableModels) {
+      const g = map.get(m.providerId) ?? { providerName: m.providerName, models: [] };
+      g.models.push(m);
+      map.set(m.providerId, g);
+    }
+    return [...map.values()];
+  });
   // Panel metrics memo is defined after `now`/`streamStart`/`isStreaming` below.
   let modelRef: HTMLDivElement | undefined;
   let priorityRef: HTMLDivElement | undefined;
@@ -786,7 +798,7 @@ export default function ChatView(props: {
                       <circle cx="12" cy="12" r="4" />
                     </svg>
                   </span>
-                  <span>{props.selectedModel || "选择模型"}</span>
+                  <span>{props.selectedModel ? modelIdOfKey(props.selectedModel) : "选择模型"}</span>
                   <span class="btn-caret">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
                       <polyline points="6 9 12 15 18 9"></polyline>
@@ -803,11 +815,21 @@ export default function ChatView(props: {
                         </div>
                       }
                     >
-                      <For each={props.availableModels}>
-                        {(model) => (
-                          <button class="dropdown-item" onClick={() => { props.onSelectModel(model); setModelDropdownOpen(false); }}>
-                            {model}
-                          </button>
+                      <For each={groupedModels()}>
+                        {(group) => (
+                          <>
+                            <div class="dropdown-group-label">{group.providerName}</div>
+                            <For each={group.models}>
+                              {(m) => (
+                                <button
+                                  class="dropdown-item"
+                                  onClick={() => { props.onSelectModel(modelKeyOf(m)); setModelDropdownOpen(false); }}
+                                >
+                                  {m.modelId}
+                                </button>
+                              )}
+                            </For>
+                          </>
                         )}
                       </For>
                     </Show>

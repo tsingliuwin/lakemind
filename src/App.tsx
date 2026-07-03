@@ -12,7 +12,8 @@ import SettingsPage, { type SettingsTab } from "./components/SettingsPage";
 import HomePanel from "./components/HomePanel";
 import { executeSql, importFileToWorkspace, selectDirectory, selectFile } from "./lib/duckdb";
 import { tryFormatDuckdbSql } from "./lib/sqlFormat";
-import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage, RegisterStatus, ImportProgress, DepInfo } from "./lib/types";
+import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage, RegisterStatus, ImportProgress, DepInfo, ModelOption } from "./lib/types";
+import { modelKeyOf, modelIdOfKey, providerIdOfKey } from "./lib/types";
 import ChatView from "./components/ChatView";
 import { appendDelta, pushToolCall, pushChart, mergeToolResult, normalizeMessage } from "./lib/chat";
 import { mergeUsage } from "./lib/metrics";
@@ -100,7 +101,10 @@ export default function App() {
   const [fileTrigger, setFileTrigger] = createSignal<number>(0);
 
   // --- model settings sync ---
-  const [availableModels, setAvailableModels] = createSignal<string[]>([]);
+  // Selectable models, keyed across providers by the composite "providerId:modelId".
+  // A bare model id can collide across providers, so the selection key is composite;
+  // helper modelIdOfKey / providerIdOfKey split it back out.
+  const [availableModels, setAvailableModels] = createSignal<ModelOption[]>([]);
   const [modelCtxWindows, setModelCtxWindows] = createSignal<Record<string, number>>({});
   const [selectedModel, setSelectedModel] = createSignal<string>("");
   const [selectedPriority, setSelectedPriority] = createSignal<string>("最高");
@@ -169,27 +173,38 @@ export default function App() {
       const json = await invoke<string>("load_settings_json");
       if (json && json !== "{}") {
         const loaded = JSON.parse(json);
-        const models: string[] = [];
+        // Collect (provider, model) pairs across all enabled providers.
+        // Unlike the old bare-id list, we do NOT dedupe: the same model id
+        // under two providers is two distinct options, distinguished by the
+        // composite key "providerId:modelId".
+        const models: ModelOption[] = [];
         const ctxMap: Record<string, number> = {};
         if (loaded.providers) {
           for (const prov of loaded.providers) {
             if (prov.enabled && prov.models) {
               for (const m of prov.models) {
-                models.push(m.id);
-                if (m.contextWindow) ctxMap[m.id] = m.contextWindow;
+                const opt: ModelOption = {
+                  providerId: prov.id,
+                  providerName: prov.name || prov.id,
+                  modelId: m.id,
+                  contextWindow: m.contextWindow,
+                };
+                models.push(opt);
+                if (m.contextWindow) ctxMap[modelKeyOf(opt)] = m.contextWindow;
               }
             }
           }
         }
         setAvailableModels(models);
         setModelCtxWindows(ctxMap);
-        
+
+        const keys = models.map(modelKeyOf);
         const savedDefault = localStorage.getItem("default_model");
         if (models.length > 0) {
-          if (savedDefault && models.includes(savedDefault)) {
+          if (savedDefault && keys.includes(savedDefault)) {
             setSelectedModel(savedDefault);
-          } else if (!selectedModel() || !models.includes(selectedModel())) {
-            setSelectedModel(models[0]);
+          } else if (!selectedModel() || !keys.includes(selectedModel())) {
+            setSelectedModel(keys[0]);
           }
         } else {
           setSelectedModel("");
@@ -639,10 +654,11 @@ export default function App() {
       const activeModel = task.modelId || selectedModel();
       const historyToSend = task.messages ?? [];
       const historyJson = JSON.stringify(historyToSend);
-      
+
       await invoke("start_agent_chat", {
         taskId: id,
-        modelId: activeModel,
+        modelId: modelIdOfKey(activeModel),
+        providerId: providerIdOfKey(activeModel),
         prompt,
         historyJson,
         priority: selectedPriority(),
@@ -708,7 +724,8 @@ export default function App() {
       setStreamingTaskId(id);
       await invoke("start_agent_chat", {
         taskId: id,
-        modelId: targetModel,
+        modelId: modelIdOfKey(targetModel),
+        providerId: providerIdOfKey(targetModel),
         prompt,
         historyJson,
         priority: selectedPriority(),
@@ -771,7 +788,8 @@ export default function App() {
       setStreamingTaskId(id);
       await invoke("start_agent_chat", {
         taskId: id,
-        modelId: targetModel,
+        modelId: modelIdOfKey(targetModel),
+        providerId: providerIdOfKey(targetModel),
         prompt,
         historyJson,
         priority: selectedPriority(),

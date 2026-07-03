@@ -1,5 +1,6 @@
-import { createSignal, Show, For, onMount, onCleanup } from "solid-js";
-import type { Workspace } from "../lib/types";
+import { createSignal, Show, For, createMemo, onMount, onCleanup } from "solid-js";
+import type { Workspace, ModelOption } from "../lib/types";
+import { modelKeyOf, modelIdOfKey } from "../lib/types";
 
 interface HomePanelProps {
   workspace: string;
@@ -9,7 +10,7 @@ interface HomePanelProps {
   onCreateTask: (prompt: string, modelId: string) => void;
   onAddFile?: () => void;
   onAddFolder?: () => void;
-  availableModels: string[];
+  availableModels: ModelOption[];
   selectedModel: string;
   onSelectModel: (model: string) => void;
   selectedPriority: string;
@@ -29,6 +30,18 @@ export default function HomePanel(props: HomePanelProps) {
   const [confirmDropdownOpen, setConfirmDropdownOpen] = createSignal(false);
 
   const [priorityDropdownOpen, setPriorityDropdownOpen] = createSignal(false);
+
+  // Group selectable models by provider so duplicate model ids across
+  // providers stay distinguishable (each group shows its provider name).
+  const groupedModels = createMemo(() => {
+    const map = new Map<string, { providerName: string; models: ModelOption[] }>();
+    for (const m of props.availableModels) {
+      const g = map.get(m.providerId) ?? { providerName: m.providerName, models: [] };
+      g.models.push(m);
+      map.set(m.providerId, g);
+    }
+    return [...map.values()];
+  });
 
   const [sourceMenuOpen, setSourceMenuOpen] = createSignal(false);
 
@@ -241,7 +254,7 @@ export default function HomePanel(props: HomePanelProps) {
                         <circle cx="12" cy="12" r="4" />
                       </svg>
                     </span>
-                    <span>{props.selectedModel || "选择模型"}</span>
+                    <span>{props.selectedModel ? modelIdOfKey(props.selectedModel) : "选择模型"}</span>
                     <span class="btn-caret">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 8px; height: 8px;">
                         <polyline points="6 9 12 15 18 9"></polyline>
@@ -258,11 +271,21 @@ export default function HomePanel(props: HomePanelProps) {
                           </div>
                         }
                       >
-                        <For each={props.availableModels}>
-                          {(model) => (
-                            <button class="dropdown-item" onClick={() => { props.onSelectModel(model); setModelDropdownOpen(false); }}>
-                              {model}
-                            </button>
+                        <For each={groupedModels()}>
+                          {(group) => (
+                            <>
+                              <div class="dropdown-group-label">{group.providerName}</div>
+                              <For each={group.models}>
+                                {(m) => (
+                                  <button
+                                    class="dropdown-item"
+                                    onClick={() => { props.onSelectModel(modelKeyOf(m)); setModelDropdownOpen(false); }}
+                                  >
+                                    {m.modelId}
+                                  </button>
+                                )}
+                              </For>
+                            </>
                           )}
                         </For>
                       </Show>

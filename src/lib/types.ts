@@ -260,3 +260,32 @@ export interface FileItem {
   is_dir: boolean;
   is_modified: boolean;
 }
+
+/** A selectable model, disambiguated by its provider.
+ * Model IDs can collide across providers (e.g. two providers offering
+ * "gpt-4o"), so selection is keyed on the composite `"providerId:modelId"`. */
+export interface ModelOption {
+  providerId: string;
+  providerName: string;
+  modelId: string;
+  contextWindow?: number;
+}
+
+/** Build the composite selection key for a model option. */
+export function modelKeyOf(opt: ModelOption): string {
+  return `${opt.providerId}:${opt.modelId}`;
+}
+
+/** Extract the human-readable model id from a composite key (the part after
+ * the first `:`). Falls back to the raw value when it isn't a composite key
+ * (e.g. a legacy bare model id), so old persisted selections still render. */
+export function modelIdOfKey(key: string): string {
+  const idx = key.indexOf(":");
+  return idx >= 0 ? key.slice(idx + 1) : key;
+}
+
+/** Extract the provider id from a composite key, or null for legacy keys. */
+export function providerIdOfKey(key: string): string | null {
+  const idx = key.indexOf(":");
+  return idx >= 0 ? key.slice(0, idx) : null;
+}

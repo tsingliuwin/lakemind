@@ -17,6 +17,7 @@ pub(crate) struct TidyOkfKnowledgeTool {
     pub(crate) task_id: String,
     pub(crate) window: tauri::Window,
     pub(crate) model_id: String,
+    pub(crate) provider_id: Option<String>,
 }
 
 impl Tool for TidyOkfKnowledgeTool {
@@ -45,6 +46,7 @@ impl Tool for TidyOkfKnowledgeTool {
         let start = std::time::Instant::now();
         let ws_dir = self.app_state.workspace_dir.lock().await.to_string_lossy().to_string();
         let model_id_clone = self.model_id.clone();
+        let provider_id_clone = self.provider_id.clone();
 
         let result_str = tokio::task::spawn_blocking(move || {
             let okf_dir = crate::okf::get_okf_dir(&ws_dir);
@@ -122,7 +124,7 @@ impl Tool for TidyOkfKnowledgeTool {
                 .map_err(|e| format!("构建 Tokio 运行时失败: {}", e))?;
 
             let llm_res = rt.block_on(async {
-                complete_one_shot(&cleanup_prompt, &model_id_clone).await
+                complete_one_shot(&cleanup_prompt, &model_id_clone, provider_id_clone.as_deref()).await
             }).map_err(|e| format!("调用大模型整理失败: {}", e))?;
 
             // 4. Parse the okf-file blocks

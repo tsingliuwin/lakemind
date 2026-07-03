@@ -78,7 +78,17 @@ pub(crate) struct ModelProvider {
     pub(crate) enabled: bool,
 }
 
-pub(crate) fn get_provider_for_model(model_id: &str) -> Result<ModelProvider, String> {
+/// Resolve the provider+model config for a chat/completion request.
+///
+/// When `provider_id` is `Some`, the provider with that exact id is preferred
+/// (this disambiguates duplicate model ids across providers). If the given
+/// provider id isn't found or doesn't carry `model_id`, we fall back to the
+/// first enabled provider containing the model — preserving backward
+/// compatibility with older tasks/defaults persisted as a bare model id.
+pub(crate) fn get_provider_for_model(
+    model_id: &str,
+    provider_id: Option<&str>,
+) -> Result<ModelProvider, String> {
     let mut path = crate::db::get_lakemind_dir()?;
     path.push("settings.json");
     if !path.exists() {
@@ -89,6 +99,18 @@ pub(crate) fn get_provider_for_model(model_id: &str) -> Result<ModelProvider, St
     let settings: SavedSettings = serde_json::from_str(&content)
         .map_err(|e| format!("解析配置文件失败: {e}"))?;
 
+    // 1. Prefer the exact provider when one is supplied and matches.
+    if let Some(pid) = provider_id {
+        for provider in &settings.providers {
+            if provider.enabled && provider.id == pid {
+                if provider.models.iter().any(|m| m.id == model_id) {
+                    return Ok(provider.clone());
+                }
+            }
+        }
+    }
+
+    // 2. Fall back to the first enabled provider carrying this model id.
     for provider in settings.providers {
         if provider.enabled {
             if provider.models.iter().any(|m| m.id == model_id) {

@@ -295,6 +295,7 @@ pub(crate) async fn run_agent_chat_stream(
     window: tauri::Window,
     task_id: String,
     model_id: String,
+    provider_id: Option<String>,
     prompt: String,
     history_json: String,
     priority: String,
@@ -302,7 +303,7 @@ pub(crate) async fn run_agent_chat_stream(
     app_state: AppState,
 ) -> Result<(), String> {
     // 1. Get model provider config
-    let provider = get_provider_for_model(&model_id)?;
+    let provider = get_provider_for_model(&model_id, provider_id.as_deref())?;
 
     // Map priority (最高/均衡/最快) → OpenAI reasoning_effort (high/medium/low).
     // For models that don't support this param, it's silently ignored by the API.
@@ -356,7 +357,7 @@ pub(crate) async fn run_agent_chat_stream(
             WriteOkfBlockTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
             SearchOkfRecipesTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
             CheckSourceFingerprintTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
-            TidyOkfKnowledgeTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone(), model_id: model_id.clone() },
+            TidyOkfKnowledgeTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone(), model_id: model_id.clone(), provider_id: provider_id.clone() },
             MaterializeRemoteTableTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
             CreateTableTool { shared: ddl_shared.clone() },
             CreateViewTool { shared: ddl_shared.clone() },

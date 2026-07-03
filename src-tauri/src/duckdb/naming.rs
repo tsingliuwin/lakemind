@@ -103,7 +103,7 @@ File name: {raw}"
     );
     let result = tokio::time::timeout(
         Duration::from_secs(8),
-        crate::agent::complete_one_shot(&prompt, &model_id),
+        crate::agent::complete_one_shot(&prompt, &model_id, None),
     )
     .await
     .ok()?;
