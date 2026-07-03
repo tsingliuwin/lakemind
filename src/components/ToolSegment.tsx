@@ -151,24 +151,24 @@ export default function ToolSegment(props: {
               <line x1="3" y1="20" x2="21" y2="20" />
             </svg>
           ) : t()?.tool === "load_okf_block" ? (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; color: var(--text-normal);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; color: var(--text-primary);">
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
               <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
             </svg>
           ) : t()?.tool === "write_okf_block" ? (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; color: var(--text-normal);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; color: var(--text-primary);">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
               <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
             </svg>
           ) : t()?.tool === "search_okf_recipes" ? (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; color: var(--text-normal);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; color: var(--text-primary);">
               <line x1="6" y1="3" x2="6" y2="15"></line>
               <circle cx="18" cy="6" r="3"></circle>
               <circle cx="6" cy="18" r="3"></circle>
               <path d="M18 9a9 9 0 0 1-9 9"></path>
             </svg>
           ) : t()?.tool === "check_source_fingerprint" ? (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; color: var(--text-normal);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; color: var(--text-primary);">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
             </svg>
           ) : (
@@ -224,7 +224,7 @@ export default function ToolSegment(props: {
               <span style="font-size: 11.5px; color: var(--text-dim); margin-right: 2px; align-self: center;">数据表:</span>
               <For each={tablesList()}>
                 {(tableName: string) => (
-                  <code style="background: var(--bg-active); padding: 1.5px 5px; border-radius: 3px; font-size: 11px; color: var(--text-normal); border: 1px solid var(--border-faint); font-family: inherit;">
+                  <code style="background: var(--bg-active); padding: 1.5px 5px; border-radius: 3px; font-size: 11px; color: var(--text-primary); border: 1px solid var(--border-faint); font-family: inherit;">
                     {tableName}
                   </code>
                 )}
@@ -253,15 +253,15 @@ export default function ToolSegment(props: {
 
           {/* OKF tools parameters and results */}
           <Show when={t()?.tool && ["load_okf_block", "write_okf_block", "search_okf_recipes", "check_source_fingerprint"].includes(t()!.tool)}>
-            <div class="tool-seg__okf-details" style="display: flex; flex-direction: column; gap: 10px; font-size: 12px; color: var(--text-normal); background: var(--bg-hover); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-faint); margin: 6px 0;">
+            <div class="tool-seg__okf-details" style="display: flex; flex-direction: column; gap: 10px; font-size: 12px; color: var(--text-primary); background: var(--bg-hover); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-faint); margin: 6px 0;">
               <Show when={t()?.args && typeof t()!.args === "object"}>
                 <div style="display: flex; flex-direction: column; gap: 5px;">
                   <div style="font-weight: 600; color: var(--text-dim); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;">调用参数</div>
                   <For each={Object.entries(t()!.args as Record<string, any>)}>
                     {([key, val]) => (
                       <div style="display: flex; gap: 6px; align-items: flex-start; font-family: monospace; line-height: 1.4;">
-                        <span style="color: var(--text-normal); font-weight: 500; min-width: 80px;">{ARG_KEY_LABELS[key] ?? key}:</span>
-                        <Show when={key === "content" || key === "query" || key === "file_path"} fallback={<span style="color: var(--text-normal);">{String(val)}</span>}>
+                        <span style="color: var(--text-primary); font-weight: 500; min-width: 80px;">{ARG_KEY_LABELS[key] ?? key}:</span>
+                        <Show when={key === "content" || key === "query" || key === "file_path"} fallback={<span style="color: var(--text-primary);">{String(val)}</span>}>
                           <pre style="margin: 0; background: var(--bg-active); padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-faint); font-family: inherit; font-size: 11.5px; white-space: pre-wrap; word-break: break-all; flex: 1;">{String(val)}</pre>
                         </Show>
                       </div>

@@ -4873,7 +4873,7 @@ button.lm-select-trigger:hover:not(:disabled) {
 }
 .chat-view__scroll-down:hover {
   background: var(--bg-active);
-  color: var(--text-normal);
+  color: var(--text-primary);
 }
 .chat-view__scroll-down svg {
   width: 14px;
