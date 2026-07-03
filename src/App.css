@@ -4652,7 +4652,7 @@ button.lm-select-trigger:hover:not(:disabled) {
 }
 .chat-composer__pill-btn:hover {
   background: var(--bg-hover);
-  color: var(--text-normal);
+  color: var(--text-primary);
 }
 .chat-composer__send-square {
   width: 28px;
