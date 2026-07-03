@@ -282,6 +282,7 @@ export default function HomePanel(props: HomePanelProps) {
                                     <button
                                       class="dropdown-item"
                                       classList={{ selected: isSelected() }}
+                                      title={`${m.providerName} · ${m.modelId}`}
                                       onClick={() => { props.onSelectModel(modelKeyOf(m)); setModelDropdownOpen(false); }}
                                     >
                                       <span class="dropdown-item__check">
