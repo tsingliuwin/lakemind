@@ -1,0 +1,460 @@
+/**
+ * Customize default theme styling by overriding CSS variables:
+ * https://github.com/vuejs/vitepress/blob/main/src/client/theme-default/styles/vars.css
+ */
+
+:root {
+  font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  
+  /* ==========================================
+   * 浅色模式变量 (Light Mode)
+   * ========================================== */
+  --vp-c-bg: #f8fafc;
+  --vp-c-bg-alt: #f1f5f9;
+  --vp-c-bg-elv: #ffffff;
+  --vp-c-bg-soft: #f1f5f9;
+  
+  --vp-c-brand-1: #0d9488; /* Teal 600 */
+  --vp-c-brand-2: #0891b2; /* Cyan 600 */
+  --vp-c-brand-3: #4f46e5; /* Indigo 600 */
+  --vp-c-brand-soft: rgba(13, 148, 136, 0.08);
+  
+  --vp-c-text-1: #0f172a;
+  --vp-c-text-2: #475569;
+  --vp-c-text-3: #94a3b8;
+  
+  --vp-c-divider: rgba(0, 0, 0, 0.06);
+  --vp-c-border: rgba(0, 0, 0, 0.08);
+  
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(135deg, #0d9488 30%, #4f46e5 70%);
+  
+  --vp-home-hero-image-background-image: radial-gradient(circle, rgba(13, 148, 136, 0.15) 0%, rgba(79, 70, 229, 0.05) 70%);
+  --vp-home-hero-image-filter: blur(80px);
+
+  /* Spacing configuration to tighten spacing */
+  --vp-home-hero-padding-top: 48px;
+  --vp-home-hero-padding-bottom: 16px;
+
+  /* Alt 按钮浅色样式 */
+  --vp-button-alt-border: #cbd5e1;
+  --vp-button-alt-text: #0f172a;
+  --vp-button-alt-bg: #ffffff;
+  --vp-button-alt-hover-border: #94a3b8;
+  --vp-button-alt-hover-text: #0f172a;
+  --vp-button-alt-hover-bg: #f1f5f9;
+
+  /* Brand 按钮浅色基础变量 */
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-text: #ffffff;
+  --vp-button-brand-bg: #0d9488;
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-hover-text: #ffffff;
+  --vp-button-brand-hover-bg: #0f766e;
+}
+
+/* ==========================================
+ * 深色模式变量 (Dark Mode)
+ * ========================================== */
+.dark {
+  --vp-c-bg: #090d16;
+  --vp-c-bg-alt: #0c1220;
+  --vp-c-bg-elv: #121b2d;
+  --vp-c-bg-soft: rgba(16, 24, 48, 0.8);
+  
+  --vp-c-brand-1: #10b981; /* 湖泊翠绿/荧光绿 */
+  --vp-c-brand-2: #06b6d4; /* 极光青蓝 */
+  --vp-c-brand-3: #4f46e5; /* 智能靛蓝 */
+  --vp-c-brand-soft: rgba(16, 185, 129, 0.12);
+  
+  --vp-c-text-1: #f3f4f6;
+  --vp-c-text-2: #9ca3af;
+  --vp-c-text-3: #6b7280;
+  
+  --vp-c-divider: rgba(255, 255, 255, 0.08);
+  --vp-c-border: rgba(255, 255, 255, 0.08);
+  
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(135deg, #10b981 20%, #06b6d4 50%, #6366f1 80%);
+  
+  --vp-home-hero-image-background-image: radial-gradient(circle, rgba(16, 185, 129, 0.25) 0%, rgba(6, 182, 212, 0.15) 50%, rgba(99, 102, 241, 0.05) 100%);
+  --vp-home-hero-image-filter: blur(80px);
+
+  /* Alt 按钮深色样式 */
+  --vp-button-alt-border: rgba(255, 255, 255, 0.08);
+  --vp-button-alt-text: #f3f4f6;
+  --vp-button-alt-bg: rgba(255, 255, 255, 0.04);
+  --vp-button-alt-hover-border: rgba(255, 255, 255, 0.15);
+  --vp-button-alt-hover-text: #ffffff;
+  --vp-button-alt-hover-bg: rgba(255, 255, 255, 0.08);
+
+  /* Brand 按钮深色基础变量 */
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-text: #ffffff;
+  --vp-button-brand-bg: #10b981;
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-hover-text: #ffffff;
+  --vp-button-brand-hover-bg: #059669;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --vp-home-hero-padding-top: 64px;
+    --vp-home-hero-padding-bottom: 24px;
+  }
+}
+@media (min-width: 960px) {
+  :root {
+    --vp-home-hero-padding-top: 80px;
+    --vp-home-hero-padding-bottom: 32px;
+  }
+}
+
+/* ==========================================
+ * 渐变按钮覆盖 (解决 background-color 忽略 gradient 导致透明的问题)
+ * ========================================== */
+.VPButton.brand {
+  background: linear-gradient(135deg, #0d9488, #0891b2) !important;
+  border: none !important;
+  box-shadow: 0 4px 14px rgba(13, 148, 136, 0.2);
+  transition: all 0.25s ease !important;
+}
+
+.VPButton.brand:hover {
+  background: linear-gradient(135deg, #0f766e, #0e7490) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(13, 148, 136, 0.3);
+}
+
+.dark .VPButton.brand {
+  background: linear-gradient(135deg, #10b981, #06b6d4) !important;
+  box-shadow: 0 4px 14px rgba(6, 182, 212, 0.25);
+}
+
+.dark .VPButton.brand:hover {
+  background: linear-gradient(135deg, #059669, #0891b2) !important;
+  box-shadow: 0 6px 20px rgba(6, 182, 212, 0.35);
+}
+
+html, body {
+  background-color: var(--vp-c-bg);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--vp-c-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #1e293b;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* 首页大图发光调整 */
+@media (min-width: 640px) {
+  :root {
+    --vp-home-hero-image-filter: blur(100px);
+  }
+}
+
+/* ==========================================
+ * 默认 VitePress 首页居中排版 (去除左右偏斜及大空白区)
+ * ========================================== */
+.VPHero {
+  margin-top: 0 !important;
+}
+
+.VPHero .container {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  text-align: center !important;
+  max-width: 100% !important;
+  padding: 0 24px !important;
+}
+
+.VPHero .main {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+}
+
+.VPHero .name,
+.VPHero .text,
+.VPHero .tagline {
+  text-align: center !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+.VPHero .tagline {
+  max-width: 650px !important;
+}
+
+.VPHero .actions {
+  justify-content: center !important;
+}
+
+/* ==========================================
+ * 特色卡片墙支持主题色切换
+ * ========================================== */
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 20px;
+  margin-top: 40px;
+}
+
+@media (min-width: 768px) {
+  .features-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.feature-card {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.02);
+  border-radius: 16px;
+  padding: 24px;
+  backdrop-filter: blur(16px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.dark .feature-card {
+  background: rgba(18, 27, 45, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: none;
+}
+
+.feature-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(13, 148, 136, 0.05) 0%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.dark .feature-card::before {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, transparent 100%);
+}
+
+.feature-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(13, 148, 136, 0.2);
+  box-shadow: 0 10px 25px -5px rgba(13, 148, 136, 0.08);
+}
+
+.dark .feature-card:hover {
+  border-color: rgba(6, 182, 212, 0.3);
+  box-shadow: 0 10px 30px -10px rgba(6, 182, 212, 0.15),
+              0 1px 1px 0 rgba(6, 182, 212, 0.1) inset;
+}
+
+.feature-card:hover::before {
+  opacity: 1;
+}
+
+.feature-icon {
+  font-size: 2rem;
+  margin-bottom: 16px;
+  display: inline-block;
+  background: linear-gradient(135deg, #0d9488, #0891b2);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.dark .feature-icon {
+  background: linear-gradient(135deg, #10b981, #06b6d4);
+}
+
+.feature-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+  margin-bottom: 8px;
+}
+
+.feature-desc {
+  font-size: 0.95rem;
+  color: var(--vp-c-text-2);
+  line-height: 1.6;
+}
+
+/* ==========================================
+ * LakeMind 桌面端 Agent Chat UI 模拟器样式
+ * ========================================== */
+
+.mockup-container {
+  max-width: 1000px;
+  margin: 0 auto 48px auto; /* 移除 top margin，拉近与 Hero CTA 按钮的距离 */
+  padding: 0 16px;
+}
+
+/* ==========================================
+ * 对比与技术栈块样式
+ * ========================================== */
+
+.comparison-section, .stack-section {
+  margin: 64px auto;
+  max-width: 900px;
+}
+
+.section-head-title {
+  text-align: center;
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+  letter-spacing: -0.02em;
+  background: linear-gradient(to right, var(--vp-c-text-1), var(--vp-c-text-2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.section-head-desc {
+  text-align: center;
+  color: var(--vp-c-text-2);
+  font-size: 1rem;
+  margin-bottom: 32px;
+}
+
+/* 对比表格支持主题切换 */
+.comp-table-wrapper {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+}
+
+.dark .comp-table-wrapper {
+  background: rgba(18, 27, 45, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: none;
+}
+
+.comp-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.comp-table th, .comp-table td {
+  padding: 16px 20px;
+  font-size: 0.9rem;
+}
+
+.comp-table th {
+  background: rgba(0, 0, 0, 0.015);
+  color: var(--vp-c-text-1);
+  font-weight: 600;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.dark .comp-table th {
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.comp-table td {
+  color: var(--vp-c-text-2);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.dark .comp-table td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.comp-table tr:last-child td {
+  border-bottom: none;
+}
+
+.comp-table td.highlight {
+  color: #0d9488;
+  font-weight: 600;
+  background: rgba(13, 148, 136, 0.01);
+}
+
+.dark .comp-table td.highlight {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.02);
+}
+
+/* 技术栈卡片支持主题切换 */
+.stack-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (min-width: 640px) {
+  .stack-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.stack-card {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  transition: all 0.3s;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
+}
+
+.dark .stack-card {
+  background: rgba(18, 27, 45, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: none;
+}
+
+.stack-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(79, 70, 229, 0.2);
+  box-shadow: 0 8px 16px rgba(79, 70, 229, 0.06);
+}
+
+.dark .stack-card:hover {
+  border-color: rgba(99, 102, 241, 0.3);
+  box-shadow: 0 10px 20px rgba(99, 102, 241, 0.05);
+}
+
+.stack-card .tech-icon {
+  font-size: 1.5rem;
+  margin-bottom: 8px;
+}
+
+.stack-card .tech-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+  margin-bottom: 4px;
+}
+
+.stack-card .tech-desc {
+  font-size: 0.75rem;
+  color: var(--vp-c-text-2);
+}
+

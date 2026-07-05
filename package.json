@@ -32,6 +32,7 @@
     "@tauri-apps/cli": "^2",
     "typescript": "~5.6.2",
     "vite": "^8.0.16",
-    "vite-plugin-solid": "^2.11.0"
+    "vite-plugin-solid": "^2.11.0",
+    "vitepress": "^2.0.0-alpha.17"
   }
 }
