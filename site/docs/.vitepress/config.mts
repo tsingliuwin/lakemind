@@ -47,12 +47,10 @@ export default defineConfig({
       }
     ],
 
-    socialLinks: [
-      { icon: 'github', link: 'https://github.com/tsingliuwin/lakemind' }
-    ],
+    socialLinks: [],
     
     footer: {
-      message: 'Released under the MIT License.',
+      message: '本网站内容版权归 LakeMind 所有，未经授权请勿转载。',
       copyright: 'Copyright © 2026-present LakeMind Authors'
     }
   }
