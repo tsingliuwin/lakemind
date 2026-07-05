@@ -57,8 +57,8 @@ hero:
 
 <div class="feature-card">
 <span class="feature-icon">🔒</span>
-<h3 class="feature-title">本地优先与零 ETL 联邦探索</h3>
-<p class="feature-desc">数据 100% 留存本地。与大模型交互仅发送表结构 Schema，原始数据行绝不上网。无需漫长管道与同步，支持在本地对异构多源数据直接跨源联合（JOIN）分析。</p>
+<h3 class="feature-title">本地优先零 ETL</h3>
+<p class="feature-desc">本地 DuckDB 作为中央协调器，桌面文件就地计算、远程大表下推源端，跨源 JOIN 瞬间完成。大模型仅外发 Schema 与少量样本，海量数据无需搬运。</p>
 </div>
 
 <div class="feature-card">
