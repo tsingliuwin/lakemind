@@ -147,28 +147,28 @@ hero:
 <!-- 4. 技术栈栈底展示 -->
 <div class="stack-section">
 <h2 class="section-head-title">高性能现代技术栈</h2>
-<p class="section-head-desc">基于 Rust 生态构建的极致底层，让分析飞速流畅</p>
+<p class="section-head-desc">从查询引擎到表格渲染，全链路为速度与安全而生</p>
 
 <div class="stack-grid">
 <div class="stack-card">
 <div class="tech-icon">🦀</div>
 <div class="tech-name">Tauri 2.0 & Rust</div>
-<div class="tech-desc">高性能桌面安全沙盒，包体积小，内存开销极低。</div>
+<div class="tech-desc">原生级性能的桌面外壳，安装包仅数十 MB，内存占用仅为 Electron 的零头。</div>
 </div>
 <div class="stack-card">
 <div class="tech-icon">🦆</div>
 <div class="tech-name">Embedded DuckDB</div>
-<div class="tech-desc">嵌入式 OLAP 引擎，专为分析 Parquet/Delta 而生。</div>
+<div class="tech-desc">进程内 OLAP 引擎，对 Parquet / CSV / 关系库开箱即查，GB 级数据亚秒响应。</div>
 </div>
 <div class="stack-card">
 <div class="tech-icon">🤖</div>
 <div class="tech-name">Rig Agent SDK</div>
-<div class="tech-desc">Rust 级智能体开发套件，驱动 14 种高效交互工具。</div>
+<div class="tech-desc">Rust 原生智能体框架，流式输出推理过程，编排 14 类数据工具自主完成多步任务。</div>
 </div>
 <div class="stack-card">
 <div class="tech-icon">⚡</div>
-<div class="tech-name">零拷贝二进制 IPC</div>
-<div class="tech-desc">基于 Tauri 2.0 的二进制数据管道，数据传递免 JSON 解析，百万行秒级无感交互。</div>
+<div class="tech-name">百万行虚拟化表格</div>
+<div class="tech-desc">基于 TanStack 虚拟化渲染，仅绘制可视区单元格，百万行结果流畅滚动、丝滑无卡顿。</div>
 </div>
 </div>
 </div>
