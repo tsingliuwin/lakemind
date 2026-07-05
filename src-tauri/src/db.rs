@@ -615,10 +615,10 @@ pub fn init_global_db() -> Result<(), String> {
 pub struct DbConnectionRecord {
     pub id: String,
     pub name: String,
-    pub db_type: String, // "postgres" | "mysql"
+    pub db_type: String, // "postgres" | "mysql" | "sqlite"
     pub host: String,
     pub port: i32,
-    pub database_name: String,
+    pub database_name: String, // for sqlite: the local file path; host/port/user/password unused
     pub username: String,
     pub password: String,
     pub ssl_mode: String,
@@ -838,17 +838,21 @@ pub fn workspace_attach_alias(name: &str) -> String {
     format!("db_{safe}")
 }
 
-/// ATTACH a single external database connection to a DuckDB session under the
-/// alias `db_{safe_name}`. Loads (INSTALL/LOAD) the driver first.
-pub fn attach_one(conn: &duckdb::Connection, r: &DbConnectionRecord) -> Result<(), String> {
-    let install_sql = format!("INSTALL {};", r.db_type);
-    let load_sql = format!("LOAD {};", r.db_type);
-    let _ = conn.execute(&install_sql, []);
-    conn.execute(&load_sql, []).map_err(|e| format!("加载驱动失败: {e}"))?;
-
-    let conn_name = workspace_attach_alias(&r.name);
-
-    let attach_sql = if r.db_type == "postgres" {
+/// Build the DuckDB `ATTACH` statement for a connection record, parameterized
+/// by `db_type`. Centralizes the per-driver connection-string format so that
+/// `attach_one`, `test_connection_impl`, `list_connection_tables_impl`, and
+/// `register_database_table` stay in sync.
+///
+/// - postgres: `host=.. port=.. dbname=.. user=.. password=.. [sslmode=..]`
+/// - mysql:    `host=.. port=.. database=.. user=.. password=..`
+/// - sqlite:   the local file path (stored in `database_name`); the connection
+///             is a single file, so `host/port/user/password` are unused.
+pub fn build_attach_sql(r: &DbConnectionRecord, conn_name: &str) -> String {
+    if r.db_type == "sqlite" {
+        // Escape single quotes in the file path.
+        let path = r.database_name.replace('\'', "''");
+        format!("ATTACH '{path}' AS {conn_name} (TYPE sqlite);")
+    } else if r.db_type == "postgres" {
         let mut conn_str = format!(
             "host={} port={} dbname={} user={} password={}",
             r.host, r.port, r.database_name, r.username, r.password
@@ -858,11 +862,24 @@ pub fn attach_one(conn: &duckdb::Connection, r: &DbConnectionRecord) -> Result<(
         }
         format!("ATTACH '{}' AS {conn_name} (TYPE postgres);", conn_str)
     } else {
+        // mysql (and any other network driver falling through)
         format!(
             "ATTACH 'host={} port={} database={} user={} password={}' AS {conn_name} (TYPE mysql);",
             r.host, r.port, r.database_name, r.username, r.password
         )
-    };
+    }
+}
+
+/// ATTACH a single external database connection to a DuckDB session under the
+/// alias `db_{safe_name}`. Loads (INSTALL/LOAD) the driver first.
+pub fn attach_one(conn: &duckdb::Connection, r: &DbConnectionRecord) -> Result<(), String> {
+    let install_sql = format!("INSTALL {};", r.db_type);
+    let load_sql = format!("LOAD {};", r.db_type);
+    let _ = conn.execute(&install_sql, []);
+    conn.execute(&load_sql, []).map_err(|e| format!("加载驱动失败: {e}"))?;
+
+    let conn_name = workspace_attach_alias(&r.name);
+    let attach_sql = build_attach_sql(r, &conn_name);
 
     conn.execute(&attach_sql, [])
         .map(|e| {

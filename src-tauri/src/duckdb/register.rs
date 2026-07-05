@@ -94,7 +94,7 @@ fn build_select_sql(e: &ScanEntry) -> String {
         SourceKind::Excel => format!("SELECT * FROM read_xlsx('{scan}')"),
         SourceKind::Delta => format!("SELECT * FROM delta('{scan}')"),
         SourceKind::Table | SourceKind::View => unreachable!("Table/View are not raw-path sources"),
-        SourceKind::Postgres | SourceKind::Mysql => unreachable!("Postgres/Mysql sources are registered through register_database_table"),
+        SourceKind::Postgres | SourceKind::Mysql | SourceKind::Sqlite => unreachable!("external-database sources are registered through register_database_table"),
     }
 }
 

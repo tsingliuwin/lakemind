@@ -280,7 +280,7 @@ fn build_entry(
         SourceKind::Excel => "*.xls*".to_string(),
         SourceKind::Delta => String::new(),
         SourceKind::Table | SourceKind::View => unreachable!("Table/View sources are not resolved as physical globs"),
-        SourceKind::Postgres | SourceKind::Mysql => unreachable!("Postgres/Mysql sources are not resolved as physical globs"),
+        SourceKind::Postgres | SourceKind::Mysql | SourceKind::Sqlite => unreachable!("external-database sources are not resolved as physical globs"),
     };
     let glob = forward_slashes(&dir.join(glob_tail));
     let _ = root; // root retained for potential relative-path formatting later

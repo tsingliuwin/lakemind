@@ -1005,7 +1005,7 @@ async fn sync_entries(
         // and pruning would delete every other table in the workspace.
         if prune_orphans {
             for rec in &existing {
-                if rec.kind == "postgres" || rec.kind == "mysql" {
+                if rec.kind == "postgres" || rec.kind == "mysql" || rec.kind == "sqlite" {
                     continue;
                 }
                 if !entry_scan_paths.contains(&rec.scan_path) {
@@ -1021,7 +1021,7 @@ async fn sync_entries(
             // (either via filesystem files or external database tables).
             let mut active_s_names: HashSet<String> = final_names.iter().cloned().collect();
             for rec in &existing {
-                if rec.kind == "postgres" || rec.kind == "mysql" {
+                if rec.kind == "postgres" || rec.kind == "mysql" || rec.kind == "sqlite" {
                     active_s_names.insert(rec.table_name.clone());
                 }
             }
@@ -1798,6 +1798,7 @@ fn kind_to_str(k: &SourceKind) -> &'static str {
         SourceKind::View => "view",
         SourceKind::Postgres => "postgres",
         SourceKind::Mysql => "mysql",
+        SourceKind::Sqlite => "sqlite",
     }
 }
 
@@ -1811,6 +1812,7 @@ fn str_to_kind(s: &str) -> SourceKind {
         "view" => SourceKind::View,
         "postgres" => SourceKind::Postgres,
         "mysql" => SourceKind::Mysql,
+        "sqlite" => SourceKind::Sqlite,
         _ => SourceKind::Table,
     }
 }
@@ -2037,21 +2039,7 @@ fn test_connection_impl(r: &db::DbConnectionRecord) -> Result<(), String> {
     conn.execute(&load_sql, []).map_err(|e| format!("加载驱动失败: {e}"))?;
 
     let conn_name = "test_attached_db";
-    let attach_sql = if r.db_type == "postgres" {
-        let mut conn_str = format!(
-            "host={} port={} dbname={} user={} password={}",
-            r.host, r.port, r.database_name, r.username, r.password
-        );
-        if r.ssl_mode != "disable" {
-            conn_str.push_str(&format!(" sslmode={}", r.ssl_mode));
-        }
-        format!("ATTACH '{}' AS {conn_name} (TYPE postgres);", conn_str)
-    } else {
-        format!(
-            "ATTACH 'host={} port={} database={} user={} password={}' AS {conn_name} (TYPE mysql);",
-            r.host, r.port, r.database_name, r.username, r.password
-        )
-    };
+    let attach_sql = db::build_attach_sql(r, conn_name);
 
     conn.execute(&attach_sql, []).map_err(|e| format!("连接数据库失败: {e}"))?;
     let _ = conn.execute(&format!("DETACH {conn_name};"), []);
@@ -2066,21 +2054,7 @@ fn list_connection_tables_impl(r: &db::DbConnectionRecord) -> Result<Vec<DbTable
     conn.execute(&load_sql, []).map_err(|e| format!("加载驱动失败: {e}"))?;
 
     let conn_name = "list_attached_db";
-    let attach_sql = if r.db_type == "postgres" {
-        let mut conn_str = format!(
-            "host={} port={} dbname={} user={} password={}",
-            r.host, r.port, r.database_name, r.username, r.password
-        );
-        if r.ssl_mode != "disable" {
-            conn_str.push_str(&format!(" sslmode={}", r.ssl_mode));
-        }
-        format!("ATTACH '{}' AS {conn_name} (TYPE postgres);", conn_str)
-    } else {
-        format!(
-            "ATTACH 'host={} port={} database={} user={} password={}' AS {conn_name} (TYPE mysql);",
-            r.host, r.port, r.database_name, r.username, r.password
-        )
-    };
+    let attach_sql = db::build_attach_sql(r, conn_name);
 
     conn.execute(&attach_sql, []).map_err(|e| format!("连接数据库失败: {e}"))?;
 
@@ -2394,29 +2368,19 @@ pub async fn register_database_table(
             let _ = guard.execute(&install_sql, []);
             guard.execute(&load_sql, [])?;
             
-            let attach_sql = if conn_record.db_type == "postgres" {
-                let mut conn_str = format!(
-                    "host={} port={} dbname={} user={} password={}",
-                    conn_record.host, conn_record.port, conn_record.database_name, conn_record.username, conn_record.password
-                );
-                if conn_record.ssl_mode != "disable" {
-                    conn_str.push_str(&format!(" sslmode={}", conn_record.ssl_mode));
-                }
-                format!("ATTACH '{}' AS {catalog_name} (TYPE postgres);", conn_str)
-            } else {
-                format!(
-                    "ATTACH 'host={} port={} database={} user={} password={}' AS {catalog_name} (TYPE mysql);",
-                    conn_record.host, conn_record.port, conn_record.database_name, conn_record.username, conn_record.password
-                )
-            };
+            let attach_sql = db::build_attach_sql(&conn_record, &catalog_name);
             guard.execute(&attach_sql, [])?;
         }
-        
+
         // 1. Estimate the row count for the external table. Postgres' planner
         // statistics (pg_class.reltuples / pg_stat_all_tables.n_live_tup) are
         // instant, but return -1/0 for tables never ANALYZE'd.
         // We do NOT fall back to a remote SELECT COUNT(*) because that will cause timeouts on large tables.
         // MySQL's information_schema.table_rows is an estimate that's effectively always present.
+        // SQLite has no statistics catalog; for a local file we run an actual
+        // COUNT(*) via the attached scanner — cheap, and we want the exact count
+        // since the table will be fully materialized next.
+        let is_sqlite = conn_record.db_type == "sqlite";
         let (write_count, approx_rows) = if conn_record.db_type == "postgres" {
             let stats_sql = format!(
                 "SELECT reltuples::BIGINT,
@@ -2446,6 +2410,12 @@ pub async fn register_database_table(
                 rows = n_live_tup;
             }
             (writes, rows)
+        } else if is_sqlite {
+            let count_sql = format!("SELECT COUNT(*)::BIGINT FROM {};", full_path);
+            let rows = guard
+                .query_row(&count_sql, [], |row| row.get::<_, i64>(0))
+                .unwrap_or(0);
+            (0, rows)
         } else {
             let stats_sql = format!(
                 "SELECT COALESCE(table_rows, 0)::BIGINT, 
@@ -2457,35 +2427,55 @@ pub async fn register_database_table(
             guard.query_row(&stats_sql, [], |row| Ok((row.get::<_, i64>(1).unwrap_or(0), row.get::<_, i64>(0).unwrap_or(0))))
                 .unwrap_or((0, 0))
         };
-        
+
         let row_count_opt = if approx_rows > 0 { Some(approx_rows) } else { None };
 
         // 2. Sampling config was read above, before the DuckDB lock.
 
-        // 3. Determine if we should materialize a local sample or create a view
-        let do_sample = sample_enabled && (approx_rows > sample_limit as i64 || approx_rows <= 0);
+        // 3. Decide between (a) a small local sample, (b) a zero-copy view over
+        // the remote table, or (c) a full local materialization.
+        // SQLite is always fully materialized: it's a local file so there is no
+        // network cost to copy, and a full table avoids sample-guard / pushdown
+        // machinery (DuckDB has no `sqlite_query` function). Postgres/MySQL use
+        // the sample-vs-view tradeoff driven by the estimated row count.
+        let do_sample = !is_sqlite && sample_enabled && (approx_rows > sample_limit as i64 || approx_rows <= 0);
+        let do_full_materialize = is_sqlite;
         let (storage_kind, is_sampled, row_count_to_save) = if do_sample {
             let _ = guard.execute(&format!("DROP VIEW IF EXISTS \"{}\";", local_table_name), []);
             let _ = guard.execute(&format!("DROP TABLE IF EXISTS \"{}\";", local_table_name), []);
-            
+
             let create_table_sql = format!(
                 "CREATE TABLE \"{}\" AS SELECT * FROM {} LIMIT {};",
                 local_table_name, full_path, sample_limit
             );
             guard.execute(&create_table_sql, [])?;
-            
+
             // Get actual number of rows imported locally
             let count_sql = format!("SELECT COUNT(*)::BIGINT FROM \"{}\";", local_table_name);
             let imported_rows = guard.query_row(&count_sql, [], |row| row.get::<_, i64>(0)).unwrap_or(0);
-            
+
             ("table".to_string(), true, Some(imported_rows))
+        } else if do_full_materialize {
+            let _ = guard.execute(&format!("DROP VIEW IF EXISTS \"{}\";", local_table_name), []);
+            let _ = guard.execute(&format!("DROP TABLE IF EXISTS \"{}\";", local_table_name), []);
+
+            let create_table_sql = format!(
+                "CREATE TABLE \"{}\" AS SELECT * FROM {};",
+                local_table_name, full_path
+            );
+            guard.execute(&create_table_sql, [])?;
+
+            let count_sql = format!("SELECT COUNT(*)::BIGINT FROM \"{}\";", local_table_name);
+            let imported_rows = guard.query_row(&count_sql, [], |row| row.get::<_, i64>(0)).unwrap_or(0);
+
+            ("table".to_string(), false, Some(imported_rows))
         } else {
             let _ = guard.execute(&format!("DROP VIEW IF EXISTS \"{}\";", local_table_name), []);
             let _ = guard.execute(&format!("DROP TABLE IF EXISTS \"{}\";", local_table_name), []);
-            
+
             let create_view_sql = format!("CREATE VIEW \"{}\" AS SELECT * FROM {};", local_table_name, full_path);
             guard.execute(&create_view_sql, [])?;
-            
+
             ("view".to_string(), false, row_count_opt)
         };
         

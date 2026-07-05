@@ -128,5 +128,15 @@ pub fn attach_workspace_lake(conn: &Connection, ws_dir: &Path) -> AppResult<()> 
 
     conn.execute("USE lake;", [])
         .map_err(|e| AppError::new(format!("USE lake 失败: {e}")))?;
+
+    // SQLite columns are dynamically typed — a column declared INTEGER may hold
+    // floats/strings (type affinity is just a hint). DuckDB's sqlite_scanner
+    // validates each value against the declared type and errors out on mismatch
+    // (e.g. "declared integer, found 182.88"). Loading every column as VARCHAR
+    // sidesteps this so ATTACH + CREATE TABLE always succeeds; values are
+    // preserved verbatim and can be CAST on read. The setting persists for the
+    // whole session, so it covers every SQLite connection registered later.
+    conn.execute("SET sqlite_all_varchar=true;", [])
+        .map_err(|e| AppError::new(format!("SET sqlite_all_varchar 失败: {e}")))?;
     Ok(())
 }

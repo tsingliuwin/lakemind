@@ -71,12 +71,12 @@ function KindIcon(props: { kind: string }) {
       <Show when={k === "delta"}>
         <path d="M12 3L3 20h18z" />
       </Show>
-      <Show when={k === "postgres" || k === "mysql"}>
+      <Show when={k === "postgres" || k === "mysql" || k === "sqlite"}>
         <ellipse cx="12" cy="6" rx="8" ry="3" />
         <path d="M4 6v5c0 1.66 3.58 3 8 3s8-1.34 8-3V6" />
         <path d="M4 11v5c0 1.66 3.58 3 8 3s8-1.34 8-3v-5" />
       </Show>
-      <Show when={k !== "csv" && k !== "tsv" && k !== "parquet" && k !== "json" && k !== "excel" && k !== "delta" && k !== "table" && k !== "view" && k !== "postgres" && k !== "mysql"}>
+      <Show when={k !== "csv" && k !== "tsv" && k !== "parquet" && k !== "json" && k !== "excel" && k !== "delta" && k !== "table" && k !== "view" && k !== "postgres" && k !== "mysql" && k !== "sqlite"}>
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
         <polyline points="14 2 14 8 20 8" />
       </Show>
@@ -793,7 +793,11 @@ export default function LeftNav(props: {
                                 <div style="display: flex; align-items: center; gap: 6px;">
                                   <span style="display: inline-flex; align-items: center;">
                                     <Show when={conn.dbType === "postgres"} fallback={
-                                      <span style="font-size: 8px; font-weight: 800; background: rgba(255, 140, 0, 0.16); color: #ffa500; width: 13px; height: 13px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; line-height: 1; font-family: system-ui, -apple-system, sans-serif; flex-shrink: 0;">M</span>
+                                      <Show when={conn.dbType === "sqlite"} fallback={
+                                        <span style="font-size: 8px; font-weight: 800; background: rgba(255, 140, 0, 0.16); color: #ffa500; width: 13px; height: 13px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; line-height: 1; font-family: system-ui, -apple-system, sans-serif; flex-shrink: 0;">M</span>
+                                      }>
+                                        <span style="font-size: 8px; font-weight: 800; background: rgba(16, 185, 129, 0.16); color: #10b981; width: 13px; height: 13px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; line-height: 1; font-family: system-ui, -apple-system, sans-serif; flex-shrink: 0;">S</span>
+                                      </Show>
                                     }>
                                       <span style="font-size: 8px; font-weight: 800; background: rgba(80, 160, 255, 0.16); color: var(--brand); width: 13px; height: 13px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; line-height: 1; font-family: system-ui, -apple-system, sans-serif; flex-shrink: 0;">P</span>
                                     </Show>
@@ -987,7 +991,7 @@ export default function LeftNav(props: {
                                   const m = t.path.match(/^db:\/\/[^/]+\/([^/]*)\/(.*)$/);
                                   const schema = m?.[1] ?? "";
                                   const table = m?.[2] ?? t.name;
-                                  const dbKind = t.kind === "mysql" ? "MySQL" : "PostgreSQL";
+                                  const dbKind = t.kind === "mysql" ? "MySQL" : t.kind === "sqlite" ? "SQLite" : "PostgreSQL";
                                   // Connection name = label with the trailing "<schema>.<table>"
                                   // stripped (handles connection names that contain dots).
                                   const tail = schema ? `.${schema}.${table}` : `.${table}`;

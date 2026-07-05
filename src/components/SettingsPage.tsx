@@ -9,6 +9,7 @@ import {
   codeWrap, setCodeWrapP,
 } from "../lib/codeConfig";
 import type { DbConnection } from "../lib/types";
+import { selectFile } from "../lib/duckdb";
 
 const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
@@ -140,7 +141,7 @@ export default function SettingsPage(props: {
   const [linkedConns, setLinkedConns] = createSignal<Record<string, boolean>>({});
 
   const [formName, setFormName] = createSignal("");
-  const [formType, setFormType] = createSignal<"postgres" | "mysql">("postgres");
+  const [formType, setFormType] = createSignal<"postgres" | "mysql" | "sqlite">("postgres");
   const [formHost, setFormHost] = createSignal("");
   const [formPort, setFormPort] = createSignal(5432);
   const [formDatabase, setFormDatabase] = createSignal("");
@@ -195,6 +196,37 @@ export default function SettingsPage(props: {
       alert("请输入连接名称");
       return;
     }
+
+    const isSqlite = formType() === "sqlite";
+    // SQLite only needs a file path; network/auth fields are unused.
+    if (isSqlite) {
+      const filePath = formDatabase().trim();
+      if (!filePath) {
+        alert("请选择数据库文件");
+        return;
+      }
+      const connData: DbConnection = {
+        id: editingConn()?.id || "conn_" + Date.now(),
+        name,
+        dbType: "sqlite",
+        host: "",
+        port: 0,
+        databaseName: filePath,
+        username: "",
+        password: "",
+        sslMode: "disable",
+        createdAt: editingConn()?.createdAt || Date.now(),
+      };
+      try {
+        await invoke("upsert_db_connection", { config: connData });
+        setEditingConn(null);
+        loadConnections();
+      } catch (err) {
+        alert("保存失败: " + err);
+      }
+      return;
+    }
+
     const host = formHost().trim();
     if (!host) {
       alert("请输入主机地址");
@@ -235,6 +267,36 @@ export default function SettingsPage(props: {
 
   const handleTestConnection = async () => {
     const name = formName().trim();
+    const isSqlite = formType() === "sqlite";
+
+    if (isSqlite) {
+      const filePath = formDatabase().trim();
+      if (!name || !filePath) {
+        alert("请填写连接名称并选择数据库文件以测试");
+        return;
+      }
+      const connData: DbConnection = {
+        id: editingConn()?.id || "test_temp",
+        name,
+        dbType: "sqlite",
+        host: "",
+        port: 0,
+        databaseName: filePath,
+        username: "",
+        password: "",
+        sslMode: "disable",
+        createdAt: Date.now(),
+      };
+      setTestStatus({ status: "testing" });
+      try {
+        await invoke("test_db_connection", { config: connData });
+        setTestStatus({ status: "success", msg: "连接成功！" });
+      } catch (err) {
+        setTestStatus({ status: "error", msg: "测试失败: " + err });
+      }
+      return;
+    }
+
     const host = formHost().trim();
     const databaseName = formDatabase().trim();
     const username = formUsername().trim();
@@ -926,7 +988,8 @@ export default function SettingsPage(props: {
                 </button>
               </div>
 
-              {/* Connection URI Import */}
+              {/* Connection URI Import — not applicable to file-based SQLite */}
+              <Show when={formType() !== "sqlite"}>
               <div style="display: flex; flex-direction: column; gap: 6px;">
                 <label style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">连接串 (Connection URI)</label>
                 <div style="position: relative; display: flex; align-items: center; width: 100%;">
@@ -977,17 +1040,18 @@ export default function SettingsPage(props: {
                   </span>
                 </Show>
               </div>
+              </Show>
 
               {/* Database Type Card Selector */}
               <div style="display: flex; flex-direction: column; gap: 8px;">
                 <label style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">{t("dbType")}</label>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 14px;">
                   {/* PostgreSQL Card */}
                   <div 
                     onClick={() => {
                       setFormType("postgres");
-                      if (formPort() === 3306) setFormPort(5432);
-                      if (formName() === "local_mysql" || formName() === "") setFormName("local_postgres");
+                      if (formPort() === 3306 || formPort() === 0) setFormPort(5432);
+                      if (formName() === "local_mysql" || formName() === "local_sqlite" || formName() === "") setFormName("local_postgres");
                       if (formUsername() === "root" || formUsername() === "") setFormUsername("postgres");
                       if (formDatabase() === "mysql" || formDatabase() === "") setFormDatabase("postgres");
                     }}
@@ -1018,8 +1082,8 @@ export default function SettingsPage(props: {
                   <div 
                     onClick={() => {
                       setFormType("mysql");
-                      if (formPort() === 5432) setFormPort(3306);
-                      if (formName() === "local_postgres" || formName() === "") setFormName("local_mysql");
+                      if (formPort() === 5432 || formPort() === 0) setFormPort(3306);
+                      if (formName() === "local_postgres" || formName() === "local_sqlite" || formName() === "") setFormName("local_mysql");
                       if (formUsername() === "postgres" || formUsername() === "") setFormUsername("root");
                       if (formDatabase() === "postgres" || formDatabase() === "") setFormDatabase("mysql");
                     }}
@@ -1045,9 +1109,45 @@ export default function SettingsPage(props: {
                       ✓
                     </span>
                   </div>
+
+                  {/* SQLite Card */}
+                  <div 
+                    onClick={() => {
+                      setFormType("sqlite");
+                      setFormPort(0);
+                      setFormHost("");
+                      setFormUsername("");
+                      setFormPassword("");
+                      setFormSslMode("disable");
+                      if (formName() === "local_postgres" || formName() === "local_mysql" || formName() === "") setFormName("local_sqlite");
+                      if (formDatabase() === "postgres" || formDatabase() === "mysql") setFormDatabase("");
+                    }}
+                    style={`display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-radius: 10px; border: 2px solid transparent; background: ${formType() === "sqlite" ? "rgba(16, 185, 129, 0.06)" : "rgba(255, 255, 255, 0.015)"}; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: ${formType() === "sqlite" ? "0 4px 12px rgba(16, 185, 129, 0.1)" : "none"}`}
+                    class="db-type-card"
+                  >
+                    <div style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; background: rgba(16, 185, 129, 0.12); color: #10b981; border-radius: 8px; flex-shrink: 0;">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                        <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path>
+                      </svg>
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                      <div style="font-weight: 600; font-size: 13.5px; color: var(--text-primary);">SQLite</div>
+                      <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{t("dbTypeSqliteDesc")}</div>
+                    </div>
+                    <span 
+                      style={`color: #10b981; font-size: 15px; font-weight: bold; margin-left: auto; transition: opacity 0.15s ease-in-out; ${
+                        formType() === "sqlite" ? "opacity: 1;" : "opacity: 0; pointer-events: none;"
+                      }`}
+                    >
+                      ✓
+                    </span>
+                  </div>
                 </div>
               </div>
 
+              <Show when={formType() !== "sqlite"}>
               {/* Group 1: Connection & Network */}
               <div style="display: flex; flex-direction: column; gap: 14px;">
                 <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 4px;">{t("connNetworkConfig")}</div>
@@ -1168,6 +1268,48 @@ export default function SettingsPage(props: {
                   </Show>
                 </div>
               </div>
+              </Show>
+
+              {/* SQLite: file path picker (shown only for sqlite) */}
+              <Show when={formType() === "sqlite"}>
+                <div style="display: flex; flex-direction: column; gap: 14px; min-height: 166px; border-top: 1px solid var(--border-faint); padding-top: 20px; margin-top: 6px;">
+                  <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 4px;">{t("connNetworkConfig")}</div>
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 11.5px; color: var(--text-dim);">{t("connNameLabel")}</label>
+                    <input
+                      type="text"
+                      class="sp-input"
+                      value={formName()}
+                      placeholder="local_sqlite"
+                      onInput={(e) => setFormName(e.currentTarget.value)}
+                    />
+                  </div>
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 11.5px; color: var(--text-dim);">{t("filePathLabel")}</label>
+                    <div style="display: flex; gap: 8px; align-items: stretch;">
+                      <input
+                        type="text"
+                        class="sp-input"
+                        style="flex: 1; min-width: 0;"
+                        value={formDatabase()}
+                        placeholder="/path/to/database.db"
+                        onInput={(e) => setFormDatabase(e.currentTarget.value)}
+                      />
+                      <button
+                        type="button"
+                        class="ss-btn ss-btn-secondary btn-sec-no-highlight"
+                        style="padding: 6px 14px; font-size: 13px; flex-shrink: 0;"
+                        onClick={async () => {
+                          const p = await selectFile();
+                          if (p) setFormDatabase(p);
+                        }}
+                      >
+                        {t("browseFileBtn")}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </Show>
 
               {/* Bottom Test & Action Footer */}
               <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 6px; padding-top: 18px; border-top: 1px solid var(--border-faint);">
@@ -1266,7 +1408,7 @@ export default function SettingsPage(props: {
                         class="db-connection-item-row"
                       >
                         <div style="display: flex; align-items: center; gap: 14px;">
-                          <span style={`display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : '#ffa500'}; border-radius: 8px; flex-shrink: 0;`}>
+                          <span style={`display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : c.dbType === 'sqlite' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : c.dbType === 'sqlite' ? '#10b981' : '#ffa500'}; border-radius: 8px; flex-shrink: 0;`}>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
                               <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
                               <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
@@ -1276,10 +1418,10 @@ export default function SettingsPage(props: {
                           <div>
                             <div style="display: flex; align-items: center; gap: 8px;">
                               <span style="font-weight: 600; font-size: 14px; color: var(--text-primary);">{c.name}</span>
-                              <span style={`font-size: 10px; font-weight: bold; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : '#ffa500'}`}>{c.dbType}</span>
+                              <span style={`font-size: 10px; font-weight: bold; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : c.dbType === 'sqlite' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : c.dbType === 'sqlite' ? '#10b981' : '#ffa500'}`}>{c.dbType}</span>
                             </div>
                             <div style="font-size: 12px; color: var(--text-dim); margin-top: 4px; font-family: var(--font-mono, monospace); word-break: break-all;">
-                              {c.username}@{c.host}:{c.port}/{c.databaseName}
+                              {c.dbType === 'sqlite' ? c.databaseName : `${c.username}@${c.host}:${c.port}/${c.databaseName}`}
                             </div>
                           </div>
                         </div>
@@ -1443,7 +1585,7 @@ export default function SettingsPage(props: {
             <div class="settings-row-control">
               <div class="settings-row-info">
                 <span class="label-title">外部数据库物化采样</span>
-                <p class="settings-row-desc">引入外部数据库表（PostgreSQL/MySQL）时开启本地物化采样缓存，以大幅提升探索和字段结构查验速度，并保护生产数据库。</p>
+                <p class="settings-row-desc">引入外部数据库表（PostgreSQL/MySQL/SQLite）时开启本地物化采样缓存，以大幅提升探索和字段结构查验速度，并保护生产数据库。</p>
               </div>
               <button
                 class="ss-toggle"
