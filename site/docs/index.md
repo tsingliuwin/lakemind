@@ -8,7 +8,7 @@ hero:
   tagline: "打通本地文件与关系数据库的零 ETL 混合联邦执行。基于极致低延迟的“快速试错-纠偏环”，融合谷歌开源 OKF 标准，让 Agent 真正深入数据清洗、多步加工与业务记忆积累。"
   actions:
     - theme: brand
-      text: 快速入门 (LLM配置)
+      text: 快速入门
       link: /guide/getting-started
     - theme: alt
       text: 了解架构

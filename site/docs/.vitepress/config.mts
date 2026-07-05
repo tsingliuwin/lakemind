@@ -34,7 +34,7 @@ export default defineConfig({
       {
         text: 'Agent 核心指南',
         items: [
-          { text: '快速入门 (LLM配置)', link: '/guide/getting-started' },
+          { text: '快速入门', link: '/guide/getting-started' },
           { text: 'Agent 核心工具', link: '/guide/agent-skills' },
           { text: '谷歌 OKF 统一标准', link: '/guide/okf-knowledge' }
         ]
