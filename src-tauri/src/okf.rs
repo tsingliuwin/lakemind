@@ -424,6 +424,16 @@ fn run_git_commit(okf_dir: &Path, file_path: &Path, commit_msg: &str) {
             .current_dir(okf_dir)
             .status();
         let _ = fs::write(okf_dir.join(".gitignore"), ".DS_Store\n");
+        // 固定行尾为 LF，避免 Windows 上 autocrlf 导致的 CRLF 转换警告，
+        // 同时保证跨平台提交的 OKF 文件行尾一致。
+        let _ = fs::write(
+            okf_dir.join(".gitattributes"),
+            "* text=auto eol=lf\n*.md text eol=lf\n",
+        );
+        let _ = Command::new("git")
+            .args(["config", "core.autocrlf", "false"])
+            .current_dir(okf_dir)
+            .status();
     }
     if let Ok(rel_path) = file_path.strip_prefix(okf_dir) {
         let _ = Command::new("git")
