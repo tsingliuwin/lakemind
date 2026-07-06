@@ -45,14 +45,14 @@ export default function ChatView(props: {
   onConfirmTool: (toolCallId: string, approved: boolean) => void;
   /** 该对话是否正在流式输出（由父级 streamingTaskId 派生）。 */
   streaming: boolean;
-  /** Add a data file / scan a folder into the workspace (the "+" menu). */
+  /** Add data files into the workspace (the file button). */
   onAddFile?: () => void;
+  /** Scan a folder into the workspace (the folder button). */
   onAddFolder?: () => void;
 }) {
   const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
   const [priorityDropdownOpen, setPriorityDropdownOpen] = createSignal(false);
   const [confirmDropdownOpen, setConfirmDropdownOpen] = createSignal(false);
-  const [sourceMenuOpen, setSourceMenuOpen] = createSignal(false);
   // Group selectable models by provider so duplicate model ids across
   // providers stay distinguishable (each group shows its provider name).
   const groupedModels = createMemo(() => {
@@ -68,7 +68,6 @@ export default function ChatView(props: {
   let modelRef: HTMLDivElement | undefined;
   let priorityRef: HTMLDivElement | undefined;
   let confirmRef: HTMLDivElement | undefined;
-  let sourceRef: HTMLDivElement | undefined;
 
   const handleClickOutside = (e: MouseEvent) => {
     if (modelRef && !modelRef.contains(e.target as Node)) {
@@ -79,9 +78,6 @@ export default function ChatView(props: {
     }
     if (confirmRef && !confirmRef.contains(e.target as Node)) {
       setConfirmDropdownOpen(false);
-    }
-    if (sourceRef && !sourceRef.contains(e.target as Node)) {
-      setSourceMenuOpen(false);
     }
   };
 
@@ -660,38 +656,26 @@ export default function ChatView(props: {
           />
           <div class="chat-composer__toolbar">
             <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
-              {/* Data source menu — add a data file or scan a folder */}
-              <div class="dropdown-wrapper source-menu-wrapper" ref={sourceRef} style="position: relative;">
-                <button
-                  class="chat-composer__pill-btn chat-composer__plus-btn"
-                  title="添加数据文件 / 文件夹"
-                  onClick={() => setSourceMenuOpen(!sourceMenuOpen())}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
-                    <line x1="12" y1="5" x2="12" y2="19"></line>
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                  </svg>
-                </button>
-                <Show when={sourceMenuOpen()}>
-                  <div class="custom-dropdown-list" style="bottom: calc(100% + 6px); left: 0;">
-                    <button class="dropdown-item" onClick={() => { setSourceMenuOpen(false); props.onAddFile?.(); }}>
-                      <span class="btn-prefix">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                          <polyline points="14 2 14 8 20 8"></polyline>
-                        </svg>
-                      </span> 选择数据文件
-                    </button>
-                    <button class="dropdown-item" onClick={() => { setSourceMenuOpen(false); props.onAddFolder?.(); }}>
-                      <span class="btn-prefix">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
-                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                        </svg>
-                      </span> 选择文件夹扫描…
-                    </button>
-                  </div>
-                </Show>
-              </div>
+              {/* Data source: file picker + folder picker, each multi-select, no sub-menu */}
+              <button
+                class="chat-composer__pill-btn chat-composer__plus-btn"
+                title="添加数据文件"
+                onClick={() => props.onAddFile?.()}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                </svg>
+              </button>
+              <button
+                class="chat-composer__pill-btn chat-composer__plus-btn"
+                title="添加文件夹扫描"
+                onClick={() => props.onAddFolder?.()}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+              </button>
             </div>
 
             <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex-shrink: 1;">

@@ -47,4 +47,10 @@ export async function selectFile(): Promise<string | null> {
   return invoke<string | null>("select_file");
 }
 
+/** Open a native multi-select file picker. Returns the selected absolute paths,
+ *  or null if the user cancels. */
+export async function selectFiles(): Promise<string[] | null> {
+  return invoke<string[] | null>("select_files");
+}
+
 

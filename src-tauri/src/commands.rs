@@ -1144,9 +1144,9 @@ pub async fn save_settings_json(json: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn select_directory(prompt: Option<String>) -> Result<Option<String>, String> {
     let prompt = prompt.unwrap_or_else(|| "请选择工作区目录".to_string());
-    // The native pickers shell out to osascript/powershell/zenity, which block
-    // for as long as the dialog is open. Run them on a blocking worker so the
-    // Tauri async runtime isn't stalled while the user browses.
+    // rfd's picker is a blocking call (it runs the native modal dialog), so run
+    // it on a blocking worker to avoid stalling the Tauri async runtime while
+    // the user browses.
     tauri::async_runtime::spawn_blocking(move || select_directory_native(&prompt))
         .await
         .map_err(|e| format!("目录选择器任务失败: {e}"))
@@ -1156,6 +1156,16 @@ pub async fn select_directory(prompt: Option<String>) -> Result<Option<String>, 
 #[tauri::command]
 pub async fn select_file() -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || select_file_native("请选择数据文件"))
+        .await
+        .map_err(|e| format!("文件选择器任务失败: {e}"))
+}
+
+/// Open a native multi-select file picker (files only; folder picking is
+/// handled by `select_directory`). Replaces the old single-file picker for the
+/// import flow so users can grab several files at once.
+#[tauri::command]
+pub async fn select_files() -> Result<Option<Vec<String>>, String> {
+    tauri::async_runtime::spawn_blocking(move || select_files_native("请选择数据文件"))
         .await
         .map_err(|e| format!("文件选择器任务失败: {e}"))
 }
@@ -1868,117 +1878,40 @@ fn resolve_workspace_dir(workspace: &str) -> Result<PathBuf, String> {
 }
 
 fn select_directory_native(prompt: &str) -> Option<String> {
-    #[cfg(target_os = "macos")]
-    {
-        use std::process::Command;
-        let script = format!("POSIX path of (choose folder with prompt \"{prompt}\")");
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(&script)
-            .output()
-            .ok()?;
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path_str.is_empty() {
-                return Some(path_str);
-            }
-        }
-    }
-    #[cfg(target_os = "windows")]
-    {
-        use std::process::Command;
-        let ps_script = format!(
-            "[System.Reflection.Assembly]::LoadWithPartialName('System.windows.forms') | Out-Null; $g = New-Object System.Windows.Forms.FolderBrowserDialog; $g.Description = '{prompt}'; $g.ShowDialog() | Out-Null; $g.SelectedPath"
-        );
-        let output = Command::new("powershell")
-            .arg("-Command")
-            .arg(ps_script)
-            .output()
-            .ok()?;
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path_str.is_empty() {
-                return Some(path_str);
-            }
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        use std::process::Command;
-        let title = format!("--title={prompt}");
-        let output = Command::new("zenity")
-            .arg("--file-selection")
-            .arg("--directory")
-            .arg(&title)
-            .output()
-            .ok()?;
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path_str.is_empty() {
-                return Some(path_str);
-            }
-        }
-    }
-    let _ = prompt;
-    None
+    // rfd talks to the native file-dialog API directly (Win32 IFileOpenDialog,
+    // macOS NSOpenPanel, xdg-desktop-portal), so non-ASCII paths round-trip as
+    // correct Unicode. The previous osascript/powershell/zenity shelling read
+    // the path back through stdout, which on a CJK Windows is CP936(GBK) and was
+    // decoded as UTF-8 — silently mangling every Chinese path into mojibake.
+    rfd::FileDialog::new()
+        .set_title(prompt)
+        .pick_folder()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
 }
 
 /// Native single-file picker. Mirrors [`select_directory_native`] but opens an
 /// open-file dialog. No extension filter is enforced — the scan layer classifies
 /// the file, and unrecognized types surface a clear error upstream.
 fn select_file_native(prompt: &str) -> Option<String> {
-    #[cfg(target_os = "macos")]
-    {
-        use std::process::Command;
-        let script = format!("POSIX path of (choose file with prompt \"{prompt}\")");
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(&script)
-            .output()
-            .ok()?;
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path_str.is_empty() {
-                return Some(path_str);
-            }
-        }
-    }
-    #[cfg(target_os = "windows")]
-    {
-        use std::process::Command;
-        let ps_script = format!(
-            "[System.Reflection.Assembly]::LoadWithPartialName('System.windows.forms') | Out-Null; $g = New-Object System.Windows.Forms.OpenFileDialog; $g.Title = '{prompt}'; $g.ShowDialog() | Out-Null; $g.FileName"
-        );
-        let output = Command::new("powershell")
-            .arg("-Command")
-            .arg(ps_script)
-            .output()
-            .ok()?;
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path_str.is_empty() {
-                return Some(path_str);
-            }
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        use std::process::Command;
-        let title = format!("--title={prompt}");
-        let output = Command::new("zenity")
-            .arg("--file-selection")
-            .arg(&title)
-            .output()
-            .ok()?;
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path_str.is_empty() {
-                return Some(path_str);
-            }
-        }
-    }
-    let _ = prompt;
-    None
+    // See `select_directory_native` for why rfd is used instead of shelling out
+    // to osascript/powershell/zenity (CJK path corruption via GBK stdout).
+    rfd::FileDialog::new()
+        .set_title(prompt)
+        .pick_file()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+}
+
+/// Native multi-select file picker (files only).
+fn select_files_native(prompt: &str) -> Option<Vec<String>> {
+    rfd::FileDialog::new()
+        .set_title(prompt)
+        .pick_files()
+        .map(|paths| {
+            paths
+                .into_iter()
+                .filter_map(|p| p.to_str().map(|s| s.to_string()))
+                .collect()
+        })
 }
 
 fn copy_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {

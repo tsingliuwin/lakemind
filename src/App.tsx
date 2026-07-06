@@ -10,7 +10,7 @@ import RightInspector from "./components/RightInspector";
 import BottomConsole, { type ConsoleState } from "./components/BottomConsole";
 import SettingsPage, { type SettingsTab } from "./components/SettingsPage";
 import HomePanel from "./components/HomePanel";
-import { executeSql, importFileToWorkspace, selectDirectory, selectFile } from "./lib/duckdb";
+import { executeSql, importFileToWorkspace, selectDirectory, selectFiles } from "./lib/duckdb";
 import { tryFormatDuckdbSql } from "./lib/sqlFormat";
 import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage, RegisterStatus, ImportProgress, DepInfo, ModelOption } from "./lib/types";
 import { modelKeyOf, modelIdOfKey, providerIdOfKey } from "./lib/types";
@@ -1090,13 +1090,13 @@ export default function App() {
     }
   }
 
-  async function handleSelectFile() {
+  async function handleSelectFiles() {
     if (busy()) return;
     try {
-      const path = await selectFile();
-      if (path) await importPaths([path]);
+      const paths = await selectFiles();
+      if (paths && paths.length) await importPaths(paths);
     } catch (e) {
-      console.error("Failed to select file:", e);
+      console.error("Failed to select files:", e);
     }
   }
 
@@ -1459,7 +1459,7 @@ export default function App() {
                         void createChatTaskAndSend(prompt, modelId);
                       }
                     }}
-                    onAddFile={handleSelectFile}
+                    onAddFile={handleSelectFiles}
                     onAddFolder={handleSelectFolder}
                     availableModels={availableModels()}
                     selectedModel={selectedModel()}
@@ -1517,7 +1517,7 @@ export default function App() {
                           onConfirmTool={(toolCallId, approved) =>
                             resolveToolConfirmation(id(), toolCallId, approved)
                           }
-                          onAddFile={handleSelectFile}
+                          onAddFile={handleSelectFiles}
                           onAddFolder={handleSelectFolder}
                         />
                       )}

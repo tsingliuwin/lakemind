@@ -43,13 +43,10 @@ export default function HomePanel(props: HomePanelProps) {
     return [...map.values()];
   });
 
-  const [sourceMenuOpen, setSourceMenuOpen] = createSignal(false);
-
   let wsRef!: HTMLDivElement;
   let modelRef!: HTMLDivElement;
   let confirmRef!: HTMLDivElement;
   let priorityRef!: HTMLDivElement;
-  let sourceRef!: HTMLDivElement;
 
   const handleClickOutside = (e: MouseEvent) => {
     if (wsRef && !wsRef.contains(e.target as Node)) {
@@ -63,9 +60,6 @@ export default function HomePanel(props: HomePanelProps) {
     }
     if (priorityRef && !priorityRef.contains(e.target as Node)) {
       setPriorityDropdownOpen(false);
-    }
-    if (sourceRef && !sourceRef.contains(e.target as Node)) {
-      setSourceMenuOpen(false);
     }
   };
 
@@ -210,38 +204,26 @@ export default function HomePanel(props: HomePanelProps) {
             {/* Bottom Toolbar Row */}
             <div class="pill-footer">
               <div class="footer-left">
-                {/* Attachment Button — opens a menu to pick a data file or a folder to scan */}
-                <div class="dropdown-wrapper source-menu-wrapper" ref={sourceRef}>
-                  <button
-                    class="chat-composer__pill-btn chat-composer__plus-btn"
-                    title="添加数据文件 / 文件夹"
-                    onClick={() => setSourceMenuOpen(!sourceMenuOpen())}
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
-                      <line x1="12" y1="5" x2="12" y2="19"></line>
-                      <line x1="5" y1="12" x2="19" y2="12"></line>
-                    </svg>
-                  </button>
-                  <Show when={sourceMenuOpen()}>
-                    <div class="custom-dropdown-list">
-                      <button class="dropdown-item" onClick={() => { setSourceMenuOpen(false); props.onAddFile?.(); }}>
-                        <span class="btn-prefix">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                            <polyline points="14 2 14 8 20 8"></polyline>
-                          </svg>
-                        </span> 选择数据文件
-                      </button>
-                      <button class="dropdown-item" onClick={() => { setSourceMenuOpen(false); props.onAddFolder?.(); }}>
-                        <span class="btn-prefix">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
-                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                          </svg>
-                        </span> 选择文件夹扫描…
-                      </button>
-                    </div>
-                  </Show>
-                </div>
+                {/* Add data: file picker + folder picker, each multi-select, no sub-menu */}
+                <button
+                  class="chat-composer__pill-btn chat-composer__plus-btn"
+                  title="添加数据文件"
+                  onClick={() => props.onAddFile?.()}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                  </svg>
+                </button>
+                <button
+                  class="chat-composer__pill-btn chat-composer__plus-btn"
+                  title="添加文件夹扫描"
+                  onClick={() => props.onAddFolder?.()}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                </button>
               </div>
 
               <div class="footer-right">

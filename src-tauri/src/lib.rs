@@ -46,6 +46,7 @@ pub fn run() {
             commands::import_file_to_workspace,
             commands::select_directory,
             commands::select_file,
+            commands::select_files,
             commands::read_directory,
             commands::register_workspace_sources,
             commands::workspace_register_status,
