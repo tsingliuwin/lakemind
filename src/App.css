@@ -2267,6 +2267,61 @@ body.is-resizing-column * {
   height: 100vh;
 }
 
+/* Collapse toggle button (lives in the ss-logo-area, right-aligned). Uses the
+   same PanelLeft glyph as the main shell's sidebar toggle for consistency. */
+.ss-collapse-btn {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.ss-collapse-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.ss-collapse-btn.active {
+  color: var(--text-primary);
+}
+.ss-collapse-btn svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+/* Collapsed sidebar: shrink to a 48px rail exposing only the expand toggle.
+   Hide nav/back/footer so the rail stays clean; the right container is flex:1
+   so it reflows to fill the freed space. */
+.settings-sidebar.collapsed {
+  width: 48px;
+  min-width: 48px;
+  max-width: 48px;
+}
+.settings-sidebar.collapsed .ss-logo-area {
+  padding: 12px 0;
+  justify-content: center;
+}
+.settings-sidebar.collapsed .ss-logo-area.mac-nav {
+  padding: 12px 0;
+}
+.settings-sidebar.collapsed .ss-logo-box,
+.settings-sidebar.collapsed .ss-back-btn,
+.settings-sidebar.collapsed .ss-nav,
+.settings-sidebar.collapsed .ss-footer {
+  display: none;
+}
+.settings-sidebar.collapsed .ss-collapse-btn {
+  margin-left: 0;
+}
+
 .ss-logo-area {
   display: flex;
   align-items: center;

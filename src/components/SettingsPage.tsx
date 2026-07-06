@@ -97,6 +97,11 @@ export default function SettingsPage(props: {
 }) {
   const [activeTab, setActiveTab] = createSignal<SettingsTab>(props.initialTab ?? "general");
 
+  // Collapsible settings sidebar: when true the left rail shrinks to a narrow
+  // strip exposing only the expand toggle, giving the right detail panel full
+  // width. Mirrors the main shell's left-sidebar collapse affordance.
+  const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false);
+
   // Selection signals
   const [selectedProvider, setSelectedProvider] = createSignal<string>("");
   const [isAddingProvider, setIsAddingProvider] = createSignal(false);
@@ -764,13 +769,24 @@ export default function SettingsPage(props: {
         }
       `}</style>
       {/* Settings Sidebar */}
-      <aside class="settings-sidebar">
+      <aside class="settings-sidebar" classList={{ collapsed: sidebarCollapsed() }}>
         <div class="ss-logo-area" classList={{ "mac-nav": isMac }}>
           <Show when={!isMac}>
             <div class="ss-logo-box">
               <img src={logoSrc()} alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
             </div>
           </Show>
+          <button
+            class="ss-collapse-btn"
+            classList={{ active: !sidebarCollapsed() }}
+            title={sidebarCollapsed() ? "展开侧栏" : "折叠侧栏"}
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed())}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="9" y1="3" x2="9" y2="21"></line>
+            </svg>
+          </button>
         </div>
 
         <button class="ss-back-btn" onClick={() => props.onClose()}>
@@ -1897,7 +1913,14 @@ export default function SettingsPage(props: {
                   if (!prov) {
                     return (
                       <div class="sp-empty-provider" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); text-align: center; padding: 40px;">
-                        <span style="font-size: 40px; margin-bottom: 12px;">🔌</span>
+                        <div style="width: 56px; height: 56px; border-radius: 14px; background: var(--bg-elevated); border: 1px solid var(--border-strong); display: flex; align-items: center; justify-content: center; margin-bottom: 16px;">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width: 28px; height: 28px;">
+                            <path d="M12 22v-5" />
+                            <path d="M9 8V2" />
+                            <path d="M15 8V2" />
+                            <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" />
+                          </svg>
+                        </div>
                         <h4 style="color: var(--text); font-weight: 500;">暂无模型供应商</h4>
                         <p style="font-size: 12px; margin-top: 6px; max-width: 280px; line-height: 1.5;">点击左侧「添加供应商」按钮配置您的 AI API 接口和模型</p>
                       </div>
