@@ -1,0 +1,82 @@
+name: Release
+
+# 推送 v* 形式的 tag 时触发，构建三平台安装包并发布到 GitHub Releases。
+# 例如：git tag v0.2.0 && git push origin v0.2.0
+on:
+  push:
+    tags:
+      - "v*"
+
+# 顶层权限：仅写 contents 以发布 Release。
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.settings.os }})
+    runs-on: ${{ matrix.settings.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - os: windows-latest
+            args: ""
+          - os: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - os: macos-latest
+            args: "--target x86_64-apple-darwin"
+          - os: ubuntu-22.04
+            args: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.settings.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Linux dependencies
+        if: matrix.settings.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and bundle
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "${{ github.ref_name }}"
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.settings.args }}
+
+  publish-release:
+    name: Finalize Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: always()
+    steps:
+      - name: Report status
+        run: |
+          echo "Build matrix finished with status: ${{ needs.build.result }}"
+          if [ "${{ needs.build.result }}" != "success" ]; then
+            echo "::warning::部分平台构建失败，请到 Actions 页面查看详情。"
+          fi
