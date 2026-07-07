@@ -8,6 +8,9 @@ hero:
   tagline: "打通本地文件与关系数据库的零 ETL 混合联邦执行。基于极致低延迟的“快速试错-纠偏环”，融合谷歌开源 OKF 标准，让 Agent 真正深入数据清洗、多步加工与业务记忆积累。"
   actions:
     - theme: brand
+      text: 下载 Lakemind
+      link: https://1860052934.share.123pan.cn/123pan/bSOzvd-fmBmh
+    - theme: alt
       text: 快速入门
       link: /guide/getting-started
     - theme: alt
@@ -22,15 +25,92 @@ hero:
   <p class="section-head-desc" style="max-width: 600px; margin: 8px auto 24px auto;">
     观看真实录制的运行视频，直观感受 LakeMind 如何作为您的本地智能助手，助您秒级完成数据探查、SQL 生成与图表渲染。
   </p>
-  <div class="video-container" style="max-width: 800px; margin: 0 auto; border-radius: 12px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 40px rgba(6, 182, 212, 0.04); background: #0b0f19;">
-    <div style="position: relative; padding-bottom: 56.25%; height: 0;">
-      <iframe 
-        src="https://www.youtube.com/embed/videoseries?list=PLZ14dE31D5Bc" 
-        title="LakeMind Demo Videos"
-        style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;" 
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
-        allowfullscreen>
-      </iframe>
+  
+  <!-- Bilibili 视频展示网格 -->
+  <div class="video-grid">
+    <!-- 视频卡片 1 -->
+    <div class="video-card">
+      <div class="video-iframe-wrapper">
+        <iframe 
+          src="//player.bilibili.com/player.html?bvid=BV14FMg6aESV&page=1&high_quality=1&as_wide=1" 
+          title="Lakemind：如何分析美加墨世界杯草根逆袭"
+          scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true">
+        </iframe>
+      </div>
+      <div class="video-info">
+        <h3 class="video-title">如何分析美加墨世界杯草根逆袭</h3>
+        <p class="video-desc">通过自然语言智能探查、跨源联邦查询，快速透视美加墨世界杯晋级与爆冷历史数据。</p>
+        <div class="video-action-link">
+          <a href="https://www.bilibili.com/video/BV14FMg6aESV/" target="_blank">在 Bilibili 打开 ↗</a>
+        </div>
+      </div>
+    </div>
+    <!-- 视频卡片 2 -->
+    <div class="video-card">
+      <div class="video-iframe-wrapper">
+        <iframe 
+          src="//player.bilibili.com/player.html?bvid=BV1skTp6tEAF&page=1&high_quality=1&as_wide=1" 
+          title="看Lakemind如何分析：哪位导演是越挫越勇最后终于成王"
+          scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true">
+        </iframe>
+      </div>
+      <div class="video-info">
+        <h3 class="video-title">哪位导演是越挫越勇最后终于成王</h3>
+        <p class="video-desc">用大白话下达分析指令，让 Agent 自动编写多步复杂 SQL、聚合导演历年作品评分与票房走向。</p>
+        <div class="video-action-link">
+          <a href="https://www.bilibili.com/video/BV1skTp6tEAF/" target="_blank">在 Bilibili 打开 ↗</a>
+        </div>
+      </div>
+    </div>
+    <!-- 视频卡片 3 -->
+    <div class="video-card">
+      <div class="video-iframe-wrapper">
+        <iframe 
+          src="//player.bilibili.com/player.html?bvid=BV18MTy6cEDv&page=1&high_quality=1&as_wide=1" 
+          title="Lakemind：欧洲足球数据库，各位置最好和最差球员对比"
+          scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true">
+        </iframe>
+      </div>
+      <div class="video-info">
+        <h3 class="video-title">欧洲足球数据库球员对比</h3>
+        <p class="video-desc">联动庞大的欧洲足球数据库，智能匹配位置指标，通过 Agent 极速找出评分最高与最具提升空间的球员。</p>
+        <div class="video-action-link">
+          <a href="https://www.bilibili.com/video/BV18MTy6cEDv/" target="_blank">在 Bilibili 打开 ↗</a>
+        </div>
+      </div>
+    </div>
+    <!-- 视频卡片 4 -->
+    <div class="video-card">
+      <div class="video-iframe-wrapper">
+        <iframe 
+          src="//player.bilibili.com/player.html?bvid=BV19XTz6REBp&page=1&high_quality=1&as_wide=1" 
+          title="Lakemind Agent 重构数据分析"
+          scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true">
+        </iframe>
+      </div>
+      <div class="video-info">
+        <h3 class="video-title">Lakemind Agent 重构数据分析</h3>
+        <p class="video-desc">深度解析 Lakemind Agent 如何改变传统分析范式，实现本地智能清洗、自我纠错与数据洞察。</p>
+        <div class="video-action-link">
+          <a href="https://www.bilibili.com/video/BV19XTz6REBp/" target="_blank">在 Bilibili 打开 ↗</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- YouTube 播放列表 (作为次要/备用展示) -->
+  <div class="youtube-playlist-section" style="margin-top: 36px; padding: 0 16px;">
+    <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 16px; color: var(--vp-c-text-1);">其他演示视频 (YouTube Playlist)</h3>
+    <div class="video-container" style="max-width: 800px; margin: 0 auto; border-radius: 12px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4); background: #0b0f19;">
+      <div style="position: relative; padding-bottom: 56.25%; height: 0;">
+        <iframe 
+          src="https://www.youtube.com/embed/videoseries?list=PLZ14dE31D5Bc" 
+          title="LakeMind Demo Videos"
+          style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;" 
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+          allowfullscreen>
+        </iframe>
+      </div>
     </div>
   </div>
 </div>
