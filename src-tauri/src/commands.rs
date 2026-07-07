@@ -1738,13 +1738,17 @@ fn hydrate_custom_object(
 fn load_extensions_if_needed(conn: &duckdb::Connection, entries: &[scan::ScanEntry]) {
     let needs_delta = entries.iter().any(|e| e.kind == SourceKind::Delta);
     if needs_delta {
-        let _ = conn.execute("INSTALL delta;", []);
-        let _ = conn.execute("LOAD delta;", []);
+        if conn.execute("LOAD delta;", []).is_err() {
+            let _ = conn.execute("INSTALL delta;", []);
+            let _ = conn.execute("LOAD delta;", []);
+        }
     }
     let needs_excel = entries.iter().any(|e| e.kind == SourceKind::Excel);
     if needs_excel {
-        let _ = conn.execute("INSTALL excel;", []);
-        let _ = conn.execute("LOAD excel;", []);
+        if conn.execute("LOAD excel;", []).is_err() {
+            let _ = conn.execute("INSTALL excel;", []);
+            let _ = conn.execute("LOAD excel;", []);
+        }
     }
 }
 
@@ -1966,10 +1970,12 @@ fn path_total_size(p: &Path) -> u64 {
 
 fn test_connection_impl(r: &db::DbConnectionRecord) -> Result<(), String> {
     let conn = duckdb::Connection::open_in_memory().map_err(|e| e.to_string())?;
-    let install_sql = format!("INSTALL {};", r.db_type);
     let load_sql = format!("LOAD {};", r.db_type);
-    let _ = conn.execute(&install_sql, []);
-    conn.execute(&load_sql, []).map_err(|e| format!("加载驱动失败: {e}"))?;
+    if conn.execute(&load_sql, []).is_err() {
+        let install_sql = format!("INSTALL {};", r.db_type);
+        let _ = conn.execute(&install_sql, []);
+        conn.execute(&load_sql, []).map_err(|e| format!("加载驱动失败: {e}"))?;
+    }
 
     let conn_name = "test_attached_db";
     let attach_sql = db::build_attach_sql(r, conn_name);
@@ -1981,10 +1987,12 @@ fn test_connection_impl(r: &db::DbConnectionRecord) -> Result<(), String> {
 
 fn list_connection_tables_impl(r: &db::DbConnectionRecord) -> Result<Vec<DbTableItem>, String> {
     let conn = duckdb::Connection::open_in_memory().map_err(|e| e.to_string())?;
-    let install_sql = format!("INSTALL {};", r.db_type);
     let load_sql = format!("LOAD {};", r.db_type);
-    let _ = conn.execute(&install_sql, []);
-    conn.execute(&load_sql, []).map_err(|e| format!("加载驱动失败: {e}"))?;
+    if conn.execute(&load_sql, []).is_err() {
+        let install_sql = format!("INSTALL {};", r.db_type);
+        let _ = conn.execute(&install_sql, []);
+        conn.execute(&load_sql, []).map_err(|e| format!("加载驱动失败: {e}"))?;
+    }
 
     let conn_name = "list_attached_db";
     let attach_sql = db::build_attach_sql(r, conn_name);
@@ -2296,10 +2304,12 @@ pub async fn register_database_table(
             .is_ok();
         
         if !catalog_exists {
-            let install_sql = format!("INSTALL {};", conn_record.db_type);
             let load_sql = format!("LOAD {};", conn_record.db_type);
-            let _ = guard.execute(&install_sql, []);
-            guard.execute(&load_sql, [])?;
+            if guard.execute(&load_sql, []).is_err() {
+                let install_sql = format!("INSTALL {};", conn_record.db_type);
+                let _ = guard.execute(&install_sql, []);
+                guard.execute(&load_sql, [])?;
+            }
             
             let attach_sql = db::build_attach_sql(&conn_record, &catalog_name);
             guard.execute(&attach_sql, [])?;

@@ -78,10 +78,24 @@ pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
             // data) and, defensively, a legacy top-level `lake_data/`. Descending
             // into either re-registers materialized parquet as new sources on
             // every sync (s_x → s_s_x → s_s_s_x → …).
+            // Also prune common development, build, and system directories to avoid
+            // walking huge file trees (e.g. node_modules, .git, target) which dramatically
+            // improves startup file scan performance.
             if e.file_type().is_dir() {
                 let name = e.file_name();
                 return name != std::ffi::OsStr::new(".lake")
-                    && name != std::ffi::OsStr::new("lake_data");
+                    && name != std::ffi::OsStr::new("lake_data")
+                    && name != std::ffi::OsStr::new(".git")
+                    && name != std::ffi::OsStr::new("node_modules")
+                    && name != std::ffi::OsStr::new("target")
+                    && name != std::ffi::OsStr::new(".venv")
+                    && name != std::ffi::OsStr::new("venv")
+                    && name != std::ffi::OsStr::new(".idea")
+                    && name != std::ffi::OsStr::new(".vscode")
+                    && name != std::ffi::OsStr::new(".cargo")
+                    && name != std::ffi::OsStr::new("dist")
+                    && name != std::ffi::OsStr::new("build")
+                    && name != std::ffi::OsStr::new(".github");
             }
             true
         })
@@ -363,7 +377,31 @@ fn hive_keys_of(dir: &Path, root: &Path) -> Vec<String> {
 /// Detect Hive keys by scanning the whole root tree for `key=value` segments.
 fn hive_keys_glob(root: &Path) -> Vec<String> {
     let mut keys = Vec::new();
-    for entry in WalkDir::new(root).follow_links(false).into_iter().filter_map(|e| e.ok()).take(MAX_FILES) {
+    for entry in WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.file_type().is_dir() {
+                let name = e.file_name();
+                return name != std::ffi::OsStr::new(".lake")
+                    && name != std::ffi::OsStr::new("lake_data")
+                    && name != std::ffi::OsStr::new(".git")
+                    && name != std::ffi::OsStr::new("node_modules")
+                    && name != std::ffi::OsStr::new("target")
+                    && name != std::ffi::OsStr::new(".venv")
+                    && name != std::ffi::OsStr::new("venv")
+                    && name != std::ffi::OsStr::new(".idea")
+                    && name != std::ffi::OsStr::new(".vscode")
+                    && name != std::ffi::OsStr::new(".cargo")
+                    && name != std::ffi::OsStr::new("dist")
+                    && name != std::ffi::OsStr::new("build")
+                    && name != std::ffi::OsStr::new(".github");
+            }
+            true
+        })
+        .filter_map(|e| e.ok())
+        .take(MAX_FILES)
+    {
         let strip = entry.path().strip_prefix(root).unwrap_or(entry.path());
         for comp in strip.components() {
             if let std::path::Component::Normal(s) = comp {

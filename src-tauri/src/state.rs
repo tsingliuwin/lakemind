@@ -88,18 +88,44 @@ impl AppState {
 
     pub fn new() -> AppResult<Self> {
         let ws = default_workspace_dir();
-        let conn = Self::open_workspace(&ws)?;
+        // Open a blank connection instantly. Sane PRAGMAs.
+        let conn = duckdb::Connection::open_in_memory()?;
+        let _ = conn.execute_batch(
+            "PRAGMA memory_limit='4GB';\n\
+             PRAGMA threads=1;",
+        );
         let ih = conn.interrupt_handle();
-        let _ = crate::db::attach_workspace_connections(&conn, "DefaultProject");
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
+
+        let conn_arc = Arc::new(Mutex::new(conn));
+        let state = Self {
+            conn: conn_arc.clone(),
             interrupt_handle: Arc::new(std::sync::Mutex::new(ih)),
             sources: Arc::new(Mutex::new(Vec::new())),
-            workspace_dir: Arc::new(Mutex::new(ws)),
+            workspace_dir: Arc::new(Mutex::new(ws.clone())),
             workspace_path: Arc::new(Mutex::new("DefaultProject".to_string())),
             pending_confirmations: Arc::new(Mutex::new(HashMap::new())),
             aborted_tasks: Arc::new(Mutex::new(HashSet::new())),
-        })
+        };
+
+        // Spawn a background task to asynchronously initialize the extensions and attach DefaultProject
+        let conn_clone = conn_arc;
+        let ws_clone = ws;
+        tauri::async_runtime::spawn(async move {
+            let res = tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
+                let guard = conn_clone.blocking_lock();
+                lake::ensure_ducklake_loaded(&guard)?;
+                lake::attach_workspace_lake(&guard, &ws_clone)?;
+                let _ = crate::db::attach_workspace_connections(&guard, "DefaultProject");
+                Ok(())
+            }).await;
+            if let Err(e) = res {
+                eprintln!("Background workspace initialization panicked: {e}");
+            } else if let Ok(Err(e)) = res {
+                eprintln!("Background workspace initialization failed: {e}");
+            }
+        });
+
+        Ok(state)
     }
 }
 

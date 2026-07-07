@@ -42,23 +42,26 @@ pub const DEFAULT_ZERO_COPY_THRESHOLD: u64 = 100 * 1024 * 1024; // 100 MB
 /// which we deliberately ignore. `LOAD` must succeed — every downstream lake
 /// operation depends on it, so its error is surfaced with a clear message.
 pub fn ensure_ducklake_loaded(conn: &Connection) -> AppResult<()> {
-    if let Err(e) = conn.execute("INSTALL ducklake;", []) {
-        // Already-installed extensions error on re-INSTALL; that's fine.
-        eprintln!("INSTALL ducklake (ignored if already installed): {e}");
+    // Try to LOAD ducklake first to avoid unnecessary INSTALL check/network requests.
+    if conn.execute("LOAD ducklake;", []).is_err() {
+        if let Err(e) = conn.execute("INSTALL ducklake;", []) {
+            eprintln!("INSTALL ducklake failed: {e}");
+        }
+        conn.execute("LOAD ducklake;", []).map_err(|e| {
+            AppError::new(format!(
+                "无法加载 ducklake 扩展。LakeMind 使用 DuckLake 存储表，首次运行需要联网下载该扩展。\n原始错误: {e}"
+            ))
+        })?;
     }
-    conn.execute("LOAD ducklake;", []).map_err(|e| {
-        AppError::new(format!(
-            "无法加载 ducklake 扩展。LakeMind 使用 DuckLake 存储表，首次运行需要联网下载该扩展。\n原始错误: {e}"
-        ))
-    })?;
-    // SQLite catalog backend: the default DuckDB catalog uses an ART index that
-    // corrupts on crash ("node without metadata in ARTOperator::Insert",
-    // duckdb #18505/#21468/#18190, unfixed even in 1.5). SQLite has no such index.
-    if let Err(e) = conn.execute("INSTALL sqlite;", []) {
-        eprintln!("INSTALL sqlite (ignored if already installed): {e}");
+
+    // Try to LOAD sqlite first to avoid unnecessary INSTALL check/network requests.
+    if conn.execute("LOAD sqlite;", []).is_err() {
+        if let Err(e) = conn.execute("INSTALL sqlite;", []) {
+            eprintln!("INSTALL sqlite failed: {e}");
+        }
+        conn.execute("LOAD sqlite;", [])
+            .map_err(|e| AppError::new(format!("无法加载 sqlite 扩展: {e}")))?;
     }
-    conn.execute("LOAD sqlite;", [])
-        .map_err(|e| AppError::new(format!("无法加载 sqlite 扩展: {e}")))?;
     Ok(())
 }
 

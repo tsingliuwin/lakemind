@@ -873,10 +873,12 @@ pub fn build_attach_sql(r: &DbConnectionRecord, conn_name: &str) -> String {
 /// ATTACH a single external database connection to a DuckDB session under the
 /// alias `db_{safe_name}`. Loads (INSTALL/LOAD) the driver first.
 pub fn attach_one(conn: &duckdb::Connection, r: &DbConnectionRecord) -> Result<(), String> {
-    let install_sql = format!("INSTALL {};", r.db_type);
     let load_sql = format!("LOAD {};", r.db_type);
-    let _ = conn.execute(&install_sql, []);
-    conn.execute(&load_sql, []).map_err(|e| format!("加载驱动失败: {e}"))?;
+    if conn.execute(&load_sql, []).is_err() {
+        let install_sql = format!("INSTALL {};", r.db_type);
+        let _ = conn.execute(&install_sql, []);
+        conn.execute(&load_sql, []).map_err(|e| format!("加载驱动失败: {e}"))?;
+    }
 
     let conn_name = workspace_attach_alias(&r.name);
     let attach_sql = build_attach_sql(r, &conn_name);
