@@ -78,8 +78,8 @@ jobs:
             # 小版本：只构建常用 Win (.exe), Mac ARM64 (.dmg)
             MATRIX='{"settings":[{"os":"windows-latest","args":"","target":"","level":"small"},{"os":"macos-latest","args":"--target aarch64-apple-darwin","target":"aarch64-apple-darwin","level":"small"}]}'
           elif [ "$LEVEL" = "medium" ]; then
-            # 中版本：Win (exe/msi), Mac ARM64 & Intel
-            MATRIX='{"settings":[{"os":"windows-latest","args":"","target":"","level":"medium"},{"os":"macos-latest","args":"--target aarch64-apple-darwin","target":"aarch64-apple-darwin","level":"medium"},{"os":"macos-latest","args":"--target x86_64-apple-darwin","target":"x86_64-apple-darwin","level":"medium"}]}'
+            # 中版本：只构建常用 Win (.exe), Mac ARM64 (.dmg)
+            MATRIX='{"settings":[{"os":"windows-latest","args":"","target":"","level":"medium"},{"os":"macos-latest","args":"--target aarch64-apple-darwin","target":"aarch64-apple-darwin","level":"medium"}]}'
           else
             # 大版本：全平台、全架构
             MATRIX='{"settings":[{"os":"windows-latest","args":"","target":"","level":"large"},{"os":"macos-latest","args":"--target aarch64-apple-darwin","target":"aarch64-apple-darwin","level":"large"},{"os":"macos-latest","args":"--target x86_64-apple-darwin","target":"x86_64-apple-darwin","level":"large"},{"os":"ubuntu-22.04","args":"","target":"","level":"large"}]}'
