@@ -76,13 +76,13 @@ jobs:
           # 根据级别生成 Matrix JSON
           if [ "$LEVEL" = "small" ]; then
             # 小版本：只构建常用 Win (.exe), Mac ARM64 (.dmg)
-            MATRIX='{"settings":[{"os":"windows-latest","args":"","level":"small"},{"os":"macos-latest","args":"--target aarch64-apple-darwin","level":"small"}]}'
+            MATRIX='{"settings":[{"os":"windows-latest","args":"","target":"","level":"small"},{"os":"macos-latest","args":"--target aarch64-apple-darwin","target":"aarch64-apple-darwin","level":"small"}]}'
           elif [ "$LEVEL" = "medium" ]; then
             # 中版本：Win (exe/msi), Mac ARM64 & Intel
-            MATRIX='{"settings":[{"os":"windows-latest","args":"","level":"medium"},{"os":"macos-latest","args":"--target aarch64-apple-darwin","level":"medium"},{"os":"macos-latest","args":"--target x86_64-apple-darwin","level":"medium"}]}'
+            MATRIX='{"settings":[{"os":"windows-latest","args":"","target":"","level":"medium"},{"os":"macos-latest","args":"--target aarch64-apple-darwin","target":"aarch64-apple-darwin","level":"medium"},{"os":"macos-latest","args":"--target x86_64-apple-darwin","target":"x86_64-apple-darwin","level":"medium"}]}'
           else
             # 大版本：全平台、全架构
-            MATRIX='{"settings":[{"os":"windows-latest","args":"","level":"large"},{"os":"macos-latest","args":"--target aarch64-apple-darwin","level":"large"},{"os":"macos-latest","args":"--target x86_64-apple-darwin","level":"large"},{"os":"ubuntu-22.04","args":"","level":"large"}]}'
+            MATRIX='{"settings":[{"os":"windows-latest","args":"","target":"","level":"large"},{"os":"macos-latest","args":"--target aarch64-apple-darwin","target":"aarch64-apple-darwin","level":"large"},{"os":"macos-latest","args":"--target x86_64-apple-darwin","target":"x86_64-apple-darwin","level":"large"},{"os":"ubuntu-22.04","args":"","target":"","level":"large"}]}'
           fi
           
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
@@ -104,7 +104,7 @@ jobs:
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.settings.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.settings.target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
