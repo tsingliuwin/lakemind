@@ -243,7 +243,9 @@ export default function LeftNav(props: {
       });
       props.onRegisterDatabaseTable?.(updatedSources);
     } catch (err) {
-      alert("注册外部表失败: " + err);
+      // The backend already returns a complete, self-contained Chinese message
+      // (e.g. privilege failure with GRANT hint), so surface it verbatim.
+      alert(err);
     }
   };
 

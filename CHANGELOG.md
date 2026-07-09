@@ -4,6 +4,16 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 修复
+
+#### 数据导入
+- 修复 GBK/GB18030 编码 CSV 导入后表头变成 `column00…columnNN` 且 0 行数据的问题（中文 Windows Excel/WPS 导出的 CSV 默认即此编码）。导入前新增字节级 UTF-8 探测：检测到非 UTF-8 时优先以 `encoding='zh_CN.gbk'` 读取，避免被 `ignore_errors` 策略"吞错"生成空表。同时收紧 CSV 候选校验，拒绝表头全为 DuckDB 自动占位列名的候选，作为兜底安全网。
+
+#### 外部数据库
+- 修复零拷贝 VIEW 方式注册的外部表（postgres/mysql）在连接账号无 SELECT 权限时"注册成功却查看数据报错"的问题。注册阶段新增 `SELECT ... LIMIT 1` 真实读取探针（强制触发表级权限校验），权限不足时立即返回清晰的中文提示并附带 GRANT SELECT 建议，而非让错误推迟到首次查看数据。
+
 ## [0.2.0] - 2026-07-06
 
 本版本聚焦于外部数据库集成、数据可视化、远程表物化、动态知识系统（OKF）与运行稳定性，是一个功能与可靠性全面升级的大版本。

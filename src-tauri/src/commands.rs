@@ -1567,6 +1567,24 @@ async fn switch_workspace_lake(state: &AppState, workspace_path: String, ws_dir:
     Ok(())
 }
 
+/// Turn a remote-table read error into a clear, actionable Chinese message.
+///
+/// Postgres/MySQL table-level privilege failures (`permission denied for table`)
+/// are matched by keyword and explained with the `GRANT SELECT` remedy; any other
+/// failure (timeout, network, missing table) keeps the raw engine message so it
+/// stays diagnosable. Used both for the pre-registration probe and as a safety
+/// net around the actual CREATE statements.
+fn friendly_remote_err(e: duckdb::Error, table: &str) -> String {
+    let msg = e.to_string();
+    if msg.to_lowercase().contains("permission denied") {
+        format!(
+            "无法读取远程表“{table}”：连接账号对该表没有 SELECT 权限（数据库返回 permission denied）。请用有授权的账号在数据库中执行 GRANT SELECT 后重试。\n\n原始错误：{msg}"
+        )
+    } else {
+        format!("读取远程表“{table}”失败: {msg}")
+    }
+}
+
 /// Decide how to store a scan entry.
 ///
 /// **Zero-copy VIEWs are not yet wired up** — every import is materialized into
@@ -2381,6 +2399,24 @@ pub async fn register_database_table(
         // network cost to copy, and a full table avoids sample-guard / pushdown
         // machinery (DuckDB has no `sqlite_query` function). Postgres/MySQL use
         // the sample-vs-view tradeoff driven by the estimated row count.
+        //
+        // Pre-registration read probe for remote tables: the zero-copy VIEW
+        // branch below (`CREATE VIEW ... AS SELECT * FROM <remote>`) is LAZY —
+        // it stores only the query definition and does NOT touch table data, so
+        // a table the connection account lacks SELECT privilege on would
+        // register silently and only fail on the first "view data" click. The
+        // row estimate (reltuples) and schema (DESCRIBE) read only catalog
+        // metadata, which does not require table-level SELECT either. A real
+        // `SELECT ... LIMIT 1` forces DuckDB to push down `COPY (...) TO
+        // STDOUT`, which provokes the table-level privilege check NOW, with a
+        // clear message instead of a silent success. (LIMIT 0 can be optimized
+        // to a metadata-only plan and thus may NOT trigger the check.)
+        let is_remote = conn_record.db_type == "postgres" || conn_record.db_type == "mysql";
+        if is_remote {
+            let probe_sql = format!("SELECT * FROM {} LIMIT 1", full_path);
+            guard.execute(&probe_sql, []).map_err(|e| AppError::new(friendly_remote_err(e, &table_name)))?;
+        }
+
         let do_sample = !is_sqlite && sample_enabled && (approx_rows > sample_limit as i64 || approx_rows <= 0);
         let do_full_materialize = is_sqlite;
         let (storage_kind, is_sampled, row_count_to_save) = if do_sample {
@@ -2391,7 +2427,7 @@ pub async fn register_database_table(
                 "CREATE TABLE \"{}\" AS SELECT * FROM {} LIMIT {};",
                 local_table_name, full_path, sample_limit
             );
-            guard.execute(&create_table_sql, [])?;
+            guard.execute(&create_table_sql, []).map_err(|e| AppError::new(friendly_remote_err(e, &table_name)))?;
 
             // Get actual number of rows imported locally
             let count_sql = format!("SELECT COUNT(*)::BIGINT FROM \"{}\";", local_table_name);
@@ -2417,7 +2453,10 @@ pub async fn register_database_table(
             let _ = guard.execute(&format!("DROP TABLE IF EXISTS \"{}\";", local_table_name), []);
 
             let create_view_sql = format!("CREATE VIEW \"{}\" AS SELECT * FROM {};", local_table_name, full_path);
-            guard.execute(&create_view_sql, [])?;
+            // CREATE VIEW is lazy, so a privilege failure surfaces only at query
+            // time — wrap it as a safety net (the pre-registration probe above is
+            // the primary guard).
+            guard.execute(&create_view_sql, []).map_err(|e| AppError::new(friendly_remote_err(e, &table_name)))?;
 
             ("view".to_string(), false, row_count_opt)
         };
