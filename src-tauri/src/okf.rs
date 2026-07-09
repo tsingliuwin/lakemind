@@ -417,12 +417,17 @@ pub fn write_okf_block(
 
 fn run_git_commit(okf_dir: &Path, file_path: &Path, commit_msg: &str) {
     use std::process::Command;
+    #[cfg(target_os = "windows")]
+    use std::os::windows::process::CommandExt;
+
     let git_dir = okf_dir.join(".git");
     if !git_dir.exists() {
-        let _ = Command::new("git")
-            .arg("init")
-            .current_dir(okf_dir)
-            .status();
+        let mut cmd = Command::new("git");
+        cmd.arg("init").current_dir(okf_dir);
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(0x08000000);
+        let _ = cmd.status();
+
         let _ = fs::write(okf_dir.join(".gitignore"), ".DS_Store\n");
         // 固定行尾为 LF，避免 Windows 上 autocrlf 导致的 CRLF 转换警告，
         // 同时保证跨平台提交的 OKF 文件行尾一致。
@@ -430,23 +435,25 @@ fn run_git_commit(okf_dir: &Path, file_path: &Path, commit_msg: &str) {
             okf_dir.join(".gitattributes"),
             "* text=auto eol=lf\n*.md text eol=lf\n",
         );
-        let _ = Command::new("git")
-            .args(["config", "core.autocrlf", "false"])
-            .current_dir(okf_dir)
-            .status();
+
+        let mut cmd = Command::new("git");
+        cmd.args(["config", "core.autocrlf", "false"]).current_dir(okf_dir);
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(0x08000000);
+        let _ = cmd.status();
     }
     if let Ok(rel_path) = file_path.strip_prefix(okf_dir) {
-        let _ = Command::new("git")
-            .arg("add")
-            .arg(rel_path)
-            .current_dir(okf_dir)
-            .status();
-        let _ = Command::new("git")
-            .arg("commit")
-            .arg("-m")
-            .arg(commit_msg)
-            .current_dir(okf_dir)
-            .status();
+        let mut cmd = Command::new("git");
+        cmd.arg("add").arg(rel_path).current_dir(okf_dir);
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(0x08000000);
+        let _ = cmd.status();
+
+        let mut cmd = Command::new("git");
+        cmd.arg("commit").arg("-m").arg(commit_msg).current_dir(okf_dir);
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(0x08000000);
+        let _ = cmd.status();
     }
 }
 
