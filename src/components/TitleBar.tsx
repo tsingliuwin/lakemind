@@ -1,6 +1,7 @@
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { SourceTable } from "../lib/types";
 import { t } from "../lib/i18n";
 import { logoSrc } from "../lib/theme";
@@ -22,6 +23,45 @@ export default function TitleBar(props: {
   const [aboutOpen, setAboutOpen] = createSignal(false);
   const [appVersion, setAppVersion] = createSignal("v0.2.1");
   const appWindow = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ ? getCurrentWindow() : null;
+
+  const isNewerVersion = (current: string, latest: string): boolean => {
+    const cleanCur = current.replace(/^v/, "");
+    const cleanLat = latest.replace(/^v/, "");
+    const curParts = cleanCur.split(".").map((x) => parseInt(x, 10) || 0);
+    const latParts = cleanLat.split(".").map((x) => parseInt(x, 10) || 0);
+    for (let i = 0; i < 3; i++) {
+      const c = curParts[i] ?? 0;
+      const l = latParts[i] ?? 0;
+      if (l > c) return true;
+      if (c > l) return false;
+    }
+    return false;
+  };
+
+  const handleCheckUpdates = async () => {
+    try {
+      const res = await fetch("https://api.github.com/repos/tsingliuwin/lakemind/releases/latest");
+      if (!res.ok) {
+        alert("检查更新失败，请稍后重试。");
+        return;
+      }
+      const data = await res.json();
+      const latestTag = data.tag_name;
+      if (latestTag && isNewerVersion(appVersion(), latestTag)) {
+        const changelog = data.body || "";
+        const url = data.html_url || "https://github.com/tsingliuwin/lakemind/releases";
+        const message = `发现新版本 ${latestTag}！\n\n更新说明：\n${changelog}\n\n是否立即前往下载？`;
+        if (confirm(message)) {
+          openUrl(url).catch(console.error);
+        }
+      } else {
+        alert(`您当前已是最新版本 (${appVersion()})。`);
+      }
+    } catch (e) {
+      console.error("Check updates error:", e);
+      alert("检查更新失败，请检查网络连接后重试。");
+    }
+  };
 
   let menuRef!: HTMLDivElement;
 
@@ -153,7 +193,7 @@ export default function TitleBar(props: {
 
             <button
               class="menu-item"
-              onClick={() => { setMenuOpen(false); alert(`${t("latestVersionMsg")} (${appVersion()})`); }}
+              onClick={() => { setMenuOpen(false); void handleCheckUpdates(); }}
             >
               <span class="menu-label">{t("checkUpdates")}</span>
               <span class="menu-shortcut"></span>

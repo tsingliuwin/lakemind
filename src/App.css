@@ -293,6 +293,17 @@ select:hover:not(:disabled) {
   color: var(--text-dim);
 }
 
+@keyframes slideDownFade {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* ZCode Dropdown Menu styling */
 .tb-dropdown-menu {
   position: absolute;
@@ -305,9 +316,10 @@ select:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 200px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  min-width: 150px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
   z-index: 1010;
+  animation: slideDownFade 0.12s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .menu-item {
