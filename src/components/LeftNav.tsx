@@ -1,5 +1,7 @@
-import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
+import { For, Show, createMemo, createSignal, createEffect, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { SourceTable, QueryTask, Workspace, FileItem, RegisterStatus, ImportProgress, DbConnection } from "../lib/types";
 import type { SettingsTab } from "./SettingsPage";
 import { t } from "../lib/i18n";
@@ -117,6 +119,48 @@ export default function LeftNav(props: {
   /** Delete a workspace file (cascades to its s_ table + downstreams). */
   onDeleteFile?: (path: string) => void;
 }) {
+  const [updateInfo, setUpdateInfo] = createSignal<{ version: string; changelog: string; url: string } | null>(null);
+
+  const isNewerVersion = (current: string, latest: string): boolean => {
+    const cleanCur = current.replace(/^v/, "");
+    const cleanLat = latest.replace(/^v/, "");
+    const curParts = cleanCur.split(".").map((x) => parseInt(x, 10) || 0);
+    const latParts = cleanLat.split(".").map((x) => parseInt(x, 10) || 0);
+    for (let i = 0; i < 3; i++) {
+      const c = curParts[i] ?? 0;
+      const l = latParts[i] ?? 0;
+      if (l > c) return true;
+      if (c > l) return false;
+    }
+    return false;
+  };
+
+  const checkForUpdates = async (currentVer: string) => {
+    try {
+      const res = await fetch("https://api.github.com/repos/tsingliuwin/lakemind/releases/latest");
+      if (!res.ok) return;
+      const data = await res.json();
+      const latestTag = data.tag_name;
+      if (latestTag && isNewerVersion(currentVer, latestTag)) {
+        setUpdateInfo({
+          version: latestTag,
+          changelog: data.body || "",
+          url: data.html_url || "https://github.com/tsingliuwin/lakemind/releases",
+        });
+      }
+    } catch (e) {
+      console.warn("Failed to check for updates:", e);
+    }
+  };
+
+  onMount(() => {
+    if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
+      getVersion().then((v) => {
+        checkForUpdates(v);
+      }).catch(console.error);
+    }
+  });
+
   // Group tables by their parent directory for a tree-like feel.
   // Two kinds of objects are collected into the flat (empty-path) group that
   // renders without a header:
@@ -472,6 +516,27 @@ export default function LeftNav(props: {
           </div>
         </Show>
         <div class="ln-nav-arrows" data-tauri-drag-region>
+          <Show when={updateInfo()}>
+            {(info) => (
+              <div class="ln-update-container">
+                <button 
+                  class="ln-arrow-btn update-btn"
+                  onClick={() => openUrl(info().url).catch(console.error)}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                </button>
+                <div class="ln-update-tooltip">
+                  <div class="tooltip-header">发现新版本 {info().version}</div>
+                  <div class="tooltip-body">{info().changelog}</div>
+                  <div class="tooltip-footer">点击图标下载更新</div>
+                </div>
+              </div>
+            )}
+          </Show>
           {/* Sidebar toggle button (always show in the sidebar) */}
           <button 
             class="ln-arrow-btn" 
