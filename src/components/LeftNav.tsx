@@ -137,15 +137,15 @@ export default function LeftNav(props: {
 
   const checkForUpdates = async (currentVer: string) => {
     try {
-      const res = await fetch("https://api.github.com/repos/tsingliuwin/lakemind/releases/latest");
+      const res = await fetch("https://lakemind.xi-n.com/update.json");
       if (!res.ok) return;
       const data = await res.json();
-      const latestTag = data.tag_name;
+      const latestTag = data.version;
       if (latestTag && isNewerVersion(currentVer, latestTag)) {
         setUpdateInfo({
           version: latestTag,
-          changelog: data.body || "",
-          url: data.html_url || "https://github.com/tsingliuwin/lakemind/releases",
+          changelog: data.changelog || "",
+          url: data.url || "https://lakemind.xi-n.com/",
         });
       }
     } catch (e) {

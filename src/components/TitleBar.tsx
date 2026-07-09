@@ -40,16 +40,16 @@ export default function TitleBar(props: {
 
   const handleCheckUpdates = async () => {
     try {
-      const res = await fetch("https://api.github.com/repos/tsingliuwin/lakemind/releases/latest");
+      const res = await fetch("https://lakemind.xi-n.com/update.json");
       if (!res.ok) {
         alert("检查更新失败，请稍后重试。");
         return;
       }
       const data = await res.json();
-      const latestTag = data.tag_name;
+      const latestTag = data.version;
       if (latestTag && isNewerVersion(appVersion(), latestTag)) {
-        const changelog = data.body || "";
-        const url = data.html_url || "https://github.com/tsingliuwin/lakemind/releases";
+        const changelog = data.changelog || "";
+        const url = data.url || "https://lakemind.xi-n.com/";
         const message = `发现新版本 ${latestTag}！\n\n更新说明：\n${changelog}\n\n是否立即前往下载？`;
         if (confirm(message)) {
           openUrl(url).catch(console.error);
