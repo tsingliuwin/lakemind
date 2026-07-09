@@ -2892,6 +2892,78 @@ button.lm-select-trigger:hover:not(:disabled) {
   box-shadow: 0 0 4px var(--text-danger);
 }
 
+/* Per-model connection-test status icon. A small colored dot with a shape per
+   state so it's legible without color (and consistent across the existing-
+   provider and new-provider model lists). */
+.mt-status {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+}
+.mt-status.idle {
+  background: transparent;
+  border: 1.5px solid var(--text-dim);
+}
+.mt-status.testing {
+  border: none;
+}
+.mt-status.success {
+  background: var(--accent-green);
+  color: #fff;
+}
+.mt-status.error {
+  background: var(--text-danger);
+  color: #fff;
+  cursor: help;
+}
+
+/* Hoverable error detail for a failed model test. Replaces the native `title`
+   tooltip (which overflowed the window on long messages). Wrapped to a max
+   width and anchored under the status icon. */
+.mt-error-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.mt-error-tip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 280px;
+  width: max-content;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--text-primary);
+  white-space: normal;
+  word-break: break-word;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  z-index: 50;
+  pointer-events: none;
+}
+/* Keep the tip inside the viewport on the right edge: if it would overflow,
+   anchor from the left instead of centering. */
+.mt-error-wrap.align-right .mt-error-tip {
+  left: 0;
+  transform: none;
+}
+.mt-error-wrap:hover .mt-error-tip,
+.mt-error-wrap:focus-within .mt-error-tip {
+  display: block;
+}
+
 .sp-add-btn {
   background: transparent;
   border: 1px dashed var(--border-strong);

@@ -86,6 +86,34 @@ export interface AppSettings {
   [key: string]: any;
 }
 
+// Per-model connection-test status icon — 4 states, one shape each so it's
+// legible without color. Used by both the existing-provider and new-provider
+// model lists. `errorTip` (when set on the error state) renders a styled,
+// width-constrained hover tooltip instead of the native `title` (which
+// overflowed the window on long messages).
+function ModelStatusIcon(props: {
+  status: "idle" | "testing" | "success" | "error" | undefined;
+  errorTip?: string;
+}) {
+  const s = props.status;
+  if (s === "testing") {
+    return <div class="mt-status testing loader-spinner" style="border-top-color: var(--text-primary); width: 12px; height: 12px; border-width: 1.5px;"></div>;
+  }
+  if (s === "success") {
+    return <span class="mt-status success" title="可用">✓</span>;
+  }
+  if (s === "error") {
+    return (
+      <span class="mt-error-wrap" tabIndex={0}>
+        <span class="mt-status error">✕</span>
+        {props.errorTip ? <span class="mt-error-tip">{props.errorTip}</span> : null}
+      </span>
+    );
+  }
+  // idle / undefined
+  return <span class="mt-status idle" title="未测试" />;
+}
+
 export default function SettingsPage(props: {
   workspacePath?: string;
   onClose: () => void;
@@ -1990,19 +2018,10 @@ export default function SettingsPage(props: {
                                     Out: {model.maxTokens || 4096}
                                   </span>
                                   {/* Per-model test status (new-provider form, in-memory). */}
-                                  {(() => {
-                                    const e = modelTests()[NEW_PROVIDER_TEST_KEY]?.[model.id];
-                                    if (e?.status === "testing") {
-                                      return <div class="loader-spinner" title="测试中" style="border-top-color: var(--text-primary); width: 11px; height: 11px; border-width: 1.5px;"></div>;
-                                    }
-                                    if (e?.status === "success") {
-                                      return <span title="可用" style="color: var(--text-success); font-size: 13px; font-weight: 600;">✓</span>;
-                                    }
-                                    if (e?.status === "error") {
-                                      return <span title={e.msg || "不可用"} style="color: var(--text-danger); font-size: 13px; font-weight: 600;">✕</span>;
-                                    }
-                                    return <span title="未测试" style="color: var(--text-dim); font-size: 13px;">·</span>;
-                                  })()}
+                                  <ModelStatusIcon
+                                    status={modelTests()[NEW_PROVIDER_TEST_KEY]?.[model.id]?.status}
+                                    errorTip={modelTests()[NEW_PROVIDER_TEST_KEY]?.[model.id]?.msg}
+                                  />
                                   <div class="model-actions-btns" style="display: flex; align-items: center; gap: 8px;">
                                     <button class="sp-action-icon-btn" title="编辑模型" onClick={() => handleOpenEditTempModel(model)}>
                                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
@@ -2051,70 +2070,50 @@ export default function SettingsPage(props: {
                           </span>
                         </Show>
 
-                        <Show when={!batchTesting(NEW_PROVIDER_TEST_KEY) && newProviderModels().some(m => modelTests()[NEW_PROVIDER_TEST_KEY]?.[m.id])}>
-                          {(() => {
-                            const entries = newProviderModels().map(m => modelTests()[NEW_PROVIDER_TEST_KEY]?.[m.id]).filter(Boolean);
-                            const ok = entries.filter(e => e.status === "success").length;
-                            const fail = entries.filter(e => e.status === "error").length;
-                            const allOk = ok > 0 && fail === 0;
-                            const firstErr = entries.find(e => e.status === "error");
-                            if (allOk) {
-                              return (
-                                <span style="font-size: 12.5px; color: var(--text-success); display: flex; align-items: center; gap: 4px; font-weight: 500;">
-                                  ✓ {t("modelTestSuccess")}（{ok}/{entries.length}）
-                                </span>
-                              );
-                            }
-                            return (
-                              <div style="display: flex; align-items: center; gap: 6px; max-width: 380px; min-width: 0;">
-                                <span
-                                  style="font-size: 12px; color: var(--text-danger); display: flex; align-items: center; gap: 4px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;"
-                                  title={firstErr?.msg}
-                                >
-                                  ✕ {ok}/{entries.length} {t("modelAvailable")}，{fail} {t("modelUnavailable")}
-                                </span>
-                                <button
-                                  title={copiedModelError() === NEW_PROVIDER_TEST_KEY ? "已复制" : "复制错误日志"}
-                                  style="border: none; background: transparent; color: var(--text-dim); cursor: pointer; padding: 2px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.15s ease; flex-shrink: 0;"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    const errs = newProviderModels()
-                                      .map(m => ({ id: m.id, e: modelTests()[NEW_PROVIDER_TEST_KEY]?.[m.id] }))
-                                      .filter(x => x.e?.status === "error" && x.e.msg)
-                                      .map(x => `${x.id}: ${x.e!.msg}`)
-                                      .join("\n");
-                                    try {
-                                      await navigator.clipboard.writeText(errs);
-                                      setCopiedModelError(NEW_PROVIDER_TEST_KEY);
-                                      setTimeout(() => setCopiedModelError(""), 1500);
-                                    } catch {}
-                                  }}
-                                  onMouseEnter={(e) => {
-                                    e.currentTarget.style.color = "var(--text-primary)";
-                                    e.currentTarget.style.background = "var(--bg-hover)";
-                                  }}
-                                  onMouseLeave={(e) => {
-                                    e.currentTarget.style.color = "var(--text-dim)";
-                                    e.currentTarget.style.background = "transparent";
-                                  }}
-                                >
-                                  <Show
-                                    when={copiedModelError() === NEW_PROVIDER_TEST_KEY}
-                                    fallback={
-                                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                      </svg>
-                                    }
-                                  >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                      <polyline points="20 6 9 17 4 12"></polyline>
-                                    </svg>
-                                  </Show>
-                                </button>
-                              </div>
-                            );
-                          })()}
+                        {/* After a finished batch: per-row icons already show each
+                            model's result, so only surface a copy-error button on
+                            failure (no redundant count text). */}
+                        <Show when={!batchTesting(NEW_PROVIDER_TEST_KEY) && newProviderModels().some(m => modelTests()[NEW_PROVIDER_TEST_KEY]?.[m.id]?.status === "error")}>
+                          <button
+                            title={copiedModelError() === NEW_PROVIDER_TEST_KEY ? t("copied") : t("copyErrorLog")}
+                            style="font-size: 12px; color: var(--text-dim); display: inline-flex; align-items: center; gap: 4px; cursor: pointer; padding: 2px 4px; border: none; background: transparent; border-radius: 4px; transition: all 0.15s ease;"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              const errs = newProviderModels()
+                                .map(m => ({ id: m.id, e: modelTests()[NEW_PROVIDER_TEST_KEY]?.[m.id] }))
+                                .filter(x => x.e?.status === "error" && x.e.msg)
+                                .map(x => `${x.id}: ${x.e!.msg}`)
+                                .join("\n");
+                              try {
+                                await navigator.clipboard.writeText(errs);
+                                setCopiedModelError(NEW_PROVIDER_TEST_KEY);
+                                setTimeout(() => setCopiedModelError(""), 1500);
+                              } catch {}
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.color = "var(--text-primary)";
+                              e.currentTarget.style.background = "var(--bg-hover)";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.color = "var(--text-dim)";
+                              e.currentTarget.style.background = "transparent";
+                            }}
+                          >
+                            <Show
+                              when={copiedModelError() === NEW_PROVIDER_TEST_KEY}
+                              fallback={
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                </svg>
+                              }
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                              </svg>
+                            </Show>
+                            {t("copyErrorLog")}
+                          </button>
                         </Show>
                       </div>
                     </div>
@@ -2289,19 +2288,10 @@ export default function SettingsPage(props: {
                                       Out: {model.maxTokens || 4096}
                                     </span>
                                     {/* Per-model test status (in-memory, this session). */}
-                                    {(() => {
-                                      const e = modelTests()[prov.id]?.[model.id];
-                                      if (e?.status === "testing") {
-                                        return <div class="loader-spinner" title="测试中" style="border-top-color: var(--text-primary); width: 11px; height: 11px; border-width: 1.5px;"></div>;
-                                      }
-                                      if (e?.status === "success") {
-                                        return <span title="可用" style="color: var(--text-success); font-size: 13px; font-weight: 600;">✓</span>;
-                                      }
-                                      if (e?.status === "error") {
-                                        return <span title={e.msg || "不可用"} style="color: var(--text-danger); font-size: 13px; font-weight: 600;">✕</span>;
-                                      }
-                                      return <span title="未测试" style="color: var(--text-dim); font-size: 13px;">·</span>;
-                                    })()}
+                                    <ModelStatusIcon
+                                      status={modelTests()[prov.id]?.[model.id]?.status}
+                                      errorTip={modelTests()[prov.id]?.[model.id]?.msg}
+                                    />
                                     <div class="model-actions-btns" style="display: flex; align-items: center; gap: 8px;">
 
                                       <button class="sp-action-icon-btn" title="编辑模型" onClick={() => handleOpenEditModel(model)}>
@@ -2349,72 +2339,52 @@ export default function SettingsPage(props: {
                               </span>
                             </Show>
 
-                            {/* Summary after a finished batch (not currently testing). */}
-                            <Show when={!batchTesting(prov.id) && (prov.models || []).some(m => modelTests()[prov.id]?.[m.id])}>
-                              {(() => {
-                                const entries = (prov.models || []).map(m => modelTests()[prov.id]?.[m.id]).filter(Boolean);
-                                const ok = entries.filter(e => e.status === "success").length;
-                                const fail = entries.filter(e => e.status === "error").length;
-                                const allOk = ok > 0 && fail === 0;
-                                const firstErr = entries.find(e => e.status === "error");
-                                if (allOk) {
-                                  return (
-                                    <span style="font-size: 12.5px; color: var(--text-success); display: flex; align-items: center; gap: 4px; font-weight: 500;">
-                                      ✓ {t("modelTestSuccess")}（{ok}/{entries.length}）
-                                    </span>
-                                  );
-                                }
-                                // Partial / all-failed: show counts + copy the first error.
-                                return (
-                                  <div style="display: flex; align-items: center; gap: 6px; max-width: 380px; min-width: 0;">
-                                    <span
-                                      style="font-size: 12px; color: var(--text-danger); display: flex; align-items: center; gap: 4px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;"
-                                      title={firstErr?.msg}
-                                    >
-                                      ✕ {ok}/{entries.length} {t("modelAvailable")}，{fail} {t("modelUnavailable")}
-                                    </span>
-                                    <button
-                                      title={copiedModelError() === prov.id ? "已复制" : "复制错误日志"}
-                                      style="border: none; background: transparent; color: var(--text-dim); cursor: pointer; padding: 2px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.15s ease; flex-shrink: 0;"
-                                      onClick={async (e) => {
-                                        e.stopPropagation();
-                                        const errs = (prov.models || [])
-                                          .map(m => ({ id: m.id, e: modelTests()[prov.id]?.[m.id] }))
-                                          .filter(x => x.e?.status === "error" && x.e.msg)
-                                          .map(x => `${x.id}: ${x.e!.msg}`)
-                                          .join("\n");
-                                        try {
-                                          await navigator.clipboard.writeText(errs);
-                                          setCopiedModelError(prov.id);
-                                          setTimeout(() => setCopiedModelError(""), 1500);
-                                        } catch {}
-                                      }}
-                                      onMouseEnter={(e) => {
-                                        e.currentTarget.style.color = "var(--text-primary)";
-                                        e.currentTarget.style.background = "var(--bg-hover)";
-                                      }}
-                                      onMouseLeave={(e) => {
-                                        e.currentTarget.style.color = "var(--text-dim)";
-                                        e.currentTarget.style.background = "transparent";
-                                      }}
-                                    >
-                                      <Show
-                                        when={copiedModelError() === prov.id}
-                                        fallback={
-                                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                          </svg>
-                                        }
-                                      >
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                          <polyline points="20 6 9 17 4 12"></polyline>
-                                        </svg>
-                                      </Show>
-                                    </button>
-                                  </div>
-                                );
-                              })()}
+                            {/* After a finished batch: the per-row icons already
+                                show each model's result, so we only surface a
+                                "copy error log" button when any model failed.
+                                No redundant count text next to the button. */}
+                            <Show when={!batchTesting(prov.id) && (prov.models || []).some(m => modelTests()[prov.id]?.[m.id]?.status === "error")}>
+                              <button
+                                class="ss-btn-text"
+                                title={copiedModelError() === prov.id ? t("copied") : t("copyErrorLog")}
+                                style="font-size: 12px; color: var(--text-dim); display: inline-flex; align-items: center; gap: 4px; cursor: pointer; padding: 2px 4px; border: none; background: transparent; border-radius: 4px; transition: all 0.15s ease;"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  const errs = (prov.models || [])
+                                    .map(m => ({ id: m.id, e: modelTests()[prov.id]?.[m.id] }))
+                                    .filter(x => x.e?.status === "error" && x.e.msg)
+                                    .map(x => `${x.id}: ${x.e!.msg}`)
+                                    .join("\n");
+                                  try {
+                                    await navigator.clipboard.writeText(errs);
+                                    setCopiedModelError(prov.id);
+                                    setTimeout(() => setCopiedModelError(""), 1500);
+                                  } catch {}
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.color = "var(--text-primary)";
+                                  e.currentTarget.style.background = "var(--bg-hover)";
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.color = "var(--text-dim)";
+                                  e.currentTarget.style.background = "transparent";
+                                }}
+                              >
+                                <Show
+                                  when={copiedModelError() === prov.id}
+                                  fallback={
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                    </svg>
+                                  }
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                  </svg>
+                                </Show>
+                                {t("copyErrorLog")}
+                              </button>
                             </Show>
                           </div>
                         </div>
