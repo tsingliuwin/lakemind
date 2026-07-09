@@ -2875,7 +2875,7 @@ button.lm-select-trigger:hover:not(:disabled) {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background-color: var(--text-dim);
+  background-color: var(--accent-amber);
   flex-shrink: 0;
 }
 
@@ -2884,17 +2884,17 @@ button.lm-select-trigger:hover:not(:disabled) {
   box-shadow: 0 0 4px var(--accent-green);
 }
 
-/* Provider connection-test states (only meaningful when NOT yet enabled — an
-   enabled provider always shows the green .active dot). Four distinct looks so
-   the user can tell at a glance whether a disabled provider is ready to turn on:
-     - untested   → grey hollow ring (.provider-dot default)
-     - test pass  → blue solid (.test-success)  ← "validated, can enable now"
-     - test fail  → red solid (.test-fail)      ← "fix config / retest"
-   Green is reserved for .active (enabled), so test-success uses blue to avoid
-   the confusion of "green dot but not enabled". */
+/* Provider connection-test states follow the traffic-light mental model so the
+   colors are intuitive without a legend:
+     - untested      → amber (.provider-dot default below)  "caution, unverified"
+     - test pass     → green (.test-success)  "go — validated, ready to enable"
+     - test fail     → red   (.test-fail)      "stop — fix config / retest"
+   An ENABLED provider always shows the green .active dot (persists across
+   restarts). Green means "good to go" in every case (enabled OR validated),
+   matching a traffic light. */
 .provider-dot.test-success {
-  background-color: var(--accent-blue);
-  box-shadow: 0 0 4px var(--accent-blue);
+  background-color: var(--accent-green);
+  box-shadow: 0 0 4px var(--accent-green);
 }
 
 .provider-dot.test-fail {
