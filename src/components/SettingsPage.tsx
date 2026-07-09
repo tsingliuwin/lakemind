@@ -91,27 +91,42 @@ export interface AppSettings {
 // model lists. `errorTip` (when set on the error state) renders a styled,
 // width-constrained hover tooltip instead of the native `title` (which
 // overflowed the window on long messages).
+//
+// IMPORTANT (SolidJS): the function body runs ONCE; do NOT destructure props
+// into a local const (e.g. `const s = props.status`) — that freezes the value
+// and the icon never updates. Branch via <Show> so each `props.status` read
+// happens inside a reactive boundary.
 function ModelStatusIcon(props: {
   status: "idle" | "testing" | "success" | "error" | undefined;
   errorTip?: string;
 }) {
-  const s = props.status;
-  if (s === "testing") {
-    return <div class="mt-status testing loader-spinner" style="border-top-color: var(--text-primary); width: 12px; height: 12px; border-width: 1.5px;"></div>;
-  }
-  if (s === "success") {
-    return <span class="mt-status success" title="可用">✓</span>;
-  }
-  if (s === "error") {
-    return (
-      <span class="mt-error-wrap" tabIndex={0}>
-        <span class="mt-status error">✕</span>
-        {props.errorTip ? <span class="mt-error-tip">{props.errorTip}</span> : null}
-      </span>
-    );
-  }
-  // idle / undefined
-  return <span class="mt-status idle" title="未测试" />;
+  return (
+    <Show
+      when={props.status === "testing"}
+      fallback={
+        <Show
+          when={props.status === "success"}
+          fallback={
+            <Show
+              when={props.status === "error"}
+              fallback={<span class="mt-status idle" title="未测试" />}
+            >
+              <span class="mt-error-wrap" tabIndex={0}>
+                <span class="mt-status error">✕</span>
+                <Show when={props.errorTip}>
+                  <span class="mt-error-tip">{props.errorTip}</span>
+                </Show>
+              </span>
+            </Show>
+          }
+        >
+          <span class="mt-status success" title="可用">✓</span>
+        </Show>
+      }
+    >
+      <div class="mt-status testing loader-spinner" style="border-top-color: var(--text-primary); width: 12px; height: 12px; border-width: 1.5px;"></div>
+    </Show>
+  );
 }
 
 export default function SettingsPage(props: {
