@@ -2919,12 +2919,12 @@ button.lm-select-trigger:hover:not(:disabled) {
   border: none;
 }
 .mt-status.success {
-  background: var(--accent-green);
-  color: #fff;
+  background: var(--accent-green-bg);
+  color: var(--accent-green);
 }
 .mt-status.error {
-  background: var(--text-danger);
-  color: #fff;
+  background: var(--accent-red-bg);
+  color: var(--accent-red);
   cursor: help;
 }
 
