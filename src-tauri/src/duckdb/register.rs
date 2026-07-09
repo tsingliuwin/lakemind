@@ -12,10 +12,12 @@
 
 use duckdb::Connection;
 
+use std::io::Read;
+
 use crate::duckdb::scan::ScanEntry;
 use crate::duckdb::schema;
 use crate::error::AppResult;
-use crate::model::{SourceKind, SourceTable, StorageKind};
+use crate::model::{ColumnInfo, SourceKind, SourceTable, StorageKind};
 
 /// Create the table/view for one scan entry and return a fully-populated
 /// `SourceTable` (with columns + row-count already filled in).
@@ -110,23 +112,79 @@ fn try_create_and_validate(conn: &Connection, table_name: &str, source_fn: &str)
         return Ok(false);
     }
 
-    // Check columns
-    let check_sql = format!("SELECT count(column_name) FROM (DESCRIBE \"{table_name}\")");
-    let col_count = conn.query_row(&check_sql, [], |row| row.get::<_, i64>(0)).unwrap_or(0);
+    // Check columns via the real column names (not just a count). DuckDB
+    // sometimes "succeeds" at reading a malformed/encoding-mismatched CSV by
+    // silently dropping every row and auto-naming the columns `column00`,
+    // `column01`, … — yielding an empty table with > 1 columns. The bare
+    // `col_count > 1` check used to accept that, masking the real failure.
+    let columns = schema::describe_view(conn, table_name).unwrap_or_default();
+    let col_count = columns.len() as i64;
     println!("Succeeded! Column count: {}", col_count);
-    if col_count > 1 {
-        Ok(true)
-    } else {
+    if col_count <= 1 {
         println!("Rejected (column count <= 1)");
         let _ = conn.execute(&drop_sql, []);
-        Ok(false)
+        return Ok(false);
     }
+    // Reject candidates whose headers are entirely DuckDB auto-generated
+    // positional names (`columnNN`). This is the signature of an
+    // encoding-mismatch / dropped-header read; later strategies (e.g. GBK)
+    // stand a real chance once this one stops short-circuiting.
+    if looks_auto_generated(&columns) {
+        println!("Rejected (all headers are auto-generated columnNN)");
+        let _ = conn.execute(&drop_sql, []);
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+/// True when every non-empty column name matches DuckDB's auto-generated
+/// positional placeholder `column<digits>` (e.g. `column00`). A table whose
+/// headers are ALL such names was almost certainly produced by a read that
+/// failed to parse the header row (encoding mismatch, malformed CSV) rather
+/// than a genuine headerless file — genuine files still get materialized via
+/// the unconditional final fallback.
+fn looks_auto_generated(columns: &[ColumnInfo]) -> bool {
+    let mut named = 0usize;
+    let mut auto = 0usize;
+    for col in columns {
+        let name = col.name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        named += 1;
+        if is_auto_column_name(name) {
+            auto += 1;
+        }
+    }
+    // Need at least one header to judge, and every header must be auto-generated.
+    named > 0 && auto == named
+}
+
+/// Matches DuckDB's positional placeholder pattern `column` followed by one or
+/// more digits, e.g. `column00`, `column13`.
+fn is_auto_column_name(name: &str) -> bool {
+    let rest = match name.strip_prefix("column") {
+        Some(r) => r,
+        None => return false,
+    };
+    !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
 }
 
 /// Multi-strategy CSV loader
 fn load_csv_as_table(conn: &Connection, table_name: &str, file_path: &str, _progress: Option<&dyn Fn(&str)>) -> AppResult<()> {
     let drop_sql = format!("DROP TABLE IF EXISTS \"{}\";", table_name);
     let escaped_path = file_path.replace('\'', "''");
+
+    // Strategy 0: detect non-UTF-8 encoding up front (the common Chinese
+    // Windows case is GBK/GB18030 CSVs exported by Excel/WPS, which have no
+    // BOM). DuckDB's `read_csv_auto` decodes as UTF-8 by default, and with
+    // `ignore_errors=true` (used by the strategies below) it *silently* drops
+    // every GBK byte and auto-names columns `column00…`, producing an empty
+    // table that still has > 1 columns — so it would wrongly "succeed".
+    // Trying GBK first avoids that trap entirely for the dominant case.
+    if looks_like_non_utf8(file_path) && try_gbk_strategies(conn, table_name, &escaped_path)? {
+        return Ok(());
+    }
 
     // Strategy 1: sniff_csv pre-check
     let sniff_sql = format!("SELECT count(column_name) FROM (DESCRIBE (SELECT * FROM sniff_csv('{escaped_path}')))");
@@ -157,16 +215,8 @@ fn load_csv_as_table(conn: &Connection, table_name: &str, file_path: &str, _prog
     }
 
     // Strategy 4: Try GBK encoding if standard encodings fail
-    let _ = conn.execute("INSTALL encodings;", []);
-    if conn.execute("LOAD encodings;", []).is_ok() {
-        let gbk_source = format!("read_csv_auto('{escaped_path}', header = true, encoding = 'zh_CN.gbk')");
-        if try_create_and_validate(conn, table_name, &gbk_source)? {
-            return Ok(());
-        }
-        let gbk_robust = format!("read_csv_auto('{escaped_path}', header = true, encoding = 'zh_CN.gbk', ignore_errors=true, null_padding=true)");
-        if try_create_and_validate(conn, table_name, &gbk_robust)? {
-            return Ok(());
-        }
+    if try_gbk_strategies(conn, table_name, &escaped_path)? {
+        return Ok(());
     }
 
     // Fallback: accept best-effort full scan
@@ -174,6 +224,56 @@ fn load_csv_as_table(conn: &Connection, table_name: &str, file_path: &str, _prog
     let create_sql = format!("CREATE TABLE \"{table_name}\" AS SELECT * FROM {full_scan};");
     conn.execute(&create_sql, [])?;
     Ok(())
+}
+
+/// Try loading a CSV as GBK via DuckDB's `encodings` extension. Returns true if
+/// any candidate produced a valid (non-auto-generated-header) table. Loads the
+/// extension on demand; a missing extension simply yields false.
+fn try_gbk_strategies(conn: &Connection, table_name: &str, escaped_path: &str) -> AppResult<bool> {
+    let _ = conn.execute("INSTALL encodings;", []);
+    if conn.execute("LOAD encodings;", []).is_err() {
+        return Ok(false);
+    }
+    // all_varchar avoids type-sniffing failures on mixed GBK numeric/text cols.
+    let gbk_source = format!(
+        "read_csv_auto('{escaped_path}', header = true, encoding = 'zh_CN.gbk', all_varchar = true)"
+    );
+    if try_create_and_validate(conn, table_name, &gbk_source)? {
+        return Ok(true);
+    }
+    let gbk_robust = format!(
+        "read_csv_auto('{escaped_path}', header = true, encoding = 'zh_CN.gbk', all_varchar = true, ignore_errors=true, null_padding=true)"
+    );
+    if try_create_and_validate(conn, table_name, &gbk_robust)? {
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+/// Sniff the file's first few KB and return true only when it contains bytes
+/// that are *definitively* invalid UTF-8 — i.e. a hard decoding error
+/// (`error_len().is_some()`), not just a truncated multi-byte sequence at the
+/// chunk boundary (which we ignore to avoid false positives on a clean cut).
+/// This is intentionally conservative: valid UTF-8 and pure-ASCII files always
+/// return false. A positive result means the file is almost certainly GBK /
+/// GB18030 (the Chinese Windows Excel/WPS export default).
+fn looks_like_non_utf8(path: &str) -> bool {
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut buf = [0u8; 8192];
+    let n = match file.read(&mut buf) {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+    match std::str::from_utf8(&buf[..n]) {
+        Ok(_) => false,
+        // error_len == None means the only problem is a (possibly) incomplete
+        // multi-byte sequence at the very end of our chunk — inconclusive, so
+        // don't claim non-UTF-8.
+        Err(e) => e.error_len().is_some(),
+    }
 }
 
 struct IngestionCandidate {
@@ -433,4 +533,173 @@ fn create_xlsx_table_pruned(conn: &Connection, table_name: &str, source_fn: &str
     // 6. Clean up the temp table.
     cleanup_tmp();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::ColumnInfo;
+
+    fn col(name: &str) -> ColumnInfo {
+        ColumnInfo {
+            name: name.to_string(),
+            r#type: "VARCHAR".to_string(),
+            null: true,
+        }
+    }
+
+    #[test]
+    fn auto_column_name_matches_duckdb_pattern() {
+        assert!(is_auto_column_name("column0"));
+        assert!(is_auto_column_name("column00"));
+        assert!(is_auto_column_name("column13"));
+    }
+
+    #[test]
+    fn auto_column_name_rejects_non_patterns() {
+        assert!(!is_auto_column_name("column")); // no digits
+        assert!(!is_auto_column_name("columnA"));
+        assert!(!is_auto_column_name("订单编号"));
+        assert!(!is_auto_column_name("uuid"));
+        assert!(!is_auto_column_name("Column0")); // case-sensitive
+    }
+
+    #[test]
+    fn looks_auto_generated_true_for_all_positional() {
+        let cols = vec![col("column00"), col("column01"), col("column13")];
+        assert!(looks_auto_generated(&cols));
+    }
+
+    #[test]
+    fn looks_auto_generated_false_for_real_headers() {
+        let cols = vec![col("uuid"), col("订单编号"), col("支付时间")];
+        assert!(!looks_auto_generated(&cols));
+    }
+
+    #[test]
+    fn looks_auto_generated_false_for_mixed_names() {
+        // Even one real header means it wasn't a fully-failed read.
+        let cols = vec![col("column00"), col("订单编号"), col("column02")];
+        assert!(!looks_auto_generated(&cols));
+    }
+
+    #[test]
+    fn looks_auto_generated_false_for_empty_input() {
+        assert!(!looks_auto_generated(&[]));
+    }
+
+    #[test]
+    fn looks_like_non_utf8_detects_gbk() {
+        // "订单" in GBK = b6 a9 b5 a5. Write a temp file and sniff it.
+        let dir = tempfile_dir();
+        let path = dir.join("gbk.csv");
+        // uuid,<订单 in GBK>\n1,<bytes>\n
+        let bytes: Vec<u8> = vec![
+            b'u', b'u', b'i', b'd', b',', 0xb6, 0xa9, 0xb5, 0xa5, b'\n', b'1', b',', 0xb6,
+            0xa9, 0xb5, 0xa5, b'\n',
+        ];
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(looks_like_non_utf8(path.to_str().unwrap()));
+    }
+
+    #[test]
+    fn looks_like_non_utf8_false_for_utf8_and_ascii() {
+        let dir = tempfile_dir();
+        let utf8 = dir.join("utf8.csv");
+        std::fs::write(&utf8, "uuid,订单编号\n1,abc\n").unwrap();
+        assert!(!looks_like_non_utf8(utf8.to_str().unwrap()));
+
+        let ascii = dir.join("ascii.csv");
+        std::fs::write(&ascii, "uuid,name\n1,abc\n").unwrap();
+        assert!(!looks_like_non_utf8(ascii.to_str().unwrap()));
+    }
+
+    /// Minimal temp dir for these tests (the codebase has no `tempfile` crate).
+    /// Auto-cleans on drop.
+    struct TmpDir(std::path::PathBuf);
+    impl Drop for TmpDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    impl TmpDir {
+        fn join(&self, name: &str) -> std::path::PathBuf {
+            self.0.join(name)
+        }
+    }
+    fn tempfile_dir() -> TmpDir {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "lakemind_reg_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        TmpDir(p)
+    }
+
+    /// End-to-end: a GBK-encoded CSV must ingest with its real Chinese headers,
+    /// not DuckDB's auto-generated `columnNN` placeholders. Requires the DuckDB
+    /// `encodings` extension; skipped gracefully when it isn't loadable.
+    #[test]
+    fn gbk_csv_ingests_with_real_headers() {
+        let dir = tempfile_dir();
+        let path = dir.join("gmv.csv");
+        // Header: uuid,订单编号,支付金额  then 2 data rows, all GBK-encoded.
+        let header = b"uuid";
+        let row = |fields: &[&[u8]]| -> Vec<u8> {
+            let mut v = Vec::new();
+            for (i, f) in fields.iter().enumerate() {
+                if i > 0 {
+                    v.push(b',');
+                }
+                v.extend_from_slice(f);
+            }
+            v.push(b'\n');
+            v
+        };
+        // 订单编号 GBK = b6 a9 b5 a5 b1 e0 ba c5 ; 支付金额 GBK = d6 a7 b8 b6 bd f0 b6 ee
+        let dingdan: &[u8] = &[0xb6, 0xa9, 0xb5, 0xa5, 0xb1, 0xe0, 0xba, 0xc5];
+        let zhifu: &[u8] = &[0xd6, 0xa7, 0xb8, 0xb6, 0xbd, 0xf0, 0xb6, 0xee];
+        let mut content = row(&[header, dingdan, zhifu]);
+        content.extend(row(&[b"1", dingdan, b"100"]));
+        content.extend(row(&[b"2", dingdan, b"200"]));
+        std::fs::write(&path, &content).unwrap();
+
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        // Gate on extension availability so `cargo test` stays green everywhere.
+        if conn.execute("LOAD encodings;", []).is_err() {
+            eprintln!("[skip] DuckDB `encodings` extension unavailable — GBK test skipped");
+            return;
+        }
+        let entry = ScanEntry {
+            label: "gmv".into(),
+            view_name: "s_gmv".into(),
+            kind: SourceKind::Csv,
+            path: path.to_string_lossy().to_string(),
+            scan_path: path.to_string_lossy().to_string(),
+            partition_keys: Vec::new(),
+            file_size: content.len() as u64,
+            mtime: 0,
+        };
+        let table = register(&conn, &entry, StorageKind::Table, None).unwrap();
+        let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
+        assert_ne!(
+            names,
+            vec!["column00", "column01", "column02"],
+            "headers must not be auto-generated"
+        );
+        assert!(
+            names.contains(&"订单编号") || names.iter().any(|n| n.contains("订")),
+            "expected the real GBK-decoded header, got {names:?}"
+        );
+        // And the data rows must have survived (not silently dropped).
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM \"s_gmv\"", [], |r| r.get(0))
+            .unwrap();
+        assert!(count >= 2, "expected >=2 rows, got {count}");
+    }
 }
