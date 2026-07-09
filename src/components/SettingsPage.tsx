@@ -2093,12 +2093,6 @@ export default function SettingsPage(props: {
                           </Show>
                           {batchTesting(NEW_PROVIDER_TEST_KEY) ? t("modelTesting") : t("modelTestBtn")}
                         </button>
-
-                        <Show when={batchTesting(NEW_PROVIDER_TEST_KEY) && batchProgress()?.providerKey === NEW_PROVIDER_TEST_KEY}>
-                          <span style="font-size: 12.5px; color: var(--text-dim); display: flex; align-items: center; gap: 4px;">
-                            {t("modelTesting")} {batchProgress()!.current}/{batchProgress()!.total}：{batchProgress()!.modelId}
-                          </span>
-                        </Show>
                       </div>
                     </div>
 
@@ -2316,12 +2310,6 @@ export default function SettingsPage(props: {
                               {batchTesting(prov.id) ? t("modelTesting") : t("modelTestBtn")}
                             </button>
 
-                            {/* In-progress: "测试中 2/5：model-id" */}
-                            <Show when={batchTesting(prov.id) && batchProgress()?.providerKey === prov.id}>
-                              <span style="font-size: 12.5px; color: var(--text-dim); display: flex; align-items: center; gap: 4px;">
-                                {t("modelTesting")} {batchProgress()!.current}/{batchProgress()!.total}：{batchProgress()!.modelId}
-                              </span>
-                            </Show>
                           </div>
                         </div>
                       </div>
