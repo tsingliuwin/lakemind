@@ -411,6 +411,22 @@ export default function SettingsPage(props: {
     }));
   };
 
+  // Discard all test results for a provider. Called when the user edits any
+  // config field (endpoint / apiKey / apiFormat / model list) — a stale result
+  // from the old config would be misleading (e.g. a red ✕ after switching the
+  // API format that actually fixes it). Also clears the batch-in-progress flag.
+  const clearModelTests = (providerKey: string) => {
+    setModelTests((prev) => {
+      if (!(providerKey in prev)) return prev;
+      const next = { ...prev };
+      delete next[providerKey];
+      return next;
+    });
+    if (batchProgress()?.providerKey === providerKey) {
+      setBatchProgress(null);
+    }
+  };
+
   // Whether every model under a provider is currently validated as available
   // (all in "success" state). Used by the enable gate and the dot indicator.
   // Returns false if there are no models or any model isn't a success.
@@ -684,6 +700,11 @@ export default function SettingsPage(props: {
   };
 
   const updateProviderProperty = (providerId: string, property: keyof ModelProvider, value: any) => {
+    // Editing any field that affects connectivity invalidates prior test
+    // results — reset them so stale ✓/✕ icons don't mislead.
+    if (property === "endpoint" || property === "apiKey" || property === "apiFormat" || property === "models") {
+      clearModelTests(providerId);
+    }
     const updatedProviders = (settings().providers || []).map(p => {
       if (p.id === providerId) {
         return { ...p, [property]: value };
@@ -830,6 +851,7 @@ export default function SettingsPage(props: {
           return m;
         }));
       }
+      clearModelTests(NEW_PROVIDER_TEST_KEY);
       setIsModelModalOpen(false);
       return;
     }
@@ -1994,7 +2016,7 @@ export default function SettingsPage(props: {
                           class="sp-input" 
                           placeholder="https://api.example.com/v1"
                           value={newProviderEndpoint()}
-                          onInput={(e) => setNewProviderEndpoint(e.currentTarget.value)}
+                          onInput={(e) => { setNewProviderEndpoint(e.currentTarget.value); clearModelTests(NEW_PROVIDER_TEST_KEY); }}
                         />
                       </div>
 
@@ -2006,7 +2028,7 @@ export default function SettingsPage(props: {
                             class="sp-input password-input" 
                             placeholder="输入 API Key"
                             value={newProviderApiKey()}
-                            onInput={(e) => setNewProviderApiKey(e.currentTarget.value)}
+                            onInput={(e) => { setNewProviderApiKey(e.currentTarget.value); clearModelTests(NEW_PROVIDER_TEST_KEY); }}
                           />
                           <button class="sp-pwd-toggle" onClick={() => setShowApiKey(!showApiKey())}>
                             {showApiKey() ? (
@@ -2028,7 +2050,7 @@ export default function SettingsPage(props: {
                         <span class="sp-form-label">API 格式</span>
                           <Select
                             value={newProviderFormat()}
-                            onChange={(v) => setNewProviderFormat(v as any)}
+                            onChange={(v) => { setNewProviderFormat(v as any); clearModelTests(NEW_PROVIDER_TEST_KEY); }}
                             width="100%"
                             options={[
                               { value: "anthropic", label: "Anthropic Messages (/v1/messages)" },
@@ -2064,7 +2086,7 @@ export default function SettingsPage(props: {
                                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                                       </svg>
                                     </button>
-                                    <button class="sp-action-icon-btn" title="删除模型" onClick={() => setNewProviderModels(newProviderModels().filter(m => m.id !== model.id))}>
+                                    <button class="sp-action-icon-btn" title="删除模型" onClick={() => { setNewProviderModels(newProviderModels().filter(m => m.id !== model.id)); clearModelTests(NEW_PROVIDER_TEST_KEY); }}>
                                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
                                         <polyline points="3 6 5 6 21 6"></polyline>
                                         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
