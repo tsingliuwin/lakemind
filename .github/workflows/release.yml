@@ -1,32 +1,101 @@
 name: Release
 
-# 推送 v* 形式的 tag 时触发，构建三平台安装包并发布到 GitHub Releases。
-# 例如：git tag v0.2.0 && git push origin v0.2.0
+# 触发条件：推送 v* 形式的 tag，或者手动运行工作流
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      release_level:
+        description: 'Release level (small, medium, large)'
+        required: true
+        default: 'small'
+        type: choice
+        options:
+          - small
+          - medium
+          - large
+      tag_name:
+        description: 'Release tag name (e.g. v0.2.1)'
+        required: true
+        default: 'v0.2.1'
 
 # 顶层权限：仅写 contents 以发布 Release。
 permissions:
   contents: write
 
 jobs:
+  # 准备阶段：解析版本并动态生成构建矩阵
+  prepare:
+    name: Prepare Build Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      tag_name: ${{ steps.set-matrix.outputs.tag_name }}
+    steps:
+      - name: Determine Release Settings
+        id: set-matrix
+        run: |
+          # 确定 tag 名称
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_NAME="${{ github.event.inputs.tag_name }}"
+          else
+            TAG_NAME="${{ github.ref_name }}"
+          fi
+          
+          # 确定发布级别
+          LEVEL=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            LEVEL="${{ github.event.inputs.release_level }}"
+          else
+            # 从 tag 解析（例如 v0.2.1 -> 0.2.1）
+            VERSION="${TAG_NAME#v}"
+            if [[ "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+              MAJOR="${BASH_REMATCH[1]}"
+              MINOR="${BASH_REMATCH[2]}"
+              PATCH="${BASH_REMATCH[3]}"
+            else
+              # 无法解析时的降级策略
+              MAJOR=0
+              MINOR=0
+              PATCH=1
+            fi
+            
+            if [ "$PATCH" -ne "0" ]; then
+              LEVEL="small"
+            elif [ "$MINOR" -ne "0" ] || [ "$MAJOR" -eq "0" ]; then
+              LEVEL="medium"
+            else
+              LEVEL="large"
+            fi
+          fi
+          
+          echo "Level: $LEVEL for Tag: $TAG_NAME"
+          
+          # 根据级别生成 Matrix JSON
+          if [ "$LEVEL" = "small" ]; then
+            # 小版本：只构建常用 Win (.exe), Mac ARM64 (.dmg)
+            MATRIX='{"settings":[{"os":"windows-latest","args":"","level":"small"},{"os":"macos-latest","args":"--target aarch64-apple-darwin","level":"small"}]}'
+          elif [ "$LEVEL" = "medium" ]; then
+            # 中版本：Win (exe/msi), Mac ARM64 & Intel
+            MATRIX='{"settings":[{"os":"windows-latest","args":"","level":"medium"},{"os":"macos-latest","args":"--target aarch64-apple-darwin","level":"medium"},{"os":"macos-latest","args":"--target x86_64-apple-darwin","level":"medium"}]}'
+          else
+            # 大版本：全平台、全架构
+            MATRIX='{"settings":[{"os":"windows-latest","args":"","level":"large"},{"os":"macos-latest","args":"--target aarch64-apple-darwin","level":"large"},{"os":"macos-latest","args":"--target x86_64-apple-darwin","level":"large"},{"os":"ubuntu-22.04","args":"","level":"large"}]}'
+          fi
+          
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+
+  # 构建阶段：使用动态矩阵进行编译打包
   build:
-    name: Build (${{ matrix.settings.os }})
+    name: Build (${{ matrix.settings.os }} ${{ matrix.settings.args }})
+    needs: prepare
     runs-on: ${{ matrix.settings.os }}
     strategy:
       fail-fast: false
-      matrix:
-        settings:
-          - os: windows-latest
-            args: ""
-          - os: macos-latest
-            args: "--target aarch64-apple-darwin"
-          - os: macos-latest
-            args: "--target x86_64-apple-darwin"
-          - os: ubuntu-22.04
-            args: ""
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
 
     steps:
       - name: Checkout
@@ -48,6 +117,22 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Optimize Tauri config for small release
+        if: matrix.settings.level == 'small'
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = 'src-tauri/tauri.conf.json';
+            const conf = JSON.parse(fs.readFileSync(path, 'utf8'));
+            if (process.platform === 'win32') {
+              conf.bundle.targets = ['nsis'];
+            } else if (process.platform === 'darwin') {
+              conf.bundle.targets = ['dmg'];
+            }
+            fs.writeFileSync(path, JSON.stringify(conf, null, 2), 'utf8');
+            console.log('Tauri config optimized for small release:', conf.bundle.targets);
+          "
+
       - name: Install Linux dependencies
         if: matrix.settings.os == 'ubuntu-22.04'
         run: |
@@ -62,8 +147,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "${{ github.ref_name }}"
+          tagName: ${{ needs.prepare.outputs.tag_name }}
+          releaseName: "${{ needs.prepare.outputs.tag_name }}"
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.settings.args }}
@@ -71,7 +156,7 @@ jobs:
   publish-release:
     name: Finalize Release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [prepare, build]
     if: always()
     steps:
       - name: Report status
