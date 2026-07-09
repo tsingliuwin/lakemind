@@ -2915,9 +2915,10 @@ button.lm-select-trigger:hover:not(:disabled) {
   background: transparent;
   border: 1.5px solid var(--text-dim);
 }
-.mt-status.testing {
-  border: none;
-}
+/* Note: .mt-status.testing intentionally has NO rule of its own. The testing
+   state renders <div class="mt-status testing loader-spinner">, and the spinner
+   animation relies on the .loader-spinner borders — a `border: none` here would
+   erase it (that was the bug: the spinner was invisible during testing). */
 .mt-status.success {
   background: var(--accent-green-bg);
   color: var(--accent-green);

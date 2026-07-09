@@ -140,7 +140,7 @@ function ModelStatusIcon(props: {
         </Show>
       }
     >
-      <div class="mt-status testing loader-spinner" style="border-top-color: var(--text-primary); width: 12px; height: 12px; border-width: 1.5px;"></div>
+      <div class="loader-spinner" style="border-top-color: var(--text-primary); width: 12px; height: 12px; border-width: 1.5px; flex-shrink: 0;"></div>
     </Show>
   );
 }
