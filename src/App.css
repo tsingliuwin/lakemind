@@ -600,6 +600,78 @@ select:hover:not(:disabled) {
   border-color: var(--accent-blue-hover);
 }
 
+.modal-btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  border-radius: var(--radius-pill);
+  padding: 6px 20px;
+  font-weight: 500;
+}
+
+.modal-btn-secondary:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Auto-updater progress + notes (inside the shared modal-card) */
+.update-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.update-notes-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.update-notes-body {
+  margin: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-faint);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.update-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0 4px;
+}
+
+.update-progress-bar {
+  width: 100%;
+  height: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.update-progress-fill {
+  height: 100%;
+  background: var(--accent-blue);
+  border-radius: var(--radius-pill);
+  transition: width 0.2s ease;
+}
+
+.update-progress-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
 .icon-btn {
   width: 28px;
   height: 28px;

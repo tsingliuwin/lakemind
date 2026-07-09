@@ -1,10 +1,16 @@
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import type { SourceTable } from "../lib/types";
 import { t } from "../lib/i18n";
 import { logoSrc } from "../lib/theme";
+import {
+  checkForUpdate,
+  downloadAndInstallUpdate,
+  relaunchApp,
+  openDownloadPage,
+  type DownloadProgress,
+} from "../lib/updater";
 
 const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
@@ -24,43 +30,69 @@ export default function TitleBar(props: {
   const [appVersion, setAppVersion] = createSignal("v0.3.0");
   const appWindow = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ ? getCurrentWindow() : null;
 
-  const isNewerVersion = (current: string, latest: string): boolean => {
-    const cleanCur = current.replace(/^v/, "");
-    const cleanLat = latest.replace(/^v/, "");
-    const curParts = cleanCur.split(".").map((x) => parseInt(x, 10) || 0);
-    const latParts = cleanLat.split(".").map((x) => parseInt(x, 10) || 0);
-    for (let i = 0; i < 3; i++) {
-      const c = curParts[i] ?? 0;
-      const l = latParts[i] ?? 0;
-      if (l > c) return true;
-      if (c > l) return false;
-    }
-    return false;
+  // --- Auto-updater UI state ---
+  type UpdateStage = "checking" | "available" | "downloading" | "downloaded" | "error";
+  const [updateStage, setUpdateStage] = createSignal<UpdateStage | null>(null);
+  const [updateVersion, setUpdateVersion] = createSignal("");
+  const [updateNotes, setUpdateNotes] = createSignal("");
+  const [updateProgress, setUpdateProgress] = createSignal<DownloadProgress>({ fraction: 0, human: "" });
+  const [updateErrorMsg, setUpdateErrorMsg] = createSignal("");
+
+  const closeUpdateModal = () => {
+    setUpdateStage(null);
+    setUpdateVersion("");
+    setUpdateNotes("");
+    setUpdateProgress({ fraction: 0, human: "" });
+    setUpdateErrorMsg("");
   };
 
   const handleCheckUpdates = async () => {
+    setUpdateStage("checking");
     try {
-      const res = await fetch("https://lakemind.xi-n.com/update.json");
-      if (!res.ok) {
-        alert("检查更新失败，请稍后重试。");
+      const info = await checkForUpdate();
+      if (!info) {
+        alert(t("latestVersionMsg") + ` (${appVersion()})`);
+        closeUpdateModal();
         return;
       }
-      const data = await res.json();
-      const latestTag = data.version;
-      if (latestTag && isNewerVersion(appVersion(), latestTag)) {
-        const changelog = data.changelog || "";
-        const url = data.url || "https://lakemind.xi-n.com/";
-        const message = `发现新版本 ${latestTag}！\n\n更新说明：\n${changelog}\n\n是否立即前往下载？`;
-        if (confirm(message)) {
-          openUrl(url).catch(console.error);
-        }
-      } else {
-        alert(`您当前已是最新版本 (${appVersion()})。`);
-      }
+      setUpdateVersion(info.version);
+      setUpdateNotes(info.notes);
+      setUpdateStage("available");
     } catch (e) {
       console.error("Check updates error:", e);
-      alert("检查更新失败，请检查网络连接后重试。");
+      alert(t("updateCheckingFailed"));
+      closeUpdateModal();
     }
+  };
+
+  // Download → install (without relaunch); UI then offers the relaunch button.
+  const handleDownloadInstall = async () => {
+    setUpdateStage("downloading");
+    try {
+      await downloadAndInstallUpdate((p) => setUpdateProgress(p));
+      setUpdateStage("downloaded");
+    } catch (e) {
+      console.error("Download/install error:", e);
+      setUpdateErrorMsg(e instanceof Error ? e.message : String(e));
+      setUpdateStage("error");
+    }
+  };
+
+  const handleRelaunch = async () => {
+    setUpdateStage("downloading"); // reuse as a "busy" state for the button
+    try {
+      await relaunchApp();
+    } catch (e) {
+      console.error("Relaunch error:", e);
+      setUpdateStage("error");
+      setUpdateErrorMsg(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // Fallback: open the download page in the browser.
+  const handleFallbackDownload = () => {
+    openDownloadPage().catch(console.error);
+    closeUpdateModal();
   };
 
   let menuRef!: HTMLDivElement;
@@ -262,6 +294,81 @@ export default function TitleBar(props: {
                 <div class="spec-row"><span>{t("aboutArch")}</span><strong>SolidJS Grid Layout</strong></div>
               </div>
             </div>
+          </div>
+        </div>
+      </Show>
+
+      {/* Update Modal */}
+      <Show when={updateStage()}>
+        <div class="modal-overlay" onClick={() => updateStage() !== "downloading" && closeUpdateModal()}>
+          <div class="modal-card" style="width: 420px;" onClick={(e) => e.stopPropagation()}>
+            <div class="modal-header">
+              <h3>
+                {updateStage() === "checking" && t("updateChecking")}
+                {updateStage() === "available" && `${t("updateAvailable")} v${updateVersion()}`}
+                {updateStage() === "downloading" && t("downloadingUpdate")}
+                {updateStage() === "downloaded" && t("updateDownloaded")}
+                {updateStage() === "error" && t("updateFailed")}
+              </h3>
+              <Show when={updateStage() !== "downloading"}>
+                <button class="modal-close" onClick={closeUpdateModal}>✕</button>
+              </Show>
+            </div>
+            <div class="modal-body" style="align-items: stretch; text-align: left;">
+              <Show when={updateStage() === "checking"}>
+                <div style="display: flex; align-items: center; gap: 10px; padding: 12px 0;">
+                  <span class="import-banner__spinner" />
+                  <span style="color: var(--text-secondary); font-size: 13px;">{t("updateChecking")}</span>
+                </div>
+              </Show>
+
+              <Show when={updateStage() === "available"}>
+                <div class="update-notes">
+                  <div class="update-notes-label">{t("updateNotes")} (v{updateVersion()})</div>
+                  <pre class="update-notes-body">{updateNotes()}</pre>
+                </div>
+              </Show>
+
+              <Show when={updateStage() === "downloading"}>
+                <div class="update-progress-wrap">
+                  <div class="update-progress-bar">
+                    <div
+                      class="update-progress-fill"
+                      style={`width: ${Math.round(updateProgress().fraction * 100)}%`}
+                    />
+                  </div>
+                  <div class="update-progress-meta">
+                    {Math.round(updateProgress().fraction * 100)}% {updateProgress().human && `· ${updateProgress().human}`}
+                  </div>
+                </div>
+              </Show>
+
+              <Show when={updateStage() === "downloaded"}>
+                <p style="margin: 8px 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6;">
+                  {t("updateDownloaded")}
+                </p>
+              </Show>
+
+              <Show when={updateStage() === "error"}>
+                <p style="margin: 8px 0; color: var(--text-danger, #e06c75); font-size: 13px; line-height: 1.6;">
+                  {updateErrorMsg()}
+                </p>
+              </Show>
+            </div>
+            <Show when={updateStage() === "available" || updateStage() === "downloaded" || updateStage() === "error"}>
+              <div class="modal-footer">
+                <Show when={updateStage() === "error"}>
+                  <button class="modal-btn-secondary" onClick={handleFallbackDownload}>{t("goDownload")}</button>
+                </Show>
+                <Show when={updateStage() === "available"}>
+                  <button class="modal-btn-secondary" onClick={closeUpdateModal}>{t("close")}</button>
+                  <button class="modal-btn-primary" onClick={() => void handleDownloadInstall()}>{t("downloadingUpdate")}</button>
+                </Show>
+                <Show when={updateStage() === "downloaded"}>
+                  <button class="modal-btn-primary" onClick={() => void handleRelaunch()}>{t("installAndRelaunch")}</button>
+                </Show>
+              </div>
+            </Show>
           </div>
         </div>
       </Show>

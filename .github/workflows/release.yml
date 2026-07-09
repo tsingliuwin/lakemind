@@ -146,11 +146,15 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Sign the updater packages so the in-app updater can verify them.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ needs.prepare.outputs.tag_name }}
           releaseName: "${{ needs.prepare.outputs.tag_name }}"
           releaseDraft: false
           prerelease: false
+          updaterJsonPreferNsis: true
           args: ${{ matrix.settings.args }}
 
       - name: Upload to Cloudflare R2
@@ -162,7 +166,7 @@ jobs:
         run: |
           TAG_NAME="${{ needs.prepare.outputs.tag_name }}"
           
-          # 定位生成的文件
+          # 定位生成的文件（安装包 + 对应的 .sig 更新签名）
           if [ "${{ matrix.settings.os }}" = "windows-latest" ]; then
             FILE_PATH=$(find src-tauri/target/release/bundle/nsis -name "*.exe" | head -n 1)
             FILE_NAME="lakemind-${TAG_NAME}.exe"
@@ -190,6 +194,27 @@ jobs:
             exit 1
           fi
 
+          # 上传 .sig 签名文件（与安装包同名加 .sig 后缀，由 createUpdaterArtifacts 生成）
+          SIG_PATH="${FILE_PATH}.sig"
+          SIG_NAME="${FILE_NAME}.sig"
+          if [ -f "$SIG_PATH" ]; then
+            echo "Uploading $SIG_PATH to R2 as $SIG_NAME..."
+            aws s3 cp "$SIG_PATH" "s3://lakemind/$SIG_NAME" --endpoint-url ${{ secrets.R2_ENDPOINT }}
+            # 同时复制到统一位置，供 artifact 上传使用
+            mkdir -p updater-sigs
+            cp "$SIG_PATH" "updater-sigs/$SIG_NAME"
+          else
+            echo "::warning::Signature file not found at $SIG_PATH — updater artifacts may be disabled."
+          fi
+
+      - name: Upload updater signature artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-sig-${{ matrix.settings.os }}-${{ matrix.settings.target }}
+          path: updater-sigs/*.sig
+          if-no-files-found: warn
+          retention-days: 7
+
   # 自动化更新官网配置并提交
   update-website-config:
     name: Update Website Config
@@ -206,24 +231,82 @@ jobs:
         with:
           node-version: 20
 
-      - name: Update update.json
+      - name: Download updater signatures
+        uses: actions/download-artifact@v4
+        with:
+          path: updater-sigs
+          pattern: updater-sig-*
+          merge-multiple: true
+
+      - name: Generate latest.json + update update.json
+        env:
+          TAG_NAME: ${{ needs.prepare.outputs.tag_name }}
         run: |
-          node -e "
-            const fs = require('fs');
-            const path = 'site/docs/public/update.json';
-            const tag = '${{ needs.prepare.outputs.tag_name }}';
-            const conf = JSON.parse(fs.readFileSync(path, 'utf8'));
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const tag = process.env.TAG_NAME;
+            const version = tag.replace(/^v/, "");
+            const downloadBase = "https://upload.xi-n.com";
+
+            // 文件名 → Tauri 平台键的映射
+            const FILE_TO_PLATFORM = [
+              { re: /-arm64\.dmg\.sig$/, platform: "darwin-aarch64", file: `lakemind-${tag}-arm64.dmg` },
+              { re: /-x64\.dmg\.sig$/, platform: "darwin-x86_64", file: `lakemind-${tag}-x64.dmg` },
+              { re: /\.exe\.sig$/, platform: "windows-x86_64", file: `lakemind-${tag}.exe` },
+              { re: /\.AppImage\.sig$/, platform: "linux-x86_64", file: `lakemind-${tag}.AppImage` },
+            ];
+
+            // 收集所有下载到的 .sig 文件
+            const sigDir = "updater-sigs";
+            const platforms = {};
+            if (fs.existsSync(sigDir)) {
+              for (const dir of fs.readdirSync(sigDir)) {
+                const full = path.join(sigDir, dir);
+                // merge-multiple 后 .sig 可能直接在 updater-sigs 下，也可能在子目录
+                const entries = fs.statSync(full).isDirectory() ? fs.readdirSync(full).map(f => path.join(full, f)) : [full];
+                for (const f of entries) {
+                  if (!f.endsWith(".sig")) continue;
+                  const name = path.basename(f);
+                  const match = FILE_TO_PLATFORM.find(m => m.re.test(name));
+                  if (!match) { console.warn("No platform mapping for", name); continue; }
+                  const signature = fs.readFileSync(f, "utf8").trim();
+                  platforms[match.platform] = { signature, url: `${downloadBase}/${match.file}` };
+                  console.log("Mapped", name, "->", match.platform);
+                }
+              }
+            }
+
+            // changelog：沿用现有 update.json 里的内容，保持手填更新说明的连续性
+            let notes = "";
+            const updateJsonPath = "site/docs/public/update.json";
+            if (fs.existsSync(updateJsonPath)) {
+              try { notes = JSON.parse(fs.readFileSync(updateJsonPath, "utf8")).changelog || ""; } catch {}
+            }
+
+            // 生成 Tauri 标准 latest.json
+            const latest = {
+              version,
+              notes,
+              pubdate: new Date().toISOString(),
+              platforms,
+            };
+            fs.writeFileSync("site/docs/public/latest.json", JSON.stringify(latest, null, 2) + "\n", "utf8");
+            console.log("Wrote latest.json with platforms:", Object.keys(platforms).join(", "));
+
+            // 同步更新旧版 update.json（向后兼容 v0.3.0 旧客户端）
+            const conf = fs.existsSync(updateJsonPath) ? JSON.parse(fs.readFileSync(updateJsonPath, "utf8")) : {};
             conf.version = tag;
-            conf.url = 'https://lakemind.xi-n.com/';
-            fs.writeFileSync(path, JSON.stringify(conf, null, 2), 'utf8');
-            console.log('Successfully updated update.json to version', tag);
-          "
+            conf.url = downloadBase + "/";
+            fs.writeFileSync(updateJsonPath, JSON.stringify(conf, null, 2) + "\n", "utf8");
+            console.log("Updated update.json to version", tag);
+          '
 
       - name: Commit and Push Changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add site/docs/public/update.json
+          git add site/docs/public/latest.json site/docs/public/update.json
           git commit -m "chore: release ${{ needs.prepare.outputs.tag_name }} [skip ci]" || echo "No changes to commit"
           git push origin main
 

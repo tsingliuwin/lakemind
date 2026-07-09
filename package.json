@@ -1,6 +1,6 @@
 {
   "name": "lakemind",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "",
   "type": "module",
   "scripts": {
@@ -21,6 +21,8 @@
     "@tanstack/solid-virtual": "^3.13.28",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "@uiw/codemirror-theme-github": "^4.25.10",
     "echarts": "^6.1.0",
     "marked": "^18.0.5",

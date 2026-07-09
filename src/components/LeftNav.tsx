@@ -6,6 +6,7 @@ import type { SourceTable, QueryTask, Workspace, FileItem, RegisterStatus, Impor
 import type { SettingsTab } from "./SettingsPage";
 import { t } from "../lib/i18n";
 import { logoSrc } from "../lib/theme";
+import { checkForUpdate } from "../lib/updater";
 
 const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
@@ -121,31 +122,16 @@ export default function LeftNav(props: {
 }) {
   const [updateInfo, setUpdateInfo] = createSignal<{ version: string; changelog: string; url: string } | null>(null);
 
-  const isNewerVersion = (current: string, latest: string): boolean => {
-    const cleanCur = current.replace(/^v/, "");
-    const cleanLat = latest.replace(/^v/, "");
-    const curParts = cleanCur.split(".").map((x) => parseInt(x, 10) || 0);
-    const latParts = cleanLat.split(".").map((x) => parseInt(x, 10) || 0);
-    for (let i = 0; i < 3; i++) {
-      const c = curParts[i] ?? 0;
-      const l = latParts[i] ?? 0;
-      if (l > c) return true;
-      if (c > l) return false;
-    }
-    return false;
-  };
-
-  const checkForUpdates = async (currentVer: string) => {
+  // Passive background check using the shared updater module (handles both the
+  // plugin path and the legacy manifest fallback).
+  const checkForUpdates = async () => {
     try {
-      const res = await fetch("https://lakemind.xi-n.com/update.json");
-      if (!res.ok) return;
-      const data = await res.json();
-      const latestTag = data.version;
-      if (latestTag && isNewerVersion(currentVer, latestTag)) {
+      const info = await checkForUpdate();
+      if (info) {
         setUpdateInfo({
-          version: latestTag,
-          changelog: data.changelog || "",
-          url: data.url || "https://lakemind.xi-n.com/",
+          version: info.version,
+          changelog: info.notes,
+          url: "https://lakemind.xi-n.com/",
         });
       }
     } catch (e) {
@@ -155,9 +141,7 @@ export default function LeftNav(props: {
 
   onMount(() => {
     if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
-      getVersion().then((v) => {
-        checkForUpdates(v);
-      }).catch(console.error);
+      getVersion().then(() => checkForUpdates()).catch(console.error);
     }
   });
 

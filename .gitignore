@@ -6,3 +6,6 @@ dist
 cache
 dist
 .zcode
+# Tauri updater signing keys (never commit)
+*.key
+*.pem
