@@ -26,10 +26,12 @@
   --accent-blue-hover: #60a5fa;
   --accent-green: #10b981;   /* Active/Success indicator */
   --accent-green-bg: #112d24;
+  --text-success: #10b981;   /* Alias of --accent-green for success text/indicators */
   --accent-amber: #f59e0b;   /* Truncation / Warning indicators */
   --accent-amber-bg: #2d2211;
   --accent-red: #ef4444;     /* Error states */
   --accent-red-bg: #2d1616;
+  --text-danger: #ef4444;    /* Alias of --accent-red for error text/indicators */
   --accent-violet: #8b5cf6;  /* Special data type badges */
 
   /* --- CodeMirror selection highlight (must stay readable over --bg-surface) --- */
@@ -99,10 +101,12 @@
   --accent-blue-hover: #1d4ed8;
   --accent-green: #059669;
   --accent-green-bg: #ecfdf5;
+  --text-success: #059669;
   --accent-amber: #d97706;
   --accent-amber-bg: #fef3c7;
   --accent-red: #dc2626;
   --accent-red-bg: #fee2e2;
+  --text-danger: #dc2626;
 
   /* --- CodeMirror selection highlight (readable on white) --- */
   --cm-selection-bg: rgba(37, 99, 235, 0.16);
