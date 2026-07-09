@@ -77,7 +77,7 @@ const translations: Record<Language, Record<string, string>> = {
     aboutEnv: "运行环境",
     aboutArch: "界面架构",
     settingsM1Placeholder: "设置面板将在 M4 上线。M1 目前是纯算力客户端。",
-    latestVersionMsg: "已是最新版本 M1 (v0.1.0)",
+    latestVersionMsg: "当前已是最新版本",
     // Settings Page
     backToWorkspace: "返回工作区",
     settingsGeneral: "常规",
@@ -242,7 +242,7 @@ const translations: Record<Language, Record<string, string>> = {
     aboutEnv: "Environment",
     aboutArch: "UI Framework",
     settingsM1Placeholder: "Settings panel will release in M4. M1 is currently a pure-compute local client.",
-    latestVersionMsg: "Already at the latest version M1 (v0.1.0)",
+    latestVersionMsg: "Already at the latest version",
     // Settings Page
     backToWorkspace: "Back to Workspace",
     settingsGeneral: "General",

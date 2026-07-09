@@ -1,5 +1,6 @@
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
 import type { SourceTable } from "../lib/types";
 import { t } from "../lib/i18n";
 import { logoSrc } from "../lib/theme";
@@ -19,6 +20,7 @@ export default function TitleBar(props: {
 }) {
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [aboutOpen, setAboutOpen] = createSignal(false);
+  const [appVersion, setAppVersion] = createSignal("v0.2.1");
   const appWindow = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ ? getCurrentWindow() : null;
 
   let menuRef!: HTMLDivElement;
@@ -32,6 +34,9 @@ export default function TitleBar(props: {
 
   onMount(() => {
     document.addEventListener("mousedown", handleClickOutside);
+    if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
+      getVersion().then((v) => setAppVersion(`v${v}`)).catch(console.error);
+    }
     onCleanup(() => {
       document.removeEventListener("mousedown", handleClickOutside);
     });
@@ -148,7 +153,7 @@ export default function TitleBar(props: {
 
             <button
               class="menu-item"
-              onClick={() => { setMenuOpen(false); alert(t("latestVersionMsg")); }}
+              onClick={() => { setMenuOpen(false); alert(`${t("latestVersionMsg")} (${appVersion()})`); }}
             >
               <span class="menu-label">{t("checkUpdates")}</span>
               <span class="menu-shortcut"></span>
@@ -211,7 +216,7 @@ export default function TitleBar(props: {
               <h4>{t("aboutCore")}</h4>
               <p class="about-desc">{t("aboutDesc")}</p>
               <div class="about-specs">
-                <div class="spec-row"><span>{t("aboutVersion")}</span><strong>v0.1.0</strong></div>
+                <div class="spec-row"><span>{t("aboutVersion")}</span><strong>{appVersion()}</strong></div>
                 <div class="spec-row"><span>{t("aboutKernel")}</span><strong>DuckDB v1.10.5</strong></div>
                 <div class="spec-row"><span>{t("aboutEnv")}</span><strong>Tauri Webview Backend</strong></div>
                 <div class="spec-row"><span>{t("aboutArch")}</span><strong>SolidJS Grid Layout</strong></div>
