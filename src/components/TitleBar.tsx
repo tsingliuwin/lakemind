@@ -217,7 +217,7 @@ export default function TitleBar(props: {
               <p class="about-desc">{t("aboutDesc")}</p>
               <div class="about-specs">
                 <div class="spec-row"><span>{t("aboutVersion")}</span><strong>{appVersion()}</strong></div>
-                <div class="spec-row"><span>{t("aboutKernel")}</span><strong>DuckDB v1.10.5</strong></div>
+                <div class="spec-row"><span>{t("aboutKernel")}</span><strong>DuckDB v1.5.4</strong></div>
                 <div class="spec-row"><span>{t("aboutEnv")}</span><strong>Tauri Webview Backend</strong></div>
                 <div class="spec-row"><span>{t("aboutArch")}</span><strong>SolidJS Grid Layout</strong></div>
               </div>
