@@ -143,11 +143,15 @@ export default function SettingsPage(props: {
   const [editingConn, setEditingConn] = createSignal<DbConnection | null>(null);
   const [testStatus, setTestStatus] = createSignal<{ status: "idle" | "testing" | "success" | "error"; msg?: string }>({ status: "idle" });
   const [copiedTestError, setCopiedTestError] = createSignal(false);
-  // Per-provider model connection-test state. Keyed by providerId so switching
-  // providers doesn't show another provider's result. Mirrors `testStatus` but
-  // scoped to the modelSettings tab.
-  const [modelTestStatus, setModelTestStatus] = createSignal<{ providerId: string; status: "idle" | "testing" | "success" | "error"; msg?: string }>({ providerId: "", status: "idle" });
-  const [copiedModelError, setCopiedModelError] = createSignal(false);
+  // Per-model connection-test state. Nested map: providerKey → modelId → result.
+  // `providerKey` is the provider id for saved providers, or NEW_PROVIDER_TEST_KEY
+  // for the add-new-provider form. In-memory only (not persisted): a provider must
+  // have all its models validated in THIS session before it can be switched from
+  // disabled → enabled. Already-enabled providers are unaffected on restart.
+  type ModelTestEntry = { status: "idle" | "testing" | "success" | "error"; msg?: string };
+  const [modelTests, setModelTests] = createSignal<Record<string, Record<string, ModelTestEntry>>>({});
+  const [batchProgress, setBatchProgress] = createSignal<{ providerKey: string; current: number; total: number; modelId: string } | null>(null);
+  const [copiedModelError, setCopiedModelError] = createSignal<string>("");
   // Sentinel key for the "add new provider" form (which has no provider id yet).
   const NEW_PROVIDER_TEST_KEY = "__new__";
   const [linkedConns, setLinkedConns] = createSignal<Record<string, boolean>>({});
@@ -340,55 +344,84 @@ export default function SettingsPage(props: {
     }
   };
 
-  // Test an LLM provider's config against a minimal prompt. Tests the CURRENT
-  // form values (including unsaved edits), not the saved settings.json, so the
-  // user gets immediate feedback on endpoint/apiFormat/apiKey changes. The
-  // backend returns a friendly Chinese error; success is silent-ish.
-  //
-  // Shared by both the existing-provider detail form (keyed by prov.id) and the
-  // add-new-provider form (keyed by the sentinel "__new__"). The raw-field
-  // signature keeps it reusable across both, which hold their values in
-  // different signals.
-  const runModelConnectionTest = async (
-    statusKey: string,
+  // Set one model's test entry inside the nested map (immutable update so
+  // SolidJS reactivity fires on the relevant row).
+  const setModelEntry = (providerKey: string, modelId: string, entry: ModelTestEntry) => {
+    setModelTests((prev) => ({
+      ...prev,
+      [providerKey]: { ...(prev[providerKey] || {}), [modelId]: entry },
+    }));
+  };
+
+  // Whether every model under a provider is currently validated as available
+  // (all in "success" state). Used by the enable gate and the dot indicator.
+  // Returns false if there are no models or any model isn't a success.
+  const providerValidated = (providerKey: string, models: ModelItem[]): boolean => {
+    if (!models.length) return false;
+    const entries = modelTests()[providerKey] || {};
+    return models.every((m) => entries[m.id]?.status === "success");
+  };
+
+  // Whether a batch test is currently running for a given provider key.
+  const batchTesting = (providerKey: string): boolean =>
+    batchProgress()?.providerKey === providerKey;
+
+  // Batch-test EVERY model of a provider, sequentially (avoids hammering the API
+  // and tripping rate limits). Updates per-model state as it goes and reports
+  // progress. `providerKey` is the provider id (or NEW_PROVIDER_TEST_KEY for the
+  // add form). `endpoint/apiKey/apiFormat` come from the form so unsaved edits
+  // are reflected. Returns true iff ALL models passed.
+  const runBatchModelTest = async (
+    providerKey: string,
     endpoint: string,
     apiKey: string,
     apiFormat: string,
-    modelId: string | undefined,
-  ) => {
+    models: ModelItem[],
+  ): Promise<boolean> => {
     const ep = (endpoint || "").trim();
     const key = (apiKey || "").trim();
-    if (!ep || !key || !modelId) {
-      setModelTestStatus({ providerId: statusKey, status: "error", msg: t("modelTestEmpty") });
-      return;
+    if (!ep || !key || !models.length) {
+      // Mark all models as error with the empty-config hint.
+      for (const m of models) {
+        setModelEntry(providerKey, m.id, { status: "error", msg: t("modelTestEmpty") });
+      }
+      return false;
     }
-    setModelTestStatus({ providerId: statusKey, status: "testing" });
-    try {
-      await invoke("test_llm_connection", {
-        endpoint: ep,
-        apiKey: key,
-        apiFormat,
-        modelId,
-      });
-      setModelTestStatus({ providerId: statusKey, status: "success", msg: t("modelTestSuccess") });
-    } catch (err) {
-      setModelTestStatus({ providerId: statusKey, status: "error", msg: String(err) });
+    let allOk = true;
+    for (let i = 0; i < models.length; i++) {
+      const m = models[i];
+      setBatchProgress({ providerKey, current: i + 1, total: models.length, modelId: m.id });
+      setModelEntry(providerKey, m.id, { status: "testing" });
+      try {
+        await invoke("test_llm_connection", {
+          endpoint: ep,
+          apiKey: key,
+          apiFormat,
+          modelId: m.id,
+        });
+        setModelEntry(providerKey, m.id, { status: "success" });
+      } catch (err) {
+        setModelEntry(providerKey, m.id, { status: "error", msg: String(err) });
+        allOk = false;
+      }
     }
+    setBatchProgress(null);
+    return allOk;
   };
 
-  // Existing-provider detail form: tests the live form values of a saved
-  // provider (which may carry unsaved edits).
+  // Existing-provider detail form: batch-test all of a saved provider's models
+  // against its live (possibly unsaved) form values.
   const handleTestModelConnection = (prov: ModelProvider) =>
-    runModelConnectionTest(prov.id, prov.endpoint, prov.apiKey, prov.apiFormat, prov.models?.[0]?.id);
+    runBatchModelTest(prov.id, prov.endpoint, prov.apiKey, prov.apiFormat, prov.models || []);
 
-  // Add-new-provider form: tests the temp signals before the provider is saved.
+  // Add-new-provider form: batch-test the temp models before saving.
   const handleTestNewProviderConnection = () =>
-    runModelConnectionTest(
+    runBatchModelTest(
       NEW_PROVIDER_TEST_KEY,
       newProviderEndpoint(),
       newProviderApiKey(),
       newProviderFormat(),
-      newProviderModels()?.[0]?.id,
+      newProviderModels(),
     );
 
   const handleDeleteConnection = async (id: string) => {
@@ -620,11 +653,15 @@ export default function SettingsPage(props: {
     }
   };
 
-  const handleCreateNewProvider = () => {
+  // Add a new provider, then batch-test every model. Provider starts disabled;
+  // it is auto-enabled only if ALL models pass validation, otherwise stays
+  // disabled (the user can fix the config and re-test, then enable manually).
+  const handleCreateNewProvider = async () => {
     const name = newProviderName().trim();
     const endpoint = newProviderEndpoint().trim();
     const apiKey = newProviderApiKey().trim();
     const format = newProviderFormat();
+    const models = newProviderModels();
 
     if (!name) {
       alert("请输入服务商名称");
@@ -634,16 +671,21 @@ export default function SettingsPage(props: {
       alert("请输入 Base URL");
       return;
     }
+    if (!models.length) {
+      alert(t("modelTestEmpty"));
+      return;
+    }
 
     const newId = "custom_" + Date.now();
+    // Always create disabled first — enable depends on the batch test result.
     const newProvider: ModelProvider = {
       id: newId,
       name,
       endpoint,
       apiKey,
       apiFormat: format,
-      models: newProviderModels(),
-      enabled: true
+      models,
+      enabled: false,
     };
 
     const updated = [...(settings().providers || []), newProvider];
@@ -657,6 +699,13 @@ export default function SettingsPage(props: {
     setNewProviderApiKey("");
     setNewProviderFormat("openai");
     setNewProviderModels([]);
+
+    // Batch-test against the just-saved provider (keyed by its new id). If all
+    // models pass, flip enabled on automatically.
+    const allOk = await runBatchModelTest(newId, endpoint, apiKey, format, models);
+    if (allOk) {
+      updateProviderProperty(newId, "enabled", true);
+    }
   };
 
   // Model actions handlers
@@ -1829,9 +1878,12 @@ export default function SettingsPage(props: {
                     <span
                       class="provider-dot"
                       classList={{
+                        // Already-enabled providers stay green (persist across
+                        // restarts). Otherwise reflect the in-session batch test:
+                        // green if all models validated, red if any failed.
                         active: prov.enabled && !!prov.apiKey,
-                        "test-success": modelTestStatus().providerId === prov.id && modelTestStatus().status === "success",
-                        "test-fail": modelTestStatus().providerId === prov.id && modelTestStatus().status === "error",
+                        "test-success": !prov.enabled && providerValidated(prov.id, prov.models || []),
+                        "test-fail": !prov.enabled && (prov.models || []).some(m => modelTests()[prov.id]?.[m.id]?.status === "error") && !providerValidated(prov.id, prov.models || []),
                       }}
                     />
                     <span class="provider-name">{prov.name}</span>
@@ -1937,6 +1989,20 @@ export default function SettingsPage(props: {
                                   <span class="sp-context-badge" title="最大输出 Token">
                                     Out: {model.maxTokens || 4096}
                                   </span>
+                                  {/* Per-model test status (new-provider form, in-memory). */}
+                                  {(() => {
+                                    const e = modelTests()[NEW_PROVIDER_TEST_KEY]?.[model.id];
+                                    if (e?.status === "testing") {
+                                      return <div class="loader-spinner" title="测试中" style="border-top-color: var(--text-primary); width: 11px; height: 11px; border-width: 1.5px;"></div>;
+                                    }
+                                    if (e?.status === "success") {
+                                      return <span title="可用" style="color: var(--text-success); font-size: 13px; font-weight: 600;">✓</span>;
+                                    }
+                                    if (e?.status === "error") {
+                                      return <span title={e.msg || "不可用"} style="color: var(--text-danger); font-size: 13px; font-weight: 600;">✕</span>;
+                                    }
+                                    return <span title="未测试" style="color: var(--text-dim); font-size: 13px;">·</span>;
+                                  })()}
                                   <div class="model-actions-btns" style="display: flex; align-items: center; gap: 8px;">
                                     <button class="sp-action-icon-btn" title="编辑模型" onClick={() => handleOpenEditTempModel(model)}>
                                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
@@ -1962,71 +2028,93 @@ export default function SettingsPage(props: {
                       </div>
                     </div>
 
-                    {/* Connection test — same pattern as the provider detail
-                        form, keyed by the new-provider sentinel so its state is
-                        isolated from existing providers. */}
+                    {/* Batch connection test for the new-provider form — tests
+                        every model before saving. Keyed by the new-provider
+                        sentinel so its state is isolated. */}
                     <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 6px; padding-top: 18px; border-top: 1px solid var(--border-faint);">
                       <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                         <button
                           class="ss-btn ss-btn-secondary btn-sec-no-highlight"
                           style="padding: 6px 16px; font-size: 13px; display: flex; align-items: center; gap: 6px;"
                           onClick={handleTestNewProviderConnection}
-                          disabled={modelTestStatus().providerId === NEW_PROVIDER_TEST_KEY && modelTestStatus().status === "testing"}
+                          disabled={batchTesting(NEW_PROVIDER_TEST_KEY)}
                         >
-                          <Show when={modelTestStatus().providerId === NEW_PROVIDER_TEST_KEY && modelTestStatus().status === "testing"}>
+                          <Show when={batchTesting(NEW_PROVIDER_TEST_KEY)}>
                             <div class="loader-spinner" style="border-top-color: var(--text-primary); width: 11px; height: 11px; border-width: 1.5px;"></div>
                           </Show>
-                          {modelTestStatus().providerId === NEW_PROVIDER_TEST_KEY && modelTestStatus().status === "testing" ? t("modelTesting") : t("modelTestBtn")}
+                          {batchTesting(NEW_PROVIDER_TEST_KEY) ? t("modelTesting") : t("modelTestBtn")}
                         </button>
 
-                        <Show when={modelTestStatus().providerId === NEW_PROVIDER_TEST_KEY && modelTestStatus().status === "success"}>
-                          <span style="font-size: 12.5px; color: var(--text-success); display: flex; align-items: center; gap: 4px; font-weight: 500;">
-                            ✓ {t("modelTestSuccess")}
+                        <Show when={batchTesting(NEW_PROVIDER_TEST_KEY) && batchProgress()?.providerKey === NEW_PROVIDER_TEST_KEY}>
+                          <span style="font-size: 12.5px; color: var(--text-dim); display: flex; align-items: center; gap: 4px;">
+                            {t("modelTesting")} {batchProgress()!.current}/{batchProgress()!.total}：{batchProgress()!.modelId}
                           </span>
                         </Show>
-                        <Show when={modelTestStatus().providerId === NEW_PROVIDER_TEST_KEY && modelTestStatus().status === "error"}>
-                          <div style="display: flex; align-items: center; gap: 6px; max-width: 380px; min-width: 0;">
-                            <span
-                              style="font-size: 12px; color: var(--text-danger); display: flex; align-items: center; gap: 4px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;"
-                              title={modelTestStatus().msg}
-                            >
-                              ✕ {modelTestStatus().msg}
-                            </span>
-                            <button
-                              title={copiedModelError() ? "已复制" : "复制错误日志"}
-                              style="border: none; background: transparent; color: var(--text-dim); cursor: pointer; padding: 2px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.15s ease; flex-shrink: 0;"
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                try {
-                                  await navigator.clipboard.writeText(modelTestStatus().msg || "");
-                                  setCopiedModelError(true);
-                                  setTimeout(() => setCopiedModelError(false), 1500);
-                                } catch {}
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.color = "var(--text-primary)";
-                                e.currentTarget.style.background = "var(--bg-hover)";
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.color = "var(--text-dim)";
-                                e.currentTarget.style.background = "transparent";
-                              }}
-                            >
-                              <Show
-                                when={copiedModelError()}
-                                fallback={
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                  </svg>
-                                }
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                  <polyline points="20 6 9 17 4 12"></polyline>
-                                </svg>
-                              </Show>
-                            </button>
-                          </div>
+
+                        <Show when={!batchTesting(NEW_PROVIDER_TEST_KEY) && newProviderModels().some(m => modelTests()[NEW_PROVIDER_TEST_KEY]?.[m.id])}>
+                          {(() => {
+                            const entries = newProviderModels().map(m => modelTests()[NEW_PROVIDER_TEST_KEY]?.[m.id]).filter(Boolean);
+                            const ok = entries.filter(e => e.status === "success").length;
+                            const fail = entries.filter(e => e.status === "error").length;
+                            const allOk = ok > 0 && fail === 0;
+                            const firstErr = entries.find(e => e.status === "error");
+                            if (allOk) {
+                              return (
+                                <span style="font-size: 12.5px; color: var(--text-success); display: flex; align-items: center; gap: 4px; font-weight: 500;">
+                                  ✓ {t("modelTestSuccess")}（{ok}/{entries.length}）
+                                </span>
+                              );
+                            }
+                            return (
+                              <div style="display: flex; align-items: center; gap: 6px; max-width: 380px; min-width: 0;">
+                                <span
+                                  style="font-size: 12px; color: var(--text-danger); display: flex; align-items: center; gap: 4px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;"
+                                  title={firstErr?.msg}
+                                >
+                                  ✕ {ok}/{entries.length} {t("modelAvailable")}，{fail} {t("modelUnavailable")}
+                                </span>
+                                <button
+                                  title={copiedModelError() === NEW_PROVIDER_TEST_KEY ? "已复制" : "复制错误日志"}
+                                  style="border: none; background: transparent; color: var(--text-dim); cursor: pointer; padding: 2px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.15s ease; flex-shrink: 0;"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const errs = newProviderModels()
+                                      .map(m => ({ id: m.id, e: modelTests()[NEW_PROVIDER_TEST_KEY]?.[m.id] }))
+                                      .filter(x => x.e?.status === "error" && x.e.msg)
+                                      .map(x => `${x.id}: ${x.e!.msg}`)
+                                      .join("\n");
+                                    try {
+                                      await navigator.clipboard.writeText(errs);
+                                      setCopiedModelError(NEW_PROVIDER_TEST_KEY);
+                                      setTimeout(() => setCopiedModelError(""), 1500);
+                                    } catch {}
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.color = "var(--text-primary)";
+                                    e.currentTarget.style.background = "var(--bg-hover)";
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.color = "var(--text-dim)";
+                                    e.currentTarget.style.background = "transparent";
+                                  }}
+                                >
+                                  <Show
+                                    when={copiedModelError() === NEW_PROVIDER_TEST_KEY}
+                                    fallback={
+                                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                      </svg>
+                                    }
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                      <polyline points="20 6 9 17 4 12"></polyline>
+                                    </svg>
+                                  </Show>
+                                </button>
+                              </div>
+                            );
+                          })()}
                         </Show>
                       </div>
                     </div>
@@ -2100,13 +2188,28 @@ export default function SettingsPage(props: {
                           </Show>
 
                           <div class="sp-status-btn-group">
-                            <button 
-                              class={`status-btn enabled-btn ${prov.enabled ? "active" : ""}`}
-                              onClick={() => updateProviderProperty(prov.id, "enabled", true)}
-                            >
-                              已启用
-                            </button>
-                            <button 
+                            {(() => {
+                              // Enable gate: a disabled provider can only be
+                              // switched ON once all its models are validated
+                              // available in this session. Already-enabled
+                              // providers are never gated (they persist enabled
+                              // across restarts).
+                              const canEnable = prov.enabled || providerValidated(prov.id, prov.models || []);
+                              return (
+                                <button
+                                  class={`status-btn enabled-btn ${prov.enabled ? "active" : ""}`}
+                                  disabled={!canEnable}
+                                  title={canEnable ? "" : t("modelEnableGateTip")}
+                                  style={canEnable ? {} : { opacity: 0.45, cursor: "not-allowed" }}
+                                  onClick={() => {
+                                    if (canEnable) updateProviderProperty(prov.id, "enabled", true);
+                                  }}
+                                >
+                                  已启用
+                                </button>
+                              );
+                            })()}
+                            <button
                               class={`status-btn disabled-btn ${!prov.enabled ? "active" : ""}`}
                               onClick={() => updateProviderProperty(prov.id, "enabled", false)}
                             >
@@ -2185,6 +2288,20 @@ export default function SettingsPage(props: {
                                     <span class="sp-context-badge" title="最大输出 Token">
                                       Out: {model.maxTokens || 4096}
                                     </span>
+                                    {/* Per-model test status (in-memory, this session). */}
+                                    {(() => {
+                                      const e = modelTests()[prov.id]?.[model.id];
+                                      if (e?.status === "testing") {
+                                        return <div class="loader-spinner" title="测试中" style="border-top-color: var(--text-primary); width: 11px; height: 11px; border-width: 1.5px;"></div>;
+                                      }
+                                      if (e?.status === "success") {
+                                        return <span title="可用" style="color: var(--text-success); font-size: 13px; font-weight: 600;">✓</span>;
+                                      }
+                                      if (e?.status === "error") {
+                                        return <span title={e.msg || "不可用"} style="color: var(--text-danger); font-size: 13px; font-weight: 600;">✕</span>;
+                                      }
+                                      return <span title="未测试" style="color: var(--text-dim); font-size: 13px;">·</span>;
+                                    })()}
                                     <div class="model-actions-btns" style="display: flex; align-items: center; gap: 8px;">
 
                                       <button class="sp-action-icon-btn" title="编辑模型" onClick={() => handleOpenEditModel(model)}>
@@ -2210,69 +2327,94 @@ export default function SettingsPage(props: {
                           </div>
                         </div>
 
-                        {/* Connection test — mirrors the database tab's test button. */}
+                        {/* Batch connection test — tests every model of this provider. */}
                         <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 6px; padding-top: 18px; border-top: 1px solid var(--border-faint);">
-                          <div style="display: flex; align-items: center; gap: 12px;">
+                          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                             <button
                               class="ss-btn ss-btn-secondary btn-sec-no-highlight"
                               style="padding: 6px 16px; font-size: 13px; display: flex; align-items: center; gap: 6px;"
                               onClick={() => handleTestModelConnection(prov)}
-                              disabled={modelTestStatus().providerId === prov.id && modelTestStatus().status === "testing"}
+                              disabled={batchTesting(prov.id)}
                             >
-                              <Show when={modelTestStatus().providerId === prov.id && modelTestStatus().status === "testing"}>
+                              <Show when={batchTesting(prov.id)}>
                                 <div class="loader-spinner" style="border-top-color: var(--text-primary); width: 11px; height: 11px; border-width: 1.5px;"></div>
                               </Show>
-                              {modelTestStatus().providerId === prov.id && modelTestStatus().status === "testing" ? t("modelTesting") : t("modelTestBtn")}
+                              {batchTesting(prov.id) ? t("modelTesting") : t("modelTestBtn")}
                             </button>
 
-                            <Show when={modelTestStatus().providerId === prov.id && modelTestStatus().status === "success"}>
-                              <span style="font-size: 12.5px; color: var(--text-success); display: flex; align-items: center; gap: 4px; font-weight: 500;">
-                                ✓ {t("modelTestSuccess")}
+                            {/* In-progress: "测试中 2/5：model-id" */}
+                            <Show when={batchTesting(prov.id) && batchProgress()?.providerKey === prov.id}>
+                              <span style="font-size: 12.5px; color: var(--text-dim); display: flex; align-items: center; gap: 4px;">
+                                {t("modelTesting")} {batchProgress()!.current}/{batchProgress()!.total}：{batchProgress()!.modelId}
                               </span>
                             </Show>
-                            <Show when={modelTestStatus().providerId === prov.id && modelTestStatus().status === "error"}>
-                              <div style="display: flex; align-items: center; gap: 6px; max-width: 380px; min-width: 0;">
-                                <span
-                                  style="font-size: 12px; color: var(--text-danger); display: flex; align-items: center; gap: 4px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;"
-                                  title={modelTestStatus().msg}
-                                >
-                                  ✕ {modelTestStatus().msg}
-                                </span>
-                                <button
-                                  title={copiedModelError() ? "已复制" : "复制错误日志"}
-                                  style="border: none; background: transparent; color: var(--text-dim); cursor: pointer; padding: 2px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.15s ease; flex-shrink: 0;"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    try {
-                                      await navigator.clipboard.writeText(modelTestStatus().msg || "");
-                                      setCopiedModelError(true);
-                                      setTimeout(() => setCopiedModelError(false), 1500);
-                                    } catch {}
-                                  }}
-                                  onMouseEnter={(e) => {
-                                    e.currentTarget.style.color = "var(--text-primary)";
-                                    e.currentTarget.style.background = "var(--bg-hover)";
-                                  }}
-                                  onMouseLeave={(e) => {
-                                    e.currentTarget.style.color = "var(--text-dim)";
-                                    e.currentTarget.style.background = "transparent";
-                                  }}
-                                >
-                                  <Show
-                                    when={copiedModelError()}
-                                    fallback={
-                                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                      </svg>
-                                    }
-                                  >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                      <polyline points="20 6 9 17 4 12"></polyline>
-                                    </svg>
-                                  </Show>
-                                </button>
-                              </div>
+
+                            {/* Summary after a finished batch (not currently testing). */}
+                            <Show when={!batchTesting(prov.id) && (prov.models || []).some(m => modelTests()[prov.id]?.[m.id])}>
+                              {(() => {
+                                const entries = (prov.models || []).map(m => modelTests()[prov.id]?.[m.id]).filter(Boolean);
+                                const ok = entries.filter(e => e.status === "success").length;
+                                const fail = entries.filter(e => e.status === "error").length;
+                                const allOk = ok > 0 && fail === 0;
+                                const firstErr = entries.find(e => e.status === "error");
+                                if (allOk) {
+                                  return (
+                                    <span style="font-size: 12.5px; color: var(--text-success); display: flex; align-items: center; gap: 4px; font-weight: 500;">
+                                      ✓ {t("modelTestSuccess")}（{ok}/{entries.length}）
+                                    </span>
+                                  );
+                                }
+                                // Partial / all-failed: show counts + copy the first error.
+                                return (
+                                  <div style="display: flex; align-items: center; gap: 6px; max-width: 380px; min-width: 0;">
+                                    <span
+                                      style="font-size: 12px; color: var(--text-danger); display: flex; align-items: center; gap: 4px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;"
+                                      title={firstErr?.msg}
+                                    >
+                                      ✕ {ok}/{entries.length} {t("modelAvailable")}，{fail} {t("modelUnavailable")}
+                                    </span>
+                                    <button
+                                      title={copiedModelError() === prov.id ? "已复制" : "复制错误日志"}
+                                      style="border: none; background: transparent; color: var(--text-dim); cursor: pointer; padding: 2px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.15s ease; flex-shrink: 0;"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        const errs = (prov.models || [])
+                                          .map(m => ({ id: m.id, e: modelTests()[prov.id]?.[m.id] }))
+                                          .filter(x => x.e?.status === "error" && x.e.msg)
+                                          .map(x => `${x.id}: ${x.e!.msg}`)
+                                          .join("\n");
+                                        try {
+                                          await navigator.clipboard.writeText(errs);
+                                          setCopiedModelError(prov.id);
+                                          setTimeout(() => setCopiedModelError(""), 1500);
+                                        } catch {}
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.color = "var(--text-primary)";
+                                        e.currentTarget.style.background = "var(--bg-hover)";
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.color = "var(--text-dim)";
+                                        e.currentTarget.style.background = "transparent";
+                                      }}
+                                    >
+                                      <Show
+                                        when={copiedModelError() === prov.id}
+                                        fallback={
+                                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                          </svg>
+                                        }
+                                      >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                          <polyline points="20 6 9 17 4 12"></polyline>
+                                        </svg>
+                                      </Show>
+                                    </button>
+                                  </div>
+                                );
+                              })()}
                             </Show>
                           </div>
                         </div>
