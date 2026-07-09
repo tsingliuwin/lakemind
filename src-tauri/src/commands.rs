@@ -2080,6 +2080,31 @@ pub async fn test_db_connection(config: db::DbConnectionRecord) -> Result<(), St
         .map_err(|e| format!("Task execution error: {e}"))?
 }
 
+/// Test an LLM provider/model against the exact config shown in the settings
+/// form (not the saved settings.json), so unsaved edits are reflected. Sends a
+/// minimal prompt with an 8s hard timeout and returns a friendly error on
+/// failure. Mirrors `test_db_connection`'s "test before you trust" pattern.
+#[tauri::command]
+pub async fn test_llm_connection(
+    endpoint: String,
+    api_key: String,
+    api_format: String,
+    model_id: String,
+) -> Result<(), String> {
+    const TEST_TIMEOUT_SECS: u64 = 8;
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(TEST_TIMEOUT_SECS),
+        crate::agent::test_connection(&endpoint, &api_key, &api_format, &model_id),
+    )
+    .await
+    {
+        Ok(inner) => inner,
+        Err(_elapsed) => Err(format!(
+            "连接测试超时（{TEST_TIMEOUT_SECS} 秒未收到响应）。请检查网络或 Base URL 是否可访问。"
+        )),
+    }
+}
+
 #[tauri::command]
 pub async fn link_connection_to_workspace(
     ws_path: String,

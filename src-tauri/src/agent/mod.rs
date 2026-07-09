@@ -27,6 +27,6 @@ mod wire;
 // (llm.rs, runner.rs) reach config/llm helpers directly via `super::config::`,
 // so only the symbols actually consumed outside `agent` are re-exported here.
 pub(crate) use config::{first_enabled_model, get_query_hard_timeout, get_query_timeout};
-pub(crate) use llm::complete_one_shot;
+pub(crate) use llm::{complete_one_shot, test_connection};
 pub(crate) use runner::run_agent_chat_stream;
 pub(crate) use wire::AgentStreamEvent;

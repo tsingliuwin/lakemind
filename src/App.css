@@ -2880,6 +2880,18 @@ button.lm-select-trigger:hover:not(:disabled) {
   box-shadow: 0 0 4px var(--accent-green);
 }
 
+/* Connection-test result overrides the heuristic active dot: green when the
+   last test passed, red when it failed. Takes priority over .active. */
+.provider-dot.test-success {
+  background-color: var(--accent-green);
+  box-shadow: 0 0 4px var(--accent-green);
+}
+
+.provider-dot.test-fail {
+  background-color: var(--text-danger);
+  box-shadow: 0 0 4px var(--text-danger);
+}
+
 .sp-add-btn {
   background: transparent;
   border: 1px dashed var(--border-strong);

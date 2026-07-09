@@ -143,6 +143,11 @@ export default function SettingsPage(props: {
   const [editingConn, setEditingConn] = createSignal<DbConnection | null>(null);
   const [testStatus, setTestStatus] = createSignal<{ status: "idle" | "testing" | "success" | "error"; msg?: string }>({ status: "idle" });
   const [copiedTestError, setCopiedTestError] = createSignal(false);
+  // Per-provider model connection-test state. Keyed by providerId so switching
+  // providers doesn't show another provider's result. Mirrors `testStatus` but
+  // scoped to the modelSettings tab.
+  const [modelTestStatus, setModelTestStatus] = createSignal<{ providerId: string; status: "idle" | "testing" | "success" | "error"; msg?: string }>({ providerId: "", status: "idle" });
+  const [copiedModelError, setCopiedModelError] = createSignal(false);
   const [linkedConns, setLinkedConns] = createSignal<Record<string, boolean>>({});
 
   const [formName, setFormName] = createSignal("");
@@ -330,6 +335,32 @@ export default function SettingsPage(props: {
       setTestStatus({ status: "success", msg: "连接成功！" });
     } catch (err) {
       setTestStatus({ status: "error", msg: "测试失败: " + err });
+    }
+  };
+
+  // Test an LLM provider's config against a minimal prompt. Tests the CURRENT
+  // form values (including unsaved edits), not the saved settings.json, so the
+  // user gets immediate feedback on endpoint/apiFormat/apiKey changes. The
+  // backend returns a friendly Chinese error; success is silent-ish.
+  const handleTestModelConnection = async (prov: ModelProvider) => {
+    const endpoint = (prov.endpoint || "").trim();
+    const apiKey = (prov.apiKey || "").trim();
+    const modelId = prov.models?.[0]?.id;
+    if (!endpoint || !apiKey || !modelId) {
+      setModelTestStatus({ providerId: prov.id, status: "error", msg: t("modelTestEmpty") });
+      return;
+    }
+    setModelTestStatus({ providerId: prov.id, status: "testing" });
+    try {
+      await invoke("test_llm_connection", {
+        endpoint,
+        apiKey,
+        apiFormat: prov.apiFormat,
+        modelId,
+      });
+      setModelTestStatus({ providerId: prov.id, status: "success", msg: t("modelTestSuccess") });
+    } catch (err) {
+      setModelTestStatus({ providerId: prov.id, status: "error", msg: String(err) });
     }
   };
 
@@ -1768,7 +1799,14 @@ export default function SettingsPage(props: {
                     classList={{ active: selectedProvider() === prov.id && !isAddingProvider() }}
                     onClick={() => { setSelectedProvider(prov.id); setIsAddingProvider(false); }}
                   >
-                    <span class="provider-dot" classList={{ active: prov.enabled && !!prov.apiKey }} />
+                    <span
+                      class="provider-dot"
+                      classList={{
+                        active: prov.enabled && !!prov.apiKey,
+                        "test-success": modelTestStatus().providerId === prov.id && modelTestStatus().status === "success",
+                        "test-fail": modelTestStatus().providerId === prov.id && modelTestStatus().status === "error",
+                      }}
+                    />
                     <span class="provider-name">{prov.name}</span>
                   </button>
                 )}
@@ -2073,6 +2111,73 @@ export default function SettingsPage(props: {
                             <button class="sp-add-model-inline-btn" onClick={handleOpenAddModel}>
                               + 添加模型
                             </button>
+                          </div>
+                        </div>
+
+                        {/* Connection test — mirrors the database tab's test button. */}
+                        <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 6px; padding-top: 18px; border-top: 1px solid var(--border-faint);">
+                          <div style="display: flex; align-items: center; gap: 12px;">
+                            <button
+                              class="ss-btn ss-btn-secondary btn-sec-no-highlight"
+                              style="padding: 6px 16px; font-size: 13px; display: flex; align-items: center; gap: 6px;"
+                              onClick={() => handleTestModelConnection(prov)}
+                              disabled={modelTestStatus().providerId === prov.id && modelTestStatus().status === "testing"}
+                            >
+                              <Show when={modelTestStatus().providerId === prov.id && modelTestStatus().status === "testing"}>
+                                <div class="loader-spinner" style="border-top-color: var(--text-primary); width: 11px; height: 11px; border-width: 1.5px;"></div>
+                              </Show>
+                              {modelTestStatus().providerId === prov.id && modelTestStatus().status === "testing" ? t("modelTesting") : t("modelTestBtn")}
+                            </button>
+
+                            <Show when={modelTestStatus().providerId === prov.id && modelTestStatus().status === "success"}>
+                              <span style="font-size: 12.5px; color: var(--text-success); display: flex; align-items: center; gap: 4px; font-weight: 500;">
+                                ✓ {t("modelTestSuccess")}
+                              </span>
+                            </Show>
+                            <Show when={modelTestStatus().providerId === prov.id && modelTestStatus().status === "error"}>
+                              <div style="display: flex; align-items: center; gap: 6px; max-width: 380px; min-width: 0;">
+                                <span
+                                  style="font-size: 12px; color: var(--text-danger); display: flex; align-items: center; gap: 4px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;"
+                                  title={modelTestStatus().msg}
+                                >
+                                  ✕ {modelTestStatus().msg}
+                                </span>
+                                <button
+                                  title={copiedModelError() ? "已复制" : "复制错误日志"}
+                                  style="border: none; background: transparent; color: var(--text-dim); cursor: pointer; padding: 2px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.15s ease; flex-shrink: 0;"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      await navigator.clipboard.writeText(modelTestStatus().msg || "");
+                                      setCopiedModelError(true);
+                                      setTimeout(() => setCopiedModelError(false), 1500);
+                                    } catch {}
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.color = "var(--text-primary)";
+                                    e.currentTarget.style.background = "var(--bg-hover)";
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.color = "var(--text-dim)";
+                                    e.currentTarget.style.background = "transparent";
+                                  }}
+                                >
+                                  <Show
+                                    when={copiedModelError()}
+                                    fallback={
+                                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                      </svg>
+                                    }
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                      <polyline points="20 6 9 17 4 12"></polyline>
+                                    </svg>
+                                  </Show>
+                                </button>
+                              </div>
+                            </Show>
                           </div>
                         </div>
                       </div>

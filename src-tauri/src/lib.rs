@@ -75,6 +75,7 @@ pub fn run() {
             commands::upsert_db_connection,
             commands::delete_db_connection,
             commands::test_db_connection,
+            commands::test_llm_connection,
             commands::link_connection_to_workspace,
             commands::unlink_connection_from_workspace,
             commands::list_workspace_connections,
