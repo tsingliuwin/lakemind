@@ -1936,9 +1936,14 @@ export default function SettingsPage(props: {
                     <span
                       class="provider-dot"
                       classList={{
-                        // Already-enabled providers stay green (persist across
-                        // restarts). Otherwise reflect the in-session batch test:
-                        // green if all models validated, red if any failed.
+                        // Four states, mutually exclusive. An ENABLED provider
+                        // always shows the green active dot (persists across
+                        // restarts, never gated). A disabled provider reflects
+                        // the in-session batch test: grey (untested/default),
+                        // blue (all models validated → ready to enable), or red
+                        // (any model failed). Green is reserved for "enabled" so
+                        // a validated-but-not-yet-enabled provider isn't
+                        // mistaken for enabled.
                         active: prov.enabled && !!prov.apiKey,
                         "test-success": !prov.enabled && providerValidated(prov.id, prov.models || []),
                         "test-fail": !prov.enabled && (prov.models || []).some(m => modelTests()[prov.id]?.[m.id]?.status === "error") && !providerValidated(prov.id, prov.models || []),

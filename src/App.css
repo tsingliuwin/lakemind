@@ -2884,11 +2884,17 @@ button.lm-select-trigger:hover:not(:disabled) {
   box-shadow: 0 0 4px var(--accent-green);
 }
 
-/* Connection-test result overrides the heuristic active dot: green when the
-   last test passed, red when it failed. Takes priority over .active. */
+/* Provider connection-test states (only meaningful when NOT yet enabled — an
+   enabled provider always shows the green .active dot). Four distinct looks so
+   the user can tell at a glance whether a disabled provider is ready to turn on:
+     - untested   → grey hollow ring (.provider-dot default)
+     - test pass  → blue solid (.test-success)  ← "validated, can enable now"
+     - test fail  → red solid (.test-fail)      ← "fix config / retest"
+   Green is reserved for .active (enabled), so test-success uses blue to avoid
+   the confusion of "green dot but not enabled". */
 .provider-dot.test-success {
-  background-color: var(--accent-green);
-  box-shadow: 0 0 4px var(--accent-green);
+  background-color: var(--accent-blue);
+  box-shadow: 0 0 4px var(--accent-blue);
 }
 
 .provider-dot.test-fail {
