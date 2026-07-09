@@ -2925,7 +2925,7 @@ button.lm-select-trigger:hover:not(:disabled) {
 .mt-status.error {
   background: var(--accent-red-bg);
   color: var(--accent-red);
-  cursor: help;
+  cursor: pointer;
 }
 
 /* Hoverable error detail for a failed model test. Replaces the native `title`
