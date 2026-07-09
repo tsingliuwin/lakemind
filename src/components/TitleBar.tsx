@@ -21,7 +21,7 @@ export default function TitleBar(props: {
 }) {
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [aboutOpen, setAboutOpen] = createSignal(false);
-  const [appVersion, setAppVersion] = createSignal("v0.2.1");
+  const [appVersion, setAppVersion] = createSignal("v0.3.0");
   const appWindow = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ ? getCurrentWindow() : null;
 
   const isNewerVersion = (current: string, latest: string): boolean => {
