@@ -5952,6 +5952,22 @@ button.lm-select-trigger:hover:not(:disabled) {
   background-color: rgba(16, 185, 129, 0.25) !important;
 }
 
+/* "Ready to install" variant — a gentler pulse to draw the eye without nagging. */
+.update-btn--ready {
+  color: #fff !important;
+  background-color: var(--text-success, #10b981) !important;
+  animation: update-ready-pulse 2s ease-in-out infinite;
+}
+
+.update-btn--ready:hover {
+  filter: brightness(1.1);
+}
+
+@keyframes update-ready-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5); }
+  50% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0); }
+}
+
 .ln-update-tooltip {
   display: none;
   position: absolute;

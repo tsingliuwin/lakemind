@@ -90,6 +90,11 @@ const translations: Record<Language, Record<string, string>> = {
     relaunching: "正在重启…",
     updateFailed: "更新失败，是否前往网页手动下载？",
     goDownload: "前往下载",
+    downloadNow: "立即下载",
+    later: "稍后",
+    badgeReady: "新版本已就绪，点击立即安装",
+    badgeAvailable: "发现新版本，点击查看",
+    badgeDownloading: "正在后台下载更新…",
     // Settings Page
     backToWorkspace: "返回工作区",
     settingsGeneral: "常规",
@@ -267,6 +272,11 @@ const translations: Record<Language, Record<string, string>> = {
     relaunching: "Restarting…",
     updateFailed: "Update failed. Open the download page instead?",
     goDownload: "Go to download",
+    downloadNow: "Download now",
+    later: "Later",
+    badgeReady: "New version is ready. Click to install",
+    badgeAvailable: "Update available. Click to view",
+    badgeDownloading: "Downloading update in the background…",
     // Settings Page
     backToWorkspace: "Back to Workspace",
     settingsGeneral: "General",

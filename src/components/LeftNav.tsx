@@ -1,12 +1,10 @@
-import { For, Show, createMemo, createSignal, createEffect, onMount } from "solid-js";
+import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { getVersion } from "@tauri-apps/api/app";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import type { SourceTable, QueryTask, Workspace, FileItem, RegisterStatus, ImportProgress, DbConnection } from "../lib/types";
 import type { SettingsTab } from "./SettingsPage";
 import { t } from "../lib/i18n";
 import { logoSrc } from "../lib/theme";
-import { checkForUpdate } from "../lib/updater";
+import { updater } from "../lib/updater";
 
 const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
@@ -120,30 +118,28 @@ export default function LeftNav(props: {
   /** Delete a workspace file (cascades to its s_ table + downstreams). */
   onDeleteFile?: (path: string) => void;
 }) {
-  const [updateInfo, setUpdateInfo] = createSignal<{ version: string; changelog: string; url: string } | null>(null);
-
-  // Passive background check using the shared updater module (handles both the
-  // plugin path and the legacy manifest fallback).
-  const checkForUpdates = async () => {
-    try {
-      const info = await checkForUpdate();
-      if (info) {
-        setUpdateInfo({
-          version: info.version,
-          changelog: info.notes,
-          url: "https://lakemind.xi-n.com/",
-        });
-      }
-    } catch (e) {
-      console.warn("Failed to check for updates:", e);
+  // Update badge is driven by the shared updater store (src/lib/updater.ts),
+  // which runs the background poll + silent download. The badge shows when an
+  // update is available / downloading / ready; clicking opens the modal.
+  const showBadge = () => {
+    const s = updater.status();
+    return s === "available" || s === "downloading" || s === "ready";
+  };
+  const badgeTip = () => {
+    const s = updater.status();
+    if (s === "ready") return t("badgeReady");
+    if (s === "downloading") return t("badgeDownloading");
+    return t("badgeAvailable");
+  };
+  const onBadgeClick = () => {
+    // If already downloaded, installing is a single click; otherwise open the
+    // modal to show changelog / progress.
+    if (updater.status() === "ready") {
+      updater.installAndRelaunch();
+    } else {
+      updater.openModal();
     }
   };
-
-  onMount(() => {
-    if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
-      getVersion().then(() => checkForUpdates()).catch(console.error);
-    }
-  });
 
   // Group tables by their parent directory for a tree-like feel.
   // Two kinds of objects are collected into the flat (empty-path) group that
@@ -500,26 +496,32 @@ export default function LeftNav(props: {
           </div>
         </Show>
         <div class="ln-nav-arrows" data-tauri-drag-region>
-          <Show when={updateInfo()}>
-            {(info) => (
-              <div class="ln-update-container">
-                <button 
-                  class="ln-arrow-btn update-btn"
-                  onClick={() => openUrl(info().url).catch(console.error)}
-                >
+          <Show when={showBadge()}>
+            <div class="ln-update-container" classList={{ "ln-update-ready": updater.status() === "ready" }}>
+              <button
+                class="ln-arrow-btn update-btn"
+                classList={{ "update-btn--ready": updater.status() === "ready" }}
+                title={badgeTip()}
+                onClick={onBadgeClick}
+              >
+                <Show when={updater.status() === "downloading"} fallback={
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                     <polyline points="7 10 12 15 17 10" />
                     <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
-                </button>
-                <div class="ln-update-tooltip">
-                  <div class="tooltip-header">发现新版本 {info().version}</div>
-                  <div class="tooltip-body">{info().changelog}</div>
-                  <div class="tooltip-footer">点击图标下载更新</div>
-                </div>
+                }>
+                  <span class="import-banner__spinner" style="width: 12px; height: 12px; border-width: 2px;" />
+                </Show>
+              </button>
+              <div class="ln-update-tooltip">
+                <div class="tooltip-header">{t("updateAvailable")} v{updater.info().version}</div>
+                <Show when={updater.info().notes}>
+                  <div class="tooltip-body">{updater.info().notes}</div>
+                </Show>
+                <div class="tooltip-footer">{badgeTip()}</div>
               </div>
-            )}
+            </div>
           </Show>
           {/* Sidebar toggle button (always show in the sidebar) */}
           <button 

@@ -4,13 +4,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import type { SourceTable } from "../lib/types";
 import { t } from "../lib/i18n";
 import { logoSrc } from "../lib/theme";
-import {
-  checkForUpdate,
-  downloadAndInstallUpdate,
-  relaunchApp,
-  openDownloadPage,
-  type DownloadProgress,
-} from "../lib/updater";
+import { updater } from "../lib/updater";
 
 const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
@@ -30,69 +24,29 @@ export default function TitleBar(props: {
   const [appVersion, setAppVersion] = createSignal("v0.3.0");
   const appWindow = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ ? getCurrentWindow() : null;
 
-  // --- Auto-updater UI state ---
-  type UpdateStage = "checking" | "available" | "downloading" | "downloaded" | "error";
-  const [updateStage, setUpdateStage] = createSignal<UpdateStage | null>(null);
-  const [updateVersion, setUpdateVersion] = createSignal("");
-  const [updateNotes, setUpdateNotes] = createSignal("");
-  const [updateProgress, setUpdateProgress] = createSignal<DownloadProgress>({ fraction: 0, human: "" });
-  const [updateErrorMsg, setUpdateErrorMsg] = createSignal("");
+  // Auto-updater state lives in the shared global store (src/lib/updater.ts).
+  // Boot the background poller once on mount.
+  onMount(() => {
+    updater.start();
+  });
 
-  const closeUpdateModal = () => {
-    setUpdateStage(null);
-    setUpdateVersion("");
-    setUpdateNotes("");
-    setUpdateProgress({ fraction: 0, human: "" });
-    setUpdateErrorMsg("");
+  // The modal is dismissable unless a download/relaunch is actively running.
+  const canDismiss = () => {
+    const s = updater.status();
+    return s !== "downloading" && s !== "installing";
   };
 
-  const handleCheckUpdates = async () => {
-    setUpdateStage("checking");
-    try {
-      const info = await checkForUpdate();
-      if (!info) {
-        alert(t("latestVersionMsg") + ` (${appVersion()})`);
-        closeUpdateModal();
-        return;
-      }
-      setUpdateVersion(info.version);
-      setUpdateNotes(info.notes);
-      setUpdateStage("available");
-    } catch (e) {
-      console.error("Check updates error:", e);
-      alert(t("updateCheckingFailed"));
-      closeUpdateModal();
-    }
-  };
-
-  // Download → install (without relaunch); UI then offers the relaunch button.
-  const handleDownloadInstall = async () => {
-    setUpdateStage("downloading");
-    try {
-      await downloadAndInstallUpdate((p) => setUpdateProgress(p));
-      setUpdateStage("downloaded");
-    } catch (e) {
-      console.error("Download/install error:", e);
-      setUpdateErrorMsg(e instanceof Error ? e.message : String(e));
-      setUpdateStage("error");
-    }
-  };
-
-  const handleRelaunch = async () => {
-    setUpdateStage("downloading"); // reuse as a "busy" state for the button
-    try {
-      await relaunchApp();
-    } catch (e) {
-      console.error("Relaunch error:", e);
-      setUpdateStage("error");
-      setUpdateErrorMsg(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  // Fallback: open the download page in the browser.
-  const handleFallbackDownload = () => {
-    openDownloadPage().catch(console.error);
-    closeUpdateModal();
+  // Modal title derived from the current updater status.
+  const modalTitle = () => {
+    const s = updater.status();
+    const v = updater.info().version;
+    if (s === "checking") return t("updateChecking");
+    if (s === "available") return `${t("updateAvailable")} v${v}`;
+    if (s === "downloading") return t("downloadingUpdate");
+    if (s === "ready") return `${t("updateAvailable")} v${v}`;
+    if (s === "installing") return t("relaunching");
+    if (s === "error") return t("updateFailed");
+    return t("updateAvailable");
   };
 
   let menuRef!: HTMLDivElement;
@@ -225,7 +179,7 @@ export default function TitleBar(props: {
 
             <button
               class="menu-item"
-              onClick={() => { setMenuOpen(false); void handleCheckUpdates(); }}
+              onClick={() => { setMenuOpen(false); updater.checkInteractively(); }}
             >
               <span class="menu-label">{t("checkUpdates")}</span>
               <span class="menu-shortcut"></span>
@@ -298,74 +252,71 @@ export default function TitleBar(props: {
         </div>
       </Show>
 
-      {/* Update Modal */}
-      <Show when={updateStage()}>
-        <div class="modal-overlay" onClick={() => updateStage() !== "downloading" && closeUpdateModal()}>
+      {/* Update Modal — driven by the shared updater store */}
+      <Show when={updater.modalOpen()}>
+        <div class="modal-overlay" onClick={() => canDismiss() && updater.closeModal()}>
           <div class="modal-card" style="width: 420px;" onClick={(e) => e.stopPropagation()}>
             <div class="modal-header">
-              <h3>
-                {updateStage() === "checking" && t("updateChecking")}
-                {updateStage() === "available" && `${t("updateAvailable")} v${updateVersion()}`}
-                {updateStage() === "downloading" && t("downloadingUpdate")}
-                {updateStage() === "downloaded" && t("updateDownloaded")}
-                {updateStage() === "error" && t("updateFailed")}
-              </h3>
-              <Show when={updateStage() !== "downloading"}>
-                <button class="modal-close" onClick={closeUpdateModal}>✕</button>
+              <h3>{modalTitle()}</h3>
+              <Show when={canDismiss()}>
+                <button class="modal-close" onClick={() => updater.closeModal()}>✕</button>
               </Show>
             </div>
             <div class="modal-body" style="align-items: stretch; text-align: left;">
-              <Show when={updateStage() === "checking"}>
+              <Show when={updater.status() === "checking"}>
                 <div style="display: flex; align-items: center; gap: 10px; padding: 12px 0;">
                   <span class="import-banner__spinner" />
                   <span style="color: var(--text-secondary); font-size: 13px;">{t("updateChecking")}</span>
                 </div>
               </Show>
 
-              <Show when={updateStage() === "available"}>
+              <Show when={updater.status() === "available"}>
                 <div class="update-notes">
-                  <div class="update-notes-label">{t("updateNotes")} (v{updateVersion()})</div>
-                  <pre class="update-notes-body">{updateNotes()}</pre>
+                  <div class="update-notes-label">{t("updateNotes")} (v{updater.info().version})</div>
+                  <pre class="update-notes-body">{updater.info().notes}</pre>
                 </div>
               </Show>
 
-              <Show when={updateStage() === "downloading"}>
+              <Show when={updater.status() === "downloading" || updater.status() === "installing"}>
                 <div class="update-progress-wrap">
                   <div class="update-progress-bar">
                     <div
                       class="update-progress-fill"
-                      style={`width: ${Math.round(updateProgress().fraction * 100)}%`}
+                      style={`width: ${Math.round(updater.progress().fraction * 100)}%`}
                     />
                   </div>
                   <div class="update-progress-meta">
-                    {Math.round(updateProgress().fraction * 100)}% {updateProgress().human && `· ${updateProgress().human}`}
+                    {updater.status() === "installing"
+                      ? t("relaunching")
+                      : `${Math.round(updater.progress().fraction * 100)}%${updater.progress().human ? ` · ${updater.progress().human}` : ""}`}
                   </div>
                 </div>
               </Show>
 
-              <Show when={updateStage() === "downloaded"}>
+              <Show when={updater.status() === "ready"}>
                 <p style="margin: 8px 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6;">
                   {t("updateDownloaded")}
                 </p>
               </Show>
 
-              <Show when={updateStage() === "error"}>
+              <Show when={updater.status() === "error"}>
                 <p style="margin: 8px 0; color: var(--text-danger, #e06c75); font-size: 13px; line-height: 1.6;">
-                  {updateErrorMsg()}
+                  {updater.error()}
                 </p>
               </Show>
             </div>
-            <Show when={updateStage() === "available" || updateStage() === "downloaded" || updateStage() === "error"}>
+            <Show when={updater.status() === "available" || updater.status() === "ready" || updater.status() === "error"}>
               <div class="modal-footer">
-                <Show when={updateStage() === "error"}>
-                  <button class="modal-btn-secondary" onClick={handleFallbackDownload}>{t("goDownload")}</button>
+                <Show when={updater.status() === "error"}>
+                  <button class="modal-btn-secondary" onClick={() => updater.fallbackDownload()}>{t("goDownload")}</button>
                 </Show>
-                <Show when={updateStage() === "available"}>
-                  <button class="modal-btn-secondary" onClick={closeUpdateModal}>{t("close")}</button>
-                  <button class="modal-btn-primary" onClick={() => void handleDownloadInstall()}>{t("downloadingUpdate")}</button>
+                <Show when={updater.status() === "available"}>
+                  <button class="modal-btn-secondary" onClick={() => updater.closeModal()}>{t("close")}</button>
+                  <button class="modal-btn-primary" onClick={() => updater.downloadInteractively()}>{t("downloadNow")}</button>
                 </Show>
-                <Show when={updateStage() === "downloaded"}>
-                  <button class="modal-btn-primary" onClick={() => void handleRelaunch()}>{t("installAndRelaunch")}</button>
+                <Show when={updater.status() === "ready"}>
+                  <button class="modal-btn-secondary" onClick={() => updater.closeModal()}>{t("later")}</button>
+                  <button class="modal-btn-primary" onClick={() => updater.installAndRelaunch()}>{t("installAndRelaunch")}</button>
                 </Show>
               </div>
             </Show>
