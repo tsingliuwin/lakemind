@@ -30,23 +30,15 @@ export default function TitleBar(props: {
     updater.start();
   });
 
-  // The modal is dismissable unless a download/relaunch is actively running.
-  const canDismiss = () => {
+  const checkUpdatesLabel = () => {
     const s = updater.status();
-    return s !== "downloading" && s !== "installing";
-  };
-
-  // Modal title derived from the current updater status.
-  const modalTitle = () => {
-    const s = updater.status();
-    const v = updater.info().version;
-    if (s === "checking") return t("updateChecking");
-    if (s === "available") return `${t("updateAvailable")} v${v}`;
-    if (s === "downloading") return t("downloadingUpdate");
-    if (s === "ready") return `${t("updateAvailable")} v${v}`;
-    if (s === "installing") return t("relaunching");
-    if (s === "error") return t("updateFailed");
-    return t("updateAvailable");
+    if (s === "checking") return "正在检查更新...";
+    if (s === "up-to-date") return `已是最新版本 (${appVersion()})`;
+    if (s === "available") return "发现新版本，开始下载...";
+    if (s === "downloading") return "有新版本，正在下载...";
+    if (s === "ready") return "新版本已就绪，可在左侧栏安装";
+    if (s === "error") return "检查更新失败";
+    return t("checkUpdates");
   };
 
   let menuRef!: HTMLDivElement;
@@ -179,9 +171,9 @@ export default function TitleBar(props: {
 
             <button
               class="menu-item"
-              onClick={() => { setMenuOpen(false); updater.checkInteractively(); }}
+              onClick={(e) => { e.stopPropagation(); updater.checkInteractively(); }}
             >
-              <span class="menu-label">{t("checkUpdates")}</span>
+              <span class="menu-label">{checkUpdatesLabel()}</span>
               <span class="menu-shortcut"></span>
             </button>
 
@@ -252,77 +244,7 @@ export default function TitleBar(props: {
         </div>
       </Show>
 
-      {/* Update Modal — driven by the shared updater store */}
-      <Show when={updater.modalOpen()}>
-        <div class="modal-overlay" onClick={() => canDismiss() && updater.closeModal()}>
-          <div class="modal-card" style="width: 420px;" onClick={(e) => e.stopPropagation()}>
-            <div class="modal-header">
-              <h3>{modalTitle()}</h3>
-              <Show when={canDismiss()}>
-                <button class="modal-close" onClick={() => updater.closeModal()}>✕</button>
-              </Show>
-            </div>
-            <div class="modal-body" style="align-items: stretch; text-align: left;">
-              <Show when={updater.status() === "checking"}>
-                <div style="display: flex; align-items: center; gap: 10px; padding: 12px 0;">
-                  <span class="import-banner__spinner" />
-                  <span style="color: var(--text-secondary); font-size: 13px;">{t("updateChecking")}</span>
-                </div>
-              </Show>
 
-              <Show when={updater.status() === "available"}>
-                <div class="update-notes">
-                  <div class="update-notes-label">{t("updateNotes")} (v{updater.info().version})</div>
-                  <pre class="update-notes-body">{updater.info().notes}</pre>
-                </div>
-              </Show>
-
-              <Show when={updater.status() === "downloading" || updater.status() === "installing"}>
-                <div class="update-progress-wrap">
-                  <div class="update-progress-bar">
-                    <div
-                      class="update-progress-fill"
-                      style={`width: ${Math.round(updater.progress().fraction * 100)}%`}
-                    />
-                  </div>
-                  <div class="update-progress-meta">
-                    {updater.status() === "installing"
-                      ? t("relaunching")
-                      : `${Math.round(updater.progress().fraction * 100)}%${updater.progress().human ? ` · ${updater.progress().human}` : ""}`}
-                  </div>
-                </div>
-              </Show>
-
-              <Show when={updater.status() === "ready"}>
-                <p style="margin: 8px 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6;">
-                  {t("updateDownloaded")}
-                </p>
-              </Show>
-
-              <Show when={updater.status() === "error"}>
-                <p style="margin: 8px 0; color: var(--text-danger, #e06c75); font-size: 13px; line-height: 1.6;">
-                  {updater.error()}
-                </p>
-              </Show>
-            </div>
-            <Show when={updater.status() === "available" || updater.status() === "ready" || updater.status() === "error"}>
-              <div class="modal-footer">
-                <Show when={updater.status() === "error"}>
-                  <button class="modal-btn-secondary" onClick={() => updater.fallbackDownload()}>{t("goDownload")}</button>
-                </Show>
-                <Show when={updater.status() === "available"}>
-                  <button class="modal-btn-secondary" onClick={() => updater.closeModal()}>{t("close")}</button>
-                  <button class="modal-btn-primary" onClick={() => updater.downloadInteractively()}>{t("downloadNow")}</button>
-                </Show>
-                <Show when={updater.status() === "ready"}>
-                  <button class="modal-btn-secondary" onClick={() => updater.closeModal()}>{t("later")}</button>
-                  <button class="modal-btn-primary" onClick={() => updater.installAndRelaunch()}>{t("installAndRelaunch")}</button>
-                </Show>
-              </div>
-            </Show>
-          </div>
-        </div>
-      </Show>
     </div>
   );
 }

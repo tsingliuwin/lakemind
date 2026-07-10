@@ -120,24 +120,21 @@ export default function LeftNav(props: {
 }) {
   // Update badge is driven by the shared updater store (src/lib/updater.ts),
   // which runs the background poll + silent download. The badge shows when an
-  // update is available / downloading / ready; clicking opens the modal.
+  // update is downloading or ready.
   const showBadge = () => {
     const s = updater.status();
-    return s === "available" || s === "downloading" || s === "ready";
+    return s === "downloading" || s === "ready";
   };
   const badgeTip = () => {
     const s = updater.status();
-    if (s === "ready") return t("badgeReady");
-    if (s === "downloading") return t("badgeDownloading");
-    return t("badgeAvailable");
+    if (s === "ready") return "新版本已就绪，点击立即安装并重启";
+    if (s === "downloading") return "新版本正在后台下载中...";
+    return "";
   };
   const onBadgeClick = () => {
-    // If already downloaded, installing is a single click; otherwise open the
-    // modal to show changelog / progress.
+    // If already downloaded, install immediately.
     if (updater.status() === "ready") {
       updater.installAndRelaunch();
-    } else {
-      updater.openModal();
     }
   };
 
@@ -547,7 +544,10 @@ export default function LeftNav(props: {
             <div class="ln-update-container" classList={{ "ln-update-ready": updater.status() === "ready" }}>
               <button
                 class="ln-arrow-btn update-btn"
-                classList={{ "update-btn--ready": updater.status() === "ready" }}
+                classList={{ 
+                  "update-btn--ready": updater.status() === "ready",
+                  "update-btn--downloading": updater.status() === "downloading"
+                }}
                 title={badgeTip()}
                 onClick={onBadgeClick}
               >

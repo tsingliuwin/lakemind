@@ -5952,6 +5952,19 @@ button.lm-select-trigger:hover:not(:disabled) {
   background-color: rgba(16, 185, 129, 0.25) !important;
 }
 
+/* "Downloading" variant — extremely subtle, transparent background, lower opacity */
+.update-btn--downloading {
+  color: var(--text-secondary, #7e7e8f) !important;
+  background-color: transparent !important;
+  opacity: 0.6;
+  cursor: default !important;
+}
+
+.update-btn--downloading:hover {
+  opacity: 1;
+  background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
 /* "Ready to install" variant — a gentler pulse to draw the eye without nagging. */
 .update-btn--ready {
   color: #fff !important;
