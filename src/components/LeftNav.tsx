@@ -1267,7 +1267,6 @@ export default function LeftNav(props: {
       <div class="ln-footer">
         <button
           class="ln-brand"
-          title={t("settings")}
           onClick={() => props.onOpenSettings()}
         >
           <img src={logoSrc()} alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
