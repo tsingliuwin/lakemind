@@ -5518,12 +5518,21 @@ button.lm-select-trigger:hover:not(:disabled) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 60%;
+  max-width: 200px;
+  flex-shrink: 0;
+}
+.chart-fullscreen-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  justify-content: center;
 }
 .chart-fullscreen-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
+  flex-shrink: 0;
 }
 .chart-fullscreen-btn {
   display: inline-flex;

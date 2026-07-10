@@ -325,6 +325,11 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
     if (t === chartType()) return;
     setChartType(t);
     render();
+    // Also update the fullscreen chart if it's open
+    if (fullscreenChart) {
+      const opt = buildOption(t, props.seg.table, props.seg.xField, props.seg.yFields, props.seg.title);
+      fullscreenChart.setOption(opt, true);
+    }
   }
 
   const switchable = SWITCHABLE_TYPES.includes(props.seg.chartType);
@@ -379,6 +384,23 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
         <div class="chart-fullscreen-overlay">
           <div class="chart-fullscreen-header">
             <span class="chart-fullscreen-title">{props.seg.title || "图表预览"}</span>
+            <Show when={switchable}>
+              <div class="chart-fullscreen-tabs">
+                <For each={CHART_TYPES}>
+                  {(ct) => (
+                    <button
+                      class="chart-seg__type-btn"
+                      classList={{ active: chartType() === ct.type }}
+                      title={ct.label}
+                      onClick={() => switchType(ct.type)}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: inline-block; vertical-align: middle;" innerHTML={ct.svg} />
+                      <span>{ct.label}</span>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
             <div class="chart-fullscreen-actions">
               <button class="chart-fullscreen-btn" onClick={saveAsImage} title="保存为图片">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px;">
