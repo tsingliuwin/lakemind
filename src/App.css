@@ -1622,6 +1622,8 @@ body.is-resizing-column * {
   border-top: 1px solid var(--border-faint);
   min-height: 0;
   overflow: hidden;
+  position: relative;
+  z-index: 10;
 }
 .bottom.state-folded {
   height: 32px;
