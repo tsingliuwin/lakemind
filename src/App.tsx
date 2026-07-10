@@ -1036,9 +1036,14 @@ export default function App() {
     window.addEventListener("mouseup", onMouseUp);
   }
 
-  /** 控制台三档循环：折叠 → 默认 → 展开 → 折叠。 */
+  /** 控制台折叠与开启切换（仅在 folded 与 default 状态间切换）。 */
   function cycleConsole() {
-    setConsoleState((s) => (s === "folded" ? "default" : s === "default" ? "expanded" : "folded"));
+    setConsoleState((s) => (s === "folded" ? "default" : "folded"));
+  }
+
+  /** 控制台全屏/退出全屏状态切换。 */
+  function toggleConsoleFullscreen() {
+    setConsoleState((s) => (s === "expanded" ? "default" : "expanded"));
   }
 
   /** Shared import path for drag-drop, the file picker, and the folder picker.
@@ -1622,6 +1627,7 @@ export default function App() {
               logs={logs()}
               state={consoleState()}
               onCycleState={cycleConsole}
+              onToggleFullscreen={toggleConsoleFullscreen}
               onClear={() => void clearLogsStore()}
             />
           </div>

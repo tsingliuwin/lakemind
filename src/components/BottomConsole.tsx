@@ -33,6 +33,7 @@ export default function BottomConsole(props: {
   logs: UnifiedLog[];
   state: ConsoleState;
   onCycleState: () => void;
+  onToggleFullscreen: () => void;
   onClear: () => void;
 }) {
   const [activeTab, setActiveTab] = createSignal<ConsoleTab>("all");
@@ -102,16 +103,28 @@ export default function BottomConsole(props: {
           </Show>
           <button
             class="icon-btn"
-            title={
-              props.state === "folded"
-                ? t("expandConsole")
-                : props.state === "default"
-                  ? t("expandFurther")
-                  : t("foldConsole")
-            }
+            title={props.state === "expanded" ? t("exitFullscreenConsole") : t("fullscreenConsole")}
+            onClick={() => props.onToggleFullscreen()}
+          >
+            <Show
+              when={props.state === "expanded"}
+              fallback={
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 11px; height: 11px;">
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+                </svg>
+              }
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 11px; height: 11px;">
+                <path d="M4 14h6v6m10-6h-6v6M4 10h6V4m10 6h-6V4"></path>
+              </svg>
+            </Show>
+          </button>
+          <button
+            class="icon-btn"
+            title={props.state === "folded" ? t("expandConsole") : t("foldConsole")}
             onClick={() => props.onCycleState()}
           >
-            <Show when={props.state === "expanded"} fallback={
+            <Show when={props.state !== "folded"} fallback={
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
                 <polyline points="18 15 12 9 6 15"></polyline>
               </svg>

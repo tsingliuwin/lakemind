@@ -55,6 +55,8 @@ const translations: Record<Language, Record<string, string>> = {
     expandConsole: "展开控制台",
     expandFurther: "进一步展开",
     foldConsole: "折叠",
+    fullscreenConsole: "全屏",
+    exitFullscreenConsole: "退出全屏",
     latest: "最近",
     // 控制台 Tab 与级别
     tabAll: "全部",
@@ -248,6 +250,8 @@ const translations: Record<Language, Record<string, string>> = {
     expandConsole: "Expand Console",
     expandFurther: "Expand Further",
     foldConsole: "Fold",
+    fullscreenConsole: "Fullscreen",
+    exitFullscreenConsole: "Exit Fullscreen",
     latest: "latest",
     tabAll: "All",
     tabQuery: "Query",
