@@ -1715,19 +1715,14 @@ body.is-resizing-column * {
   font-weight: 600;
 }
 .log-card {
-  border: 1px solid transparent;
-  border-bottom-color: var(--border-faint);
-  transition: background-color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+  border-bottom: 1px solid var(--border-faint);
+  transition: background-color 0.12s ease;
 }
-.log-card:hover:not(.expanded) {
-  background: var(--bg-surface);
+.log-card:hover {
+  background: var(--bg-hover);
 }
 .log-card.expanded {
-  background: var(--bg-elevated);
-  border-color: var(--border-strong);
-  border-radius: 6px;
-  margin: 6px 10px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
+  background: var(--bg-surface);
 }
 .log-row {
   display: flex;
@@ -1742,8 +1737,8 @@ body.is-resizing-column * {
 }
 .log-card.expanded .log-row {
   align-items: flex-start;
-  padding-top: 8px;
-  padding-bottom: 6px;
+  padding-top: 6px;
+  padding-bottom: 4px;
 }
 .log-row .log-ts {
   flex: 0 0 56px;
@@ -1812,8 +1807,8 @@ body.is-resizing-column * {
 }
 /* --- Expanded detail panel (shown when a row is clicked) --- */
 .log-detail {
-  margin: 0 12px 10px 74px;
-  padding: 0 0 4px 0;
+  margin: 0 12px 8px 74px;
+  padding: 4px 0;
   background: transparent;
   border: none;
   font-size: 11px;
