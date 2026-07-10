@@ -2694,6 +2694,53 @@ pub async fn get_table_ddl(
     .await
 }
 
+fn decode_base64(s: &str) -> Option<Vec<u8>> {
+    let mut table = [0u8; 256];
+    for (i, &c) in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".iter().enumerate() {
+        table[c as usize] = i as u8;
+    }
+    let bytes = s.as_bytes();
+    let mut out = Vec::new();
+    let mut buffer = 0u32;
+    let mut bits = 0;
+    for &b in bytes {
+        if b == b'=' { break; }
+        let val = table[b as usize];
+        if val == 0 && b != b'A' { continue; }
+        buffer = (buffer << 6) | (val as u32);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
+#[tauri::command]
+pub async fn save_image_from_base64(base64_data: String, default_name: String) -> Result<(), String> {
+    let base64_str = if let Some(pos) = base64_data.find("base64,") {
+        &base64_data[pos + 7..]
+    } else {
+        &base64_data
+    };
+
+    let decoded_bytes = decode_base64(base64_str)
+        .ok_or_else(|| "Failed to decode base64 data".to_string())?;
+
+    let file_path = rfd::FileDialog::new()
+        .set_file_name(&default_name)
+        .add_filter("PNG Image", &["png"])
+        .save_file();
+
+    if let Some(path) = file_path {
+        std::fs::write(&path, decoded_bytes)
+            .map_err(|e| format!("Failed to write file: {}", e))?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

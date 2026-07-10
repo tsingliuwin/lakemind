@@ -1,5 +1,6 @@
 import { onCleanup, onMount, createSignal, For, Show, createEffect } from "solid-js";
 import * as echarts from "echarts";
+import { invoke } from "@tauri-apps/api/core";
 import type { Segment, SqlResult } from "../lib/types";
 import { currentTheme, Theme } from "../lib/theme";
 
@@ -84,18 +85,19 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
   function saveAsImage() {
     const activeChart = isFullScreen() ? fullscreenChart : chart;
     if (!activeChart) return;
-    
+
     const isLight = currentTheme() === "light";
     const url = activeChart.getDataURL({
       type: "png",
       pixelRatio: 2,
       backgroundColor: isLight ? "#ffffff" : "#121214",
     });
-    
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${props.seg.title || "chart"}.png`;
-    a.click();
+
+    const fileName = `${props.seg.title || "chart"}.png`;
+    invoke("save_image_from_base64", {
+      base64Data: url,
+      defaultName: fileName,
+    }).catch((e) => console.error("[chart] save image failed:", e));
   }
 
   /** Build ECharts option from SqlResult + chart config. */

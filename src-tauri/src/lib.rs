@@ -111,6 +111,7 @@ pub fn run() {
             commands::list_db_connection_tables,
             commands::register_database_table,
             commands::get_table_ddl,
+            commands::save_image_from_base64,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
