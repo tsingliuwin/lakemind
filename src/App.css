@@ -695,6 +695,7 @@ select:hover:not(:disabled) {
 .icon-btn:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text-primary);
+  border-color: transparent;
 }
 .icon-btn.active {
   color: var(--accent-blue);
