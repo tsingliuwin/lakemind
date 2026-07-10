@@ -1738,36 +1738,26 @@ body.is-resizing-column * {
   font-family: var(--font-mono);
   font-size: 11px;
 }
-.log-row .log-level {
-  flex: 0 0 14px;
-  text-align: center;
-  font-weight: 700;
-  font-size: 12px;
-}
-.log-row .log-level[data-level="info"] { color: var(--accent-green); }
-.log-row .log-level[data-level="warn"] { color: var(--accent-amber, #f59e0b); }
-.log-row .log-level[data-level="error"] { color: var(--accent-red); }
-.log-row .log-level[data-level="debug"] { color: var(--text-dim); }
-/* Category shown as a compact colored tag instead of a wide fixed column. */
-.log-row .log-cat {
+/* Unified badge: text = category, color = level/status. Merges the old
+ * glyph + category columns into one, reinforcing the app-wide convention that
+ * green = ok, amber = warning, red = error, dim = debug/trace. */
+.log-row .log-badge {
   flex: 0 0 auto;
-  color: var(--text-dim);
   font-family: var(--font-mono);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.3px;
   white-space: nowrap;
-  padding: 0 5px;
+  padding: 1px 6px;
   border-radius: 3px;
-  line-height: 16px;
+  line-height: 15px;
   background: var(--bg-hover);
+  color: var(--text-secondary);
 }
-/* Per-category tag tint so rows stay identifiable without a full-width column. */
-.log-row .log-cat[data-cat="query"]  { color: var(--accent-green, #10b981); }
-.log-row .log-cat[data-cat="import"] { color: var(--accent-amber, #f59e0b); }
-.log-row .log-cat[data-cat="agent"]  { color: #818cf8; }
-.log-row .log-cat[data-cat="error"],
-.log-row .log-cat[data-cat="system"] { color: var(--text-secondary); }
+.log-row .log-badge[data-level="info"]  { color: var(--accent-green); }
+.log-row .log-badge[data-level="warn"]  { color: var(--accent-amber); }
+.log-row .log-badge[data-level="error"] { color: var(--accent-red); }
+.log-row .log-badge[data-level="debug"] { color: var(--text-dim); }
 .log-row .log-title {
   flex: 1;
   min-width: 0;

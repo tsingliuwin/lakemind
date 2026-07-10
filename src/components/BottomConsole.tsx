@@ -158,8 +158,7 @@ export default function BottomConsole(props: {
                       }}
                     >
                       <span class="log-ts">{formatTs(log.ts)}</span>
-                      <span class="log-level" data-level={log.level} title={levelName(log.level)}>{levelGlyph(log.level)}</span>
-                      <span class="log-cat" data-cat={log.category}>{log.category}</span>
+                      <span class="log-badge" data-level={log.level} title={levelName(log.level)}>{log.category}</span>
                       <span class="log-title" title={title}>{title}</span>
                       <span class="log-meta">
                         <Show when={rowCount != null}>
@@ -195,16 +194,6 @@ function formatTs(ms: number): string {
 /** Pull a numeric value out of a possibly-undefined detail field. */
 function numFromDetail(v: unknown): number | null {
   return typeof v === "number" ? v : null;
-}
-
-/** One-glyph level indicator shown in each row. */
-function levelGlyph(level: LogLevel): string {
-  switch (level) {
-    case "error": return "✗";
-    case "warn": return "▲";
-    case "info": return "✓";
-    default: return "·";
-  }
 }
 
 /** Localized level name for tooltips. */
