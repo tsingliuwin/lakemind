@@ -1320,8 +1320,8 @@ select:hover:not(:disabled) {
   transition: all 0.15s ease;
 }
 .editor-toolbar .header-close-btn:hover {
-  background: var(--bg-active) !important;
-  color: var(--text-primary) !important;
+  background: rgba(239, 68, 68, 0.15) !important;
+  color: var(--accent-red) !important;
 }
 
 .editor-toolbar button:active:not(:disabled) {
