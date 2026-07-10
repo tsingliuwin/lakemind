@@ -1795,15 +1795,16 @@ body.is-resizing-column * {
 }
 /* --- Expanded detail panel (shown when a row is clicked) --- */
 .log-detail {
-  margin: 0 12px 4px 74px;
-  padding: 6px 10px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-faint);
-  border-radius: 4px;
+  margin: 0 12px 6px 74px;
+  padding: 6px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
   font-size: 11px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
 }
 .log-detail .ld-section {
   display: flex;
@@ -1839,7 +1840,7 @@ body.is-resizing-column * {
 .log-detail .ld-code {
   margin: 0;
   padding: 6px 8px;
-  background: var(--bg-base);
+  background: var(--bg-surface);
   border: 1px solid var(--border-faint);
   border-radius: 4px;
   font-family: var(--font-mono);
