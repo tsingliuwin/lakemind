@@ -1,0 +1,11 @@
+{
+  "version": "0.3.2",
+  "notes": "- 自动更新升级为静默下载 + 就绪提示：发现新版后台静默下载，完成后徽标变绿，点击秒级安装\n- 统一更新入口：左上角徽标与右上角菜单共享同一套更新流程，不再跳网页\n- 启动后定时自动检查更新（每 4 小时），无需重启也能发现新版\n- 修复 macOS 自动更新签名缺失无法校验安装的问题",
+  "pubdate": "2026-07-10T04:35:20.954Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK1lJWTVCMm81b1lSeDlkZERUaUYwQmVKS3Y5OVhRSGJUNHY3cnFoWmdsanMxZEpYSzlrZm9ucklPSFk0NUs3VjJpbzEwcHRUbCtDeVBLQVgwVWpUK1FFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzNjU4MDM4CWZpbGU6bGFrZW1pbmRfMC4zLjJfeDY0LXNldHVwLmV4ZQpkdDM0b1B4YmIxRjFBb3RzbkxHWEpRTDVBNlkzT0RBd1d6MG5yZEJsSVlnZFRLYjA4YmVOVFMwMVNjVGRhdnFOcVFHVXcwa2JEYmdITUFwWWtxNEdEZz09Cg==",
+      "url": "https://upload.xi-n.com/lakemind-v0.3.2.exe"
+    }
+  }
+}
