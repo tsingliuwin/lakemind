@@ -127,7 +127,7 @@ jobs:
             if (process.platform === 'win32') {
               conf.bundle.targets = ['nsis'];
             } else if (process.platform === 'darwin') {
-              conf.bundle.targets = ['dmg'];
+              conf.bundle.targets = ['app', 'dmg'];
             }
             fs.writeFileSync(path, JSON.stringify(conf, null, 2), 'utf8');
             console.log('Tauri config optimized for small release:', conf.bundle.targets);
