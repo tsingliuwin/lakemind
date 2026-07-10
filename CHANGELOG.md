@@ -6,6 +6,22 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-10
+
+### 新增
+
+#### 数据分析 Agent
+- 引入全局分析准则库（OKF bundle）：将"分析准则"从扁平糊在系统提示词里的静态文本，重构为遵循 [OKF v0.1 规范](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) 的分层、标签化、可检索、按需注入的活知识库。准则随软件分发于 `~/.lakemind/tenets/`，所有工作区共享，是产品资产而非每工作区从零积累。
+- 分层架构：PREAMBLE 只保留跨行业普适的核心准则（数据纪律红线）；行业案例（教育、旅游、房地产…）与分析主题准则（转化、增长…）按 frontmatter 标签多维分类（`industry:` / `topic:` / `error-type:` / `severity:`），按需检索。
+- 新增 2 个 Agent 工具（共 16 个）：`search_tenets`（关键词检索准则标题/描述/标签/正文）、`load_tenets`（支持渐进式披露——不带参数返回目录大纲，带 concept_id 精读单条，带标签批量加载）。
+- 首次启动自动初始化种子准则库（已存在则跳过，尊重用户编辑）。
+- 扩展性：新增行业/主题只需添加一个带 frontmatter 的 Markdown 文件并更新对应 index.md，零代码。bundle 可 git 化、可 zip 分发。
+
+### 变更
+
+#### 数据分析 Agent
+- 重构系统提示词（PREAMBLE）的数据纪律章节：回退此前硬编码在其中的教育行业具体案例（面向全球用户不应常驻单一行业案例），改为跨行业普适的抽象表述；同时引导 Agent 在涉及特定行业或分析主题时主动检索准则库。该教育案例（"3,546 单 99 元体验课"归因错误）完整保留于 `industry/education.md`，按标签被检索。
+
 ## [0.3.2] - 2026-07-10
 
 ### 新增
