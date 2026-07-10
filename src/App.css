@@ -2741,6 +2741,7 @@ body.is-resizing-column * {
 .settings-view-header {
   margin-bottom: 24px;
   flex-shrink: 0;
+  max-width: 680px;
 }
 
 .settings-view-header h2 {
@@ -2767,6 +2768,8 @@ body.is-resizing-column * {
   display: flex;
   box-shadow: none;
   overflow: hidden;
+  max-width: 680px;
+  width: 100%;
 }
 
 .settings-panel-box.single-col {
