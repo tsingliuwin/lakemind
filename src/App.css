@@ -6139,10 +6139,14 @@ button.lm-select-trigger:hover:not(:disabled) {
   justify-content: center;
   cursor: pointer;
   margin-right: 4px;
+  border: none !important;
+  outline: none !important;
 }
 
 .update-btn:hover {
   background-color: rgba(16, 185, 129, 0.25) !important;
+  border: none !important;
+  outline: none !important;
 }
 
 /* "Downloading" variant — extremely subtle, transparent background, lower opacity */
@@ -6151,11 +6155,15 @@ button.lm-select-trigger:hover:not(:disabled) {
   background-color: transparent !important;
   opacity: 0.6;
   cursor: default !important;
+  border: none !important;
+  outline: none !important;
 }
 
 .update-btn--downloading:hover {
   opacity: 1;
   background-color: rgba(255, 255, 255, 0.05) !important;
+  border: none !important;
+  outline: none !important;
 }
 
 /* "Ready to install" variant — a gentler pulse to draw the eye without nagging. */
@@ -6163,10 +6171,14 @@ button.lm-select-trigger:hover:not(:disabled) {
   color: #fff !important;
   background-color: var(--text-success, #10b981) !important;
   animation: update-ready-pulse 2s ease-in-out infinite;
+  border: none !important;
+  outline: none !important;
 }
 
 .update-btn--ready:hover {
   filter: brightness(1.1);
+  border: none !important;
+  outline: none !important;
 }
 
 @keyframes update-ready-pulse {
@@ -6178,7 +6190,7 @@ button.lm-select-trigger:hover:not(:disabled) {
   display: none;
   position: absolute;
   top: 100%;
-  right: 0;
+  left: 0;
   margin-top: 6px;
   width: 280px;
   max-height: 350px;

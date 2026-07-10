@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
+import { For, Show, createMemo, createSignal, createEffect, onCleanup } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import type { SourceTable, QueryTask, Workspace, FileItem, RegisterStatus, ImportProgress, DbConnection } from "../lib/types";
 import type { SettingsTab } from "./SettingsPage";
@@ -132,10 +132,30 @@ export default function LeftNav(props: {
     if (s === "downloading") return "新版本正在后台下载中...";
     return "";
   };
+
+  const [showRelaunchConfirm, setShowRelaunchConfirm] = createSignal(false);
+
+  createEffect(() => {
+    if (showRelaunchConfirm()) {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          setShowRelaunchConfirm(false);
+        } else if (e.key === "Enter") {
+          setShowRelaunchConfirm(false);
+          updater.installAndRelaunch();
+        }
+      };
+      window.addEventListener("keydown", handleKeyDown, { capture: true });
+      onCleanup(() => {
+        window.removeEventListener("keydown", handleKeyDown, { capture: true });
+      });
+    }
+  });
+
   const onBadgeClick = () => {
-    // If already downloaded, install immediately.
+    // If already downloaded, show confirmation modal first.
     if (updater.status() === "ready") {
-      updater.installAndRelaunch();
+      setShowRelaunchConfirm(true);
     }
   };
 
@@ -1254,6 +1274,36 @@ export default function LeftNav(props: {
           <span class="ln-brand-name">LakeMind</span>
         </button>
       </div>
+
+      <Show when={showRelaunchConfirm()}>
+        <div class="modal-overlay" onClick={() => setShowRelaunchConfirm(false)}>
+          <div class="modal-card update-confirm-card" onClick={(e) => e.stopPropagation()} style="width: 440px; padding: 20px 24px; border-radius: 12px; display: flex; flex-direction: column; gap: 12px;">
+            <div style="font-size: 14px; font-weight: 600; color: var(--text-primary);">
+              确认更新到 v{updater.info().version}？
+            </div>
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 8px;">
+              应用将立即退出并启动安装程序，正在进行的会话会被中断。
+            </div>
+            <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px;">
+              <button
+                onClick={() => setShowRelaunchConfirm(false)}
+                style="background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-strong); color: var(--text-secondary); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 8px;"
+              >
+                稍后 <span style="font-size: 10px; opacity: 0.5; background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px;">esc</span>
+              </button>
+              <button
+                onClick={() => {
+                  setShowRelaunchConfirm(false);
+                  updater.installAndRelaunch();
+                }}
+                style="background: #fff; border: none; color: #000; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px;"
+              >
+                立即重启更新 <span style="font-size: 10px; opacity: 0.6; font-family: monospace;">↵</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
     </nav>
   );
 }
