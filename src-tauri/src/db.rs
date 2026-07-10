@@ -100,6 +100,10 @@ pub struct SourceRecord {
     /// `"full"`    — fully materialized; aggregation is safe.
     /// `None`/empty is treated as `sampled` (when `is_sampled`) or `full`.
     pub materialize_status: Option<String>,
+    /// Worksheet name for multi-sheet Excel files. `None` for single-sheet
+    /// files and non-Excel sources. Part of the source identity key together
+    /// with `scan_path`, so the same `.xlsx` can back multiple rows.
+    pub sheet: Option<String>,
 }
 
 /// Status strings stored in `sources.materialize_status`.
@@ -132,8 +136,8 @@ pub fn upsert_source(conn: &Connection, ws_path: &str, r: &SourceRecord) -> Resu
     let keys = serde_json::to_string(&r.partition_keys).unwrap_or_else(|_| "[]".into());
     let cols = serde_json::to_string(&r.columns).unwrap_or_else(|_| "[]".into());
     conn.execute(
-        "INSERT INTO sources (workspace_path, table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count, materialize_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO sources (workspace_path, table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count, materialize_status, sheet)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(workspace_path, table_name) DO UPDATE SET
             label=excluded.label, kind=excluded.kind, storage=excluded.storage,
             file_path=excluded.file_path, scan_path=excluded.scan_path,
@@ -141,11 +145,11 @@ pub fn upsert_source(conn: &Connection, ws_path: &str, r: &SourceRecord) -> Resu
             file_mtime=excluded.file_mtime, file_size=excluded.file_size,
             columns=excluded.columns, row_count=excluded.row_count,
             is_sampled=excluded.is_sampled, full_row_count=excluded.full_row_count,
-            materialize_status=excluded.materialize_status",
+            materialize_status=excluded.materialize_status, sheet=excluded.sheet",
         rusqlite::params![
             ws_path, r.table_name, r.label, r.kind, r.storage, r.file_path, r.scan_path, keys,
             r.created_at, r.name_source, r.file_mtime, r.file_size, cols, r.row_count,
-            if r.is_sampled { 1 } else { 0 }, r.full_row_count, r.materialize_status
+            if r.is_sampled { 1 } else { 0 }, r.full_row_count, r.materialize_status, r.sheet
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -156,7 +160,7 @@ pub fn upsert_source(conn: &Connection, ws_path: &str, r: &SourceRecord) -> Resu
 pub fn list_sources(conn: &Connection, ws_path: &str) -> Result<Vec<SourceRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count, materialize_status
+            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count, materialize_status, sheet
              FROM sources WHERE workspace_path = ? ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -186,6 +190,7 @@ pub fn list_sources(conn: &Connection, ws_path: &str) -> Result<Vec<SourceRecord
                 is_sampled: is_sampled_val != 0,
                 full_row_count: row.get(14).ok(),
                 materialize_status: row.get(15).ok(),
+                sheet: row.get(16).ok(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -207,7 +212,7 @@ pub fn get_source_by_table(
 ) -> Result<Option<SourceRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count, materialize_status
+            "SELECT table_name, label, kind, storage, file_path, scan_path, partition_keys, created_at, name_source, file_mtime, file_size, columns, row_count, is_sampled, full_row_count, materialize_status, sheet
              FROM sources WHERE workspace_path = ? AND table_name = ?",
         )
         .map_err(|e| e.to_string())?;
@@ -237,6 +242,7 @@ pub fn get_source_by_table(
                 is_sampled: is_sampled_val != 0,
                 full_row_count: row.get(14).ok(),
                 materialize_status: row.get(15).ok(),
+                sheet: row.get(16).ok(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -487,6 +493,7 @@ pub fn init_global_db() -> Result<(), String> {
             is_sampled     INTEGER NOT NULL DEFAULT 0,
             full_row_count INTEGER,
             materialize_status TEXT,
+            sheet           TEXT,
             PRIMARY KEY (workspace_path, table_name),
             FOREIGN KEY(workspace_path) REFERENCES workspaces(path) ON DELETE CASCADE
         )",
@@ -506,6 +513,10 @@ pub fn init_global_db() -> Result<(), String> {
             [],
         );
     }
+    // sheet: worksheet name for multi-sheet Excel files. NULL for single-sheet
+    // files and non-Excel sources. Added for multi-sheet Excel support; old rows
+    // get NULL (treated as single-sheet, preserving legacy behavior).
+    let _ = conn.execute("ALTER TABLE sources ADD COLUMN sheet TEXT;", []);
 
     // config: key/value user settings (NEW)
     conn.execute(

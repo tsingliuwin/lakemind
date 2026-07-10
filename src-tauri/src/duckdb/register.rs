@@ -52,6 +52,7 @@ pub fn register(
         columns,
         is_sampled: false,
         full_row_count: None,
+        sheet: e.sheet.clone(),
     })
 }
 
@@ -70,7 +71,7 @@ fn create_view(conn: &Connection, e: &ScanEntry) -> AppResult<()> {
 fn create_table(conn: &Connection, e: &ScanEntry, progress: Option<&dyn Fn(&str)>) -> AppResult<()> {
     match e.kind {
         SourceKind::Csv => load_csv_as_table(conn, &e.view_name, &e.scan_path, progress)?,
-        SourceKind::Excel => load_xlsx_as_table(conn, &e.view_name, &e.scan_path, progress)?,
+        SourceKind::Excel => load_xlsx_as_table(conn, &e.view_name, &e.scan_path, e.sheet.as_deref(), progress)?,
         _ => {
             conn.execute(&format!("DROP TABLE IF EXISTS \"{}\";", e.view_name), [])?;
             let sql = format!("CREATE TABLE \"{}\" AS {};", e.view_name, build_select_sql(e));
@@ -93,7 +94,13 @@ fn build_select_sql(e: &ScanEntry) -> String {
         SourceKind::Parquet => format!("SELECT * FROM read_parquet('{scan}'{partition_clause})"),
         SourceKind::Csv => format!("SELECT * FROM read_csv_auto('{scan}', header = true)"),
         SourceKind::Json => format!("SELECT * FROM read_json_auto('{scan}')"),
-        SourceKind::Excel => format!("SELECT * FROM read_xlsx('{scan}')"),
+        SourceKind::Excel => match &e.sheet {
+            Some(sheet) => {
+                let esc_sheet = sheet.replace('\'', "''");
+                format!("SELECT * FROM read_xlsx('{scan}', sheet='{esc_sheet}')")
+            }
+            None => format!("SELECT * FROM read_xlsx('{scan}')"),
+        },
         SourceKind::Delta => format!("SELECT * FROM delta('{scan}')"),
         SourceKind::Table | SourceKind::View => unreachable!("Table/View are not raw-path sources"),
         SourceKind::Postgres | SourceKind::Mysql | SourceKind::Sqlite => unreachable!("external-database sources are registered through register_database_table"),
@@ -350,10 +357,22 @@ fn evaluate_candidate(conn: &Connection, table_name: &str, source_fn: &str) -> A
     }))
 }
 
-/// Multi-strategy Excel loader
-fn load_xlsx_as_table(conn: &Connection, table_name: &str, file_path: &str, progress: Option<&dyn Fn(&str)>) -> AppResult<()> {
+/// Multi-strategy Excel loader. `sheet` selects a specific worksheet for
+/// multi-sheet files; `None` leaves DuckDB to its default (first sheet).
+fn load_xlsx_as_table(
+    conn: &Connection,
+    table_name: &str,
+    file_path: &str,
+    sheet: Option<&str>,
+    progress: Option<&dyn Fn(&str)>,
+) -> AppResult<()> {
     let drop_sql = format!("DROP TABLE IF EXISTS \"{}\";", table_name);
     let escaped_path = file_path.replace('\'', "''");
+    // Sheet clause injected into every strategy's `read_xlsx(...)` call.
+    let sheet_clause = match sheet {
+        Some(s) => format!(", sheet='{}'", s.replace('\'', "''")),
+        None => String::new(),
+    };
 
     let mut candidates = Vec::new();
 
@@ -379,25 +398,25 @@ fn load_xlsx_as_table(conn: &Connection, table_name: &str, file_path: &str, prog
     }
 
     // Strategy 1: Default load
-    try_strategy!(1, "默认读取", format!("read_xlsx('{escaped_path}')"));
+    try_strategy!(1, "默认读取", format!("read_xlsx('{escaped_path}'{sheet_clause})"));
 
     // Strategy 2-6: Try different header offsets (common in exported reports)
     let offsets = ["A1:ZZ100000", "A2:ZZ100000", "A3:ZZ100000", "A4:ZZ100000", "A5:ZZ100000"];
     for (i, r) in offsets.iter().enumerate() {
         let label = format!("表头偏移{}", r.split(':').next().unwrap_or(r));
         try_strategy!(i + 2, label, format!(
-            "read_xlsx('{escaped_path}', header=true, range='{r}', stop_at_empty=false, ignore_errors=true)"
+            "read_xlsx('{escaped_path}', header=true, range='{r}', stop_at_empty=false, ignore_errors=true{sheet_clause})"
         ));
     }
 
     // Strategy 7: stop_at_empty=false + header + ignore_errors
     try_strategy!(7, "忽略错误全扫描", format!(
-        "read_xlsx('{escaped_path}', header=true, stop_at_empty=false, ignore_errors=true)"
+        "read_xlsx('{escaped_path}', header=true, stop_at_empty=false, ignore_errors=true{sheet_clause})"
     ));
 
     // Strategy 8: all_varchar + stop_at_empty=false + ignore_errors
     try_strategy!(8, "全文本类型", format!(
-        "read_xlsx('{escaped_path}', header=true, stop_at_empty=false, all_varchar=true, ignore_errors=true)"
+        "read_xlsx('{escaped_path}', header=true, stop_at_empty=false, all_varchar=true, ignore_errors=true{sheet_clause})"
     ));
 
     if !candidates.is_empty() {
@@ -416,7 +435,7 @@ fn load_xlsx_as_table(conn: &Connection, table_name: &str, file_path: &str, prog
     // Fallback: accept best-effort result using Strategy 8 source (all_varchar)
     let _ = conn.execute(&drop_sql, []);
     let fallback_source = format!(
-        "read_xlsx('{escaped_path}', header=true, stop_at_empty=false, all_varchar=true, ignore_errors=true)"
+        "read_xlsx('{escaped_path}', header=true, stop_at_empty=false, all_varchar=true, ignore_errors=true{sheet_clause})"
     );
     create_xlsx_table_pruned(conn, table_name, &fallback_source)?;
     Ok(())
@@ -684,6 +703,7 @@ mod tests {
             partition_keys: Vec::new(),
             file_size: content.len() as u64,
             mtime: 0,
+            sheet: None,
         };
         let table = register(&conn, &entry, StorageKind::Table, None).unwrap();
         let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();

@@ -20,6 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
+use calamine::{open_workbook, Reader, Xlsx};
 use walkdir::WalkDir;
 
 use crate::duckdb::naming;
@@ -47,6 +48,11 @@ pub struct ScanEntry {
     /// Max mtime (ms since epoch) of the backing file(s). Companion to
     /// `file_size`: either changing triggers a source rebuild.
     pub mtime: i64,
+    /// Worksheet name for multi-sheet Excel files. `None` means the file has a
+    /// single sheet (or isn't Excel) and is registered as one table using
+    /// DuckDB's default (first sheet). For a multi-sheet `.xlsx`, one
+    /// `ScanEntry` is produced per sheet, each carrying its sheet name.
+    pub sheet: Option<String>,
 }
 
 /// Walk `root` and produce a deduplicated list of SOURCE scan entries.
@@ -142,7 +148,7 @@ pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
             out.push(build_individual_entry(f, *s, *mt, SourceKind::Json, &root_str));
         }
         for (f, s, mt) in &excel_files {
-            out.push(build_individual_entry(f, *s, *mt, SourceKind::Excel, &root_str));
+            out.extend(build_excel_entries(f, *s, *mt, &root_str));
         }
 
         // Group parquet files by parent directory to detect subdirectories (shards)
@@ -210,12 +216,14 @@ pub fn scan_path(root: &Path, is_workspace: bool) -> Vec<ScanEntry> {
         }
         // Excel: register individually since read_xlsx doesn't support globbing.
         for (f, s, mt) in &excel_files {
-            out.push(build_individual_entry(f, *s, *mt, SourceKind::Excel, &root_str));
+            out.extend(build_excel_entries(f, *s, *mt, &root_str));
         }
     }
 
-    // Deduplicate by scan_path (a file might be caught twice on edge cases).
-    out.dedup_by(|a, b| a.scan_path == b.scan_path);
+    // Deduplicate by (scan_path, sheet) — a multi-sheet xlsx yields one entry
+    // per sheet, all sharing the same scan_path, so sheet must be part of the
+    // identity to avoid collapsing them back into one.
+    out.dedup_by(|a, b| a.scan_path == b.scan_path && a.sheet == b.sheet);
     out
 }
 
@@ -239,7 +247,73 @@ fn build_individual_entry(file: &Path, file_size: u64, mtime: i64, kind: SourceK
         partition_keys: Vec::new(),
         file_size,
         mtime,
+        sheet: None,
     }
+}
+
+/// Enumerate worksheet names in an `.xlsx` file using calamine.
+///
+/// calamine only reads the workbook metadata (zip + `xl/workbook.xml`), not the
+/// cell data, so this is fast even for large files. Returns an empty Vec on any
+/// error (corrupt file, not actually xlsx, etc.) so the caller can fall back to
+/// registering a single table with `sheet = None` (DuckDB's first-sheet default).
+fn list_xlsx_sheets(file: &Path) -> Vec<String> {
+    match open_workbook::<Xlsx<_>, _>(file) {
+        Ok(book) => book.sheet_names().to_vec(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Build SOURCE scan entries for an Excel file.
+///
+/// - 0 or 1 sheet (or unreadable) → a single entry with `sheet = None`, label =
+///   file stem. This preserves the legacy behavior exactly (backward compat).
+/// - ≥ 2 sheets → one entry per sheet, each with `sheet = Some(name)` and a
+///   `{file_stem}_{sheet}` label so the sheet is identifiable in the UI and the
+///   generated table name.
+///
+/// All entries share the same file path/size/mtime (they back the same file).
+fn build_excel_entries(file: &Path, file_size: u64, mtime: i64, root: &Path) -> Vec<ScanEntry> {
+    let stem = file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("data")
+        .to_string();
+    let _ = root;
+
+    let sheets = list_xlsx_sheets(file);
+    if sheets.len() <= 1 {
+        // Single-sheet (or unreadable): keep legacy behavior — one table, no sheet suffix.
+        return vec![ScanEntry {
+            label: stem.clone(),
+            view_name: naming::view_name(&stem),
+            kind: SourceKind::Excel,
+            path: forward_slashes(file),
+            scan_path: forward_slashes(file),
+            partition_keys: Vec::new(),
+            file_size,
+            mtime,
+            sheet: None,
+        }];
+    }
+
+    sheets
+        .into_iter()
+        .map(|sheet| {
+            let label = format!("{stem}_{sheet}");
+            ScanEntry {
+                label: label.clone(),
+                view_name: naming::view_name(&label),
+                kind: SourceKind::Excel,
+                path: forward_slashes(file),
+                scan_path: forward_slashes(file),
+                partition_keys: Vec::new(),
+                file_size,
+                mtime,
+                sheet: Some(sheet),
+            }
+        })
+        .collect()
 }
 
 fn group_by_dir(files: &[(PathBuf, u64, i64)]) -> Vec<(String, PathBuf, u64, i64)> {
@@ -312,6 +386,7 @@ fn build_entry(
         partition_keys,
         file_size: total_size,
         mtime,
+        sheet: None,
     }
 }
 

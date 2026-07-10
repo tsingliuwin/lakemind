@@ -153,6 +153,7 @@ import { t } from "./i18n";
 export type UpdateStatus =
   | "idle" // nothing happened yet / reset
   | "checking" // a check() is in flight
+  | "up-to-date" // already at the latest version
   | "available" // new version known, not yet downloaded
   | "downloading" // silent download in progress
   | "ready" // downloaded & staged; waiting for user to relaunch
@@ -174,7 +175,6 @@ const store = createRoot(() => {
   const [info, setInfo] = createSignal<UpdateStateInfo>({ version: "", notes: "" });
   const [progress, setProgress] = createSignal<DownloadProgress>({ fraction: 0, human: "" });
   const [error, setError] = createSignal("");
-  /** Whether the update modal is open (driven by either entry point). */
   const [modalOpen, setModalOpen] = createSignal(false);
 
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -196,78 +196,70 @@ const store = createRoot(() => {
 
   /**
    * Run an update check.
-   * - `userInitiated=true`: opens the modal and shows a spinner; on "no update"
-   *   shows the "already latest" alert. This is the right-menu path.
-   * - `userInitiated=false`: silent background poll; on a new version it kicks
-   *   off a silent download. Never disturbs the user unless ready.
-   *
-   * Concurrency: if a background download is already in progress or the update
-   * is already staged, a user-initiated check just opens the modal on the
-   * current state instead of re-checking (avoids a double check()/download()).
+   * - `userInitiated=true`: silent check except setting status for menu feedback.
+   * - `userInitiated=false`: silent background poll.
+   * Both will trigger the download silently and show progress via the sidebar badge.
    */
   const runCheck = async (userInitiated: boolean) => {
     if (!inTauri) return;
     const prev = status();
-    if (userInitiated && (prev === "downloading" || prev === "ready" || prev === "checking")) {
-      // Already knows about / is fetching the update — just surface it.
-      setModalOpen(true);
+    if (prev === "downloading" || prev === "ready" || prev === "checking") {
       return;
     }
-    if (userInitiated) setModalOpen(true);
     setStatus("checking");
     resetTransient();
     try {
       const found = await checkForUpdate();
       if (!found) {
-        setStatus("idle");
         if (userInitiated) {
-          const cur = await getVersion().catch(() => "");
-          alert(t("latestVersionMsg") + (cur ? ` (v${cur})` : ""));
-          setModalOpen(false);
+          setStatus("up-to-date");
+          setTimeout(() => {
+            if (status() === "up-to-date") {
+              setStatus("idle");
+            }
+          }, 5000);
+        } else {
+          setStatus("idle");
         }
         return;
       }
       setInfo({ version: found.version, notes: found.notes });
       setStatus("available");
-      // Background path: silently start downloading right away.
-      if (!userInitiated) {
-        void runDownload(false);
-      }
+      void runDownload();
     } catch (e) {
       console.error("Update check failed:", e);
-      setStatus("error");
-      setError(e instanceof Error ? e.message : String(e));
       if (userInitiated) {
-        alert(t("updateCheckingFailed"));
-        setModalOpen(false);
+        setStatus("error");
+        setError(e instanceof Error ? e.message : String(e));
+        setTimeout(() => {
+          if (status() === "error") {
+            setStatus("idle");
+          }
+        }, 5000);
+      } else {
+        setStatus("idle");
       }
     }
   };
 
-  /**
-   * Download (and stage) the update without relaunching.
-   * `userInitiated=true` keeps the modal open with a progress bar.
-   * `userInitiated=false` runs truly silently; on success it flips to "ready".
-   * Reentrant-safe: a download already in progress is a no-op.
-   */
-  const runDownload = async (userInitiated: boolean) => {
-    if (status() === "downloading") return; // already fetching
-    if (status() === "ready") return; // already staged
+  /** Download and stage the update silently. */
+  const runDownload = async () => {
+    if (status() === "downloading") return;
+    if (status() === "ready") return;
     setStatus("downloading");
     resetTransient();
     try {
       await downloadAndInstallUpdate((p) => setProgress(p));
       setStatus("ready");
-      // Silent success: do NOT auto-open the modal; the badge reflects "ready".
     } catch (e) {
-      console.error("Silent/interactive download failed:", e);
+      console.error("Download failed:", e);
       setStatus("error");
       setError(e instanceof Error ? e.message : String(e));
-      // Background failures are swallowed (next poll retries). Interactive ones
-      // surface in the already-open modal.
-      if (!userInitiated) {
-        setStatus("idle"); // back off silently; badge hides
-      }
+      setTimeout(() => {
+        if (status() === "error") {
+          setStatus("idle");
+        }
+      }, 5000);
     }
   };
 
@@ -283,23 +275,15 @@ const store = createRoot(() => {
     }
   };
 
-  /** User clicked the menu "check for updates" — interactive flow. */
   const checkInteractively = () => void runCheck(true);
-
-  /** User clicked "download" in the modal. */
-  const downloadInteractively = () => void runDownload(true);
-
-  /** User clicked "install & relaunch" in the modal. */
+  const downloadInteractively = () => void runDownload();
   const installAndRelaunch = () => void runInstall();
 
-  /** Either entry point opens the modal. */
-  const openModal = () => setModalOpen(true);
-  const closeModal = () => setModalOpen(false);
-
-  /** Open the browser download page and close the modal (fallback). */
+  // Stub functions to maintain API compatibility
+  const openModal = () => {};
+  const closeModal = () => {};
   const fallbackDownload = () => {
     void openDownloadPage();
-    setModalOpen(false);
   };
 
   /** Boot the background poller. Idempotent: safe to call from multiple mounts. */

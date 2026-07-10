@@ -110,6 +110,7 @@ mod tests_sampled_intercept {
             is_sampled: true,
             full_row_count: Some(1_000_000),
             materialize_status: Some(crate::db::mat_status::SAMPLED.to_string()),
+            sheet: None,
         }
     }
 
