@@ -2,6 +2,7 @@ import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import type { SourceTable, QueryTask, Workspace, FileItem, RegisterStatus, ImportProgress, DbConnection } from "../lib/types";
 import type { SettingsTab } from "./SettingsPage";
+import { logError } from "../lib/logger";
 import { t } from "../lib/i18n";
 import { logoSrc } from "../lib/theme";
 import { updater } from "../lib/updater";
@@ -201,7 +202,7 @@ export default function LeftNav(props: {
       const list = await invoke<DbConnection[]>("list_workspace_connections", { wsPath: ws });
       setWorkspaceConns(list);
     } catch (err) {
-      console.error("Failed to list workspace db connections:", err);
+      logError("ui", "Failed to list workspace db connections", err);
     }
   };
 
@@ -218,7 +219,7 @@ export default function LeftNav(props: {
       });
       setDbTables({ ...dbTables(), [id]: list });
     } catch (err) {
-      console.error("Failed to load tables for connection " + c.name, err);
+      logError("ui", "Failed to load tables for connection " + c.name, err);
     } finally {
       setLoadingDbConns({ ...loadingDbConns(), [id]: false });
     }
@@ -392,7 +393,7 @@ export default function LeftNav(props: {
       const items = await invoke<FileItem[]>("read_directory", { path: dirPath });
       setDirectoryContents((prev) => ({ ...prev, [dirPath]: items }));
     } catch (e) {
-      console.error("Failed to read dir:", e);
+      logError("ui", "Failed to read dir", e);
     }
   };
 

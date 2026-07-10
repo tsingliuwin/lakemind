@@ -10,6 +10,7 @@ mod commands;
 mod db;
 mod duckdb;
 mod error;
+mod logging;
 mod model;
 mod state;
 mod agent;
@@ -26,12 +27,36 @@ pub fn run() {
         eprintln!("Failed to initialize central SQLite database: {e}");
     }
 
+    // Install the tracing subscriber: the custom [`SqliteEmitLayer`] persists
+    // every event to SQLite and pushes info+ to the frontend console, while the
+    // fmt layer mirrors to stdout for dev diagnostics. Installed BEFORE the
+    // Tauri runtime starts so early-boot events are captured; the AppHandle is
+    // wired in from `setup` below (events before then degrade to SQLite-only).
+    use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_target(false)
+        .with_level(true)
+        .compact();
+    // RUST_LOG overrides; default to `info` so debug events don't spam.
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(logging::SqliteEmitLayer::new())
+        .with(filter)
+        .init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(AppState::default())
         .setup(|_app| {
+            // Hand the AppHandle to the logging layer so it can emit to the
+            // frontend `app-log` channel.
+            logging::set_handle(_app.handle().clone());
+
             #[cfg(not(target_os = "macos"))]
             {
                 use tauri::Manager;
@@ -72,7 +97,9 @@ pub fn run() {
             commands::start_agent_chat,
             commands::resolve_tool_confirmation,
             commands::abort_chat,
-            commands::log_debug_info,
+            commands::append_log,
+            commands::query_logs,
+            commands::clear_logs,
             commands::get_db_connections,
             commands::upsert_db_connection,
             commands::delete_db_connection,

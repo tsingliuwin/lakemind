@@ -10,6 +10,7 @@ import {
 } from "../lib/codeConfig";
 import type { DbConnection } from "../lib/types";
 import { selectFile } from "../lib/duckdb";
+import { logError } from "../lib/logger";
 
 const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
@@ -231,7 +232,7 @@ export default function SettingsPage(props: {
       const list = await invoke<DbConnection[]>("get_db_connections");
       setConnections(list);
     } catch (err) {
-      console.error("Failed to load db connections:", err);
+      logError("ui", "Failed to load db connections", err);
     }
   };
 
@@ -245,7 +246,7 @@ export default function SettingsPage(props: {
       }
       setLinkedConns(map);
     } catch (err) {
-      console.error("Failed to load workspace connections:", err);
+      logError("ui", "Failed to load workspace connections", err);
     }
   };
 
@@ -648,7 +649,7 @@ export default function SettingsPage(props: {
         }
       }
     } catch (err) {
-      console.error("Failed to load settings:", err);
+      logError("ui", "Failed to load settings", err);
     }
 
     // Load database sampling configurations
@@ -665,7 +666,7 @@ export default function SettingsPage(props: {
         }
       }
     } catch (err) {
-      console.error("Failed to load app config settings:", err);
+      logError("ui", "Failed to load app config settings", err);
     }
 
     loadConnections();
@@ -677,7 +678,7 @@ export default function SettingsPage(props: {
     const updated = { ...settings(), [key]: value };
     setSettings(updated);
     invoke("save_settings_json", { json: JSON.stringify(updated, null, 2) }).catch(err => {
-      console.error("Failed to save settings:", err);
+      logError("ui", "Failed to save settings", err);
     });
   };
 
@@ -686,7 +687,7 @@ export default function SettingsPage(props: {
     try {
       await invoke("set_app_config", { key: "explore.materialized_sample_enabled", value: enabled ? "true" : "false" });
     } catch (err) {
-      console.error("Failed to save explore.materialized_sample_enabled:", err);
+      logError("ui", "Failed to save explore.materialized_sample_enabled", err);
     }
   };
 
@@ -695,7 +696,7 @@ export default function SettingsPage(props: {
     try {
       await invoke("set_app_config", { key: "explore.materialized_sample_limit", value: limit.toString() });
     } catch (err) {
-      console.error("Failed to save explore.materialized_sample_limit:", err);
+      logError("ui", "Failed to save explore.materialized_sample_limit", err);
     }
   };
 

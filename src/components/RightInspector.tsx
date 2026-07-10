@@ -1,6 +1,7 @@
 import { For, Show, createSignal, createEffect } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { typeFamily, type SourceTable, type DepInfo } from "../lib/types";
+import { logError } from "../lib/logger";
 import { t } from "../lib/i18n";
 
 /**
@@ -50,7 +51,7 @@ export default function RightInspector(props: {
         setDdl(res);
       })
       .catch((err) => {
-        console.error("Failed to load DDL:", err);
+        logError("ui", "Failed to load DDL", err);
         setDdl(null);
       })
       .finally(() => {

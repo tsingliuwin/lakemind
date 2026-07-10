@@ -56,6 +56,17 @@ const translations: Record<Language, Record<string, string>> = {
     expandFurther: "进一步展开",
     foldConsole: "折叠",
     latest: "最近",
+    // 控制台 Tab 与级别
+    tabAll: "全部",
+    tabQuery: "查询",
+    tabImport: "导入",
+    tabAgent: "Agent",
+    tabSystem: "系统",
+    levelDebug: "调试",
+    levelInfo: "信息",
+    levelWarn: "警告",
+    levelError: "错误",
+    consoleAllEmptyHint: "暂无日志。执行查询、导入数据或与 Agent 对话后会在此显示。",
 
     // TitleBar dropdown & modal
     newQueryTask: "新建任务",
@@ -238,6 +249,16 @@ const translations: Record<Language, Record<string, string>> = {
     expandFurther: "Expand Further",
     foldConsole: "Fold",
     latest: "latest",
+    tabAll: "All",
+    tabQuery: "Query",
+    tabImport: "Import",
+    tabAgent: "Agent",
+    tabSystem: "System",
+    levelDebug: "Debug",
+    levelInfo: "Info",
+    levelWarn: "Warn",
+    levelError: "Error",
+    consoleAllEmptyHint: "No logs yet. Run a query, import data, or chat with the Agent to see entries here.",
 
     // TitleBar dropdown & modal
     newQueryTask: "New Query",

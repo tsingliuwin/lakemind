@@ -5,6 +5,7 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { sql } from "@codemirror/lang-sql";
 import { githubLight, githubDark } from "@uiw/codemirror-theme-github";
 import { formatDuckdbSql } from "../lib/sqlFormat";
+import { logError } from "../lib/logger";
 import { isLightCodeTheme, codeLineNumbers, codeWrap, codeFontSize } from "../lib/codeConfig";
 import { ROW_CAP_OPTIONS } from "../lib/types";
 import { t } from "../lib/i18n";
@@ -106,7 +107,7 @@ export default function SqlEditor(props: {
       const msg = err instanceof Error ? err.message : String(err);
       setFormatErr(msg);
       setFormatState("err");
-      console.error("[SqlEditor] format failed:", msg);
+      logError("ui", "SqlEditor format failed", msg);
       setTimeout(() => setFormatState("idle"), 3000);
     }
   }
