@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    # 只在 Cargo.lock（Rust 依赖）或 package-lock.json（npm 依赖）变化时预热，
+    # 确保缓存 key 与后续 Release 构建完全一致，从而真正提速。
+    paths:
+      - "src-tauri/Cargo.lock"
+      - "package-lock.json"
 
 jobs:
   warm-cache:
