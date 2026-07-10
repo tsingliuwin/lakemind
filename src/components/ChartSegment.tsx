@@ -389,7 +389,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
               </button>
               <button class="chart-fullscreen-btn" onClick={() => setIsFullScreen(false)} title="退出全屏">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px;">
-                  <path d="M18 6L6 18M6 6l12 12"></path>
+                  <path d="M4 14h6v6m10-6h-6v6M4 10h6V4m10 6h-6V4"></path>
                 </svg>
               </button>
             </div>
