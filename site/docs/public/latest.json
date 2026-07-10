@@ -1,15 +1,15 @@
 {
-  "version": "0.3.4",
+  "version": "0.4.0",
   "notes": "- 自动更新升级为静默下载 + 就绪提示：发现新版后台静默下载，完成后徽标变绿，点击秒级安装\n- 统一更新入口：左上角徽标与右上角菜单共享同一套更新流程，不再跳网页\n- 启动后定时自动检查更新（每 4 小时），无需重启也能发现新版\n- 修复 macOS 自动更新签名缺失无法校验安装的问题",
-  "pubdate": "2026-07-10T06:37:53.217Z",
+  "pubdate": "2026-07-10T10:50:06.290Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK1Ira1ladXhVbHd0OEpnQXdVOFBSMDJ0b2ExZk9yK3pIWTBtODdpaTNTcXc0V01MazBjOUtGMGVwdWY2eHBUTjJYWXJUNnRXQUtpRncvWlU0TlZJS2djPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzNjY0NjgwCWZpbGU6bGFrZW1pbmQuYXBwLnRhci5nego1Y3FUbnNzRGZiZXhJTTk3c2t0MWF0U2JhYjF3aFdrSkl0TlJDLzZwaE91MC8wWGpqT0k1SFZJYUt1a2doc3U3eFhCZjNIc2dXZTRTczlIWEVlVHJBZz09Cg==",
-      "url": "https://upload.xi-n.com/lakemind-v0.3.4-arm64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK2EvVUthd1pVQnMwNmZ5M2s0Rk5NcSs3cGhrYjJPTzVUaFRScXl2ZHFhaThEa3VxVmozd3FtUjVKSnorLzVqN3EyRGt2ZHROcFFYU3BUdlJQZEFLMHc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzNjc5NjgyCWZpbGU6bGFrZW1pbmQuYXBwLnRhci5negp2Z2FLbzdNSUZNcDdRR01ub3BXSFVwN0dZQ2hnWVV1TGZuWVEwYnVid1lTbjNjQ0txcU5Bd2dadEtab3RnMUJSR1dmSCs1NzMrdS9iVFlPSndKWG9DQT09Cg==",
+      "url": "https://upload.xi-n.com/lakemind-v0.4.0-arm64.app.tar.gz"
     },
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK2RyOTg5bFR1alJzQURpL2VmaUdUUldacmZNSkwvblh2U2xXdEtvcUw4N1Z0UkVQMm9LVEl5dFE2QUh3YzJudTFoejNRL2Rld1lvOFQyRDhvZVVTS2dvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzNjY1Mzc5CWZpbGU6bGFrZW1pbmRfMC4zLjRfeDY0LXNldHVwLmV4ZQoyc210SHVZZnQ3YngvanBuL1RWU3ZDd0thZW9NMmVWYlNzN1JTekdud3JRQjE1REVtVXJwa0FJenVaMTVSbjgxV2RBUU03UENEb3RoQ2xrUWZReG1BQT09Cg==",
-      "url": "https://upload.xi-n.com/lakemind-v0.3.4.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK1plY29UWFRFaXp0NUtMQks5Qzk4Q3djem94bElTMWcxa3pDZlB6TlF3ZUVwekk1aHJ0TzNQd1hOL3VSa2gwbkJyMTl2Um0xSXdmOGNVeWF0d1JQWUFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzNjgwNTI0CWZpbGU6bGFrZW1pbmRfMC40LjBfeDY0LXNldHVwLmV4ZQp3bnE2aHFnL0RmK0tFRlR4VG5Tc2pCaTN5UGlYQTFoaTlvZHI4ckNEV1YvU2RKdkl6YVRwVk1scG1mTjhvdGlIeGdJdmgzT1ZtZzBwdEFMWU1PSVpDdz09Cg==",
+      "url": "https://upload.xi-n.com/lakemind-v0.4.0.exe"
     }
   }
 }
