@@ -417,7 +417,7 @@ export default function LeftNav(props: {
       <div class="fe-tree-container" style={{ "padding-left": `${depth > 0 ? 12 : 0}px` }}>
         <For each={filteredContents}>
           {(item) => {
-            const isExpanded = !!expandedPaths()[item.path];
+            const isExpanded = () => !!expandedPaths()[item.path];
             return (
               <div class="fe-tree-node">
                 <div
@@ -441,7 +441,7 @@ export default function LeftNav(props: {
                   }}
                   onClick={() => {
                     if (item.is_dir) {
-                      toggleFolder(item.path);
+                       toggleFolder(item.path);
                     } else {
                       handleFileClick(item);
                     }
@@ -462,7 +462,7 @@ export default function LeftNav(props: {
                     }
                   >
                     <span class="fe-node-icon" style="font-size: 11px;">
-                      {isExpanded ? "▾ 📁" : "▸ 📁"}
+                      {isExpanded() ? "▾ 📁" : "▸ 📁"}
                     </span>
                   </Show>
                   <span class="fe-node-name" style="flex: 1; font-size: 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -474,7 +474,7 @@ export default function LeftNav(props: {
                     </Show>
                   </Show>
                 </div>
-                <Show when={item.is_dir && isExpanded}>
+                <Show when={item.is_dir && isExpanded()}>
                   {renderFileTree(item.path, depth + 1)}
                 </Show>
               </div>

@@ -144,12 +144,12 @@ export default function BottomConsole(props: {
                 const title = titleFor(log);
                 const rowCount = numFromDetail(log.detail?.rowCount);
                 const elapsedMs = numFromDetail(log.detail?.elapsedMs);
-                const expanded = expandedId() === log.id;
+                const expanded = () => expandedId() === log.id;
                 return (
                   <>
                     <div
                       class="log-row"
-                      classList={{ clickable: true, expanded }}
+                      classList={{ clickable: true, expanded: expanded() }}
                       onClick={() => setExpandedId((id) => (id === log.id ? null : log.id ?? null))}
                     >
                       <span class="log-ts">{formatTs(log.ts)}</span>
@@ -163,9 +163,9 @@ export default function BottomConsole(props: {
                           <span>{elapsedMs}ms</span>
                         </Show>
                       </span>
-                      <span class="log-expand" data-open={expanded}>▸</span>
+                      <span class="log-expand" data-open={expanded()}>▸</span>
                     </div>
-                    <Show when={expanded}>
+                    <Show when={expanded()}>
                       <LogDetail log={log} copiedId={copiedId()} onCopied={(id) => setCopiedId(id)} />
                     </Show>
                   </>
