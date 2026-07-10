@@ -175,34 +175,28 @@ jobs:
 
           if [ "${{ matrix.settings.os }}" = "windows-latest" ]; then
             # --- Windows (nsis) ---
-            INST_PATH=$(find src-tauri/target/release/bundle/nsis -name "*-setup.exe" | head -n 1)
+            INST_PATH=$(find src-tauri/target/release/bundle/nsis -name "*-setup.exe" 2>/dev/null | head -n 1)
             INST_NAME="lakemind-${TAG_NAME}.exe"
             # updater 用同一个 exe + 它的 .sig
             UP_PATH="$INST_PATH"; UP_NAME="$INST_NAME"
             UP_SIG_PATH="${INST_PATH}.sig"; UP_SIG_NAME="${INST_NAME}.sig"
           elif [ "${{ matrix.settings.os }}" = "macos-latest" ]; then
             if [[ "${{ matrix.settings.args }}" == *"--target x86_64-apple-darwin"* ]]; then
-              INST_PATH=$(find src-tauri/target/x86_64-apple-darwin/release/bundle/dmg -name "*.dmg" | head -n 1)
+              INST_PATH=$(find src-tauri/target/x86_64-apple-darwin/release/bundle/dmg -name "*.dmg" 2>/dev/null | head -n 1)
               INST_NAME="lakemind-${TAG_NAME}-x64.dmg"
               # updater 用 macos/ 下的 app.tar.gz（不是 dmg）
-              UP_PATH=$(find src-tauri/target/x86_64-apple-darwin/release/bundle/macos -name "*.app.tar.gz" | head -n 1)
+              UP_PATH=$(find src-tauri/target/x86_64-apple-darwin/release/bundle/macos -name "*.app.tar.gz" 2>/dev/null | head -n 1)
               UP_NAME="lakemind-${TAG_NAME}-x64.app.tar.gz"
             else
-              INST_PATH=$(find src-tauri/target/aarch64-apple-darwin/release/bundle/dmg -name "*.dmg" | head -n 1)
-              if [ -z "$INST_PATH" ]; then
-                INST_PATH=$(find src-tauri/target/release/bundle/dmg -name "*.dmg" | head -n 1)
-              fi
+              INST_PATH=$(find src-tauri/target/aarch64-apple-darwin/release/bundle/dmg -name "*.dmg" 2>/dev/null | head -n 1)
               INST_NAME="lakemind-${TAG_NAME}-arm64.dmg"
-              UP_PATH=$(find src-tauri/target/aarch64-apple-darwin/release/bundle/macos -name "*.app.tar.gz" | head -n 1)
-              if [ -z "$UP_PATH" ]; then
-                UP_PATH=$(find src-tauri/target/release/bundle/macos -name "*.app.tar.gz" | head -n 1)
-              fi
+              UP_PATH=$(find src-tauri/target/aarch64-apple-darwin/release/bundle/macos -name "*.app.tar.gz" 2>/dev/null | head -n 1)
               UP_NAME="lakemind-${TAG_NAME}-arm64.app.tar.gz"
             fi
             UP_SIG_PATH="${UP_PATH}.sig"; UP_SIG_NAME="${UP_NAME}.sig"
           elif [ "${{ matrix.settings.os }}" = "ubuntu-22.04" ]; then
             # --- Linux (AppImage) ---
-            INST_PATH=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" | head -n 1)
+            INST_PATH=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" 2>/dev/null | head -n 1)
             INST_NAME="lakemind-${TAG_NAME}.AppImage"
             UP_PATH="$INST_PATH"; UP_NAME="$INST_NAME"
             UP_SIG_PATH="${INST_PATH}.sig"; UP_SIG_NAME="${INST_NAME}.sig"
@@ -228,7 +222,10 @@ jobs:
             aws s3 cp "$UP_SIG_PATH" "s3://lakemind/$UP_SIG_NAME" --endpoint-url ${{ secrets.R2_ENDPOINT }}
             cp "$UP_SIG_PATH" "updater-sigs/$UP_SIG_NAME"
           else
-            echo "::error::Updater signature not found at $UP_SIG_PATH — check TAURI_SIGNING_PRIVATE_KEY secret."
+            echo "::error::Updater signature not found at '$UP_SIG_PATH'."
+            echo "::error::This usually means the TAURI_SIGNING_PRIVATE_KEY secret is missing,"
+            echo "::error::malformed, or failed to decode (e.g. trailing characters / not pure base64)."
+            echo "::error::Re-copy the private key value exactly: cat ~/.tauri/lakemind.key"
           fi
 
       - name: Upload updater signature artifact
