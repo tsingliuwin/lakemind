@@ -1740,15 +1740,17 @@ body.is-resizing-column * {
 }
 /* Unified badge: text = category, color = level/status. Merges the old
  * glyph + category columns into one, reinforcing the app-wide convention that
- * green = ok, amber = warning, red = error, dim = debug/trace. */
+ * green = ok, amber = warn, red = error, dim = debug/trace. Fixed width so
+ * the column lines up regardless of category name length. */
 .log-row .log-badge {
-  flex: 0 0 auto;
+  flex: 0 0 64px;
   font-family: var(--font-mono);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.3px;
   white-space: nowrap;
-  padding: 1px 6px;
+  text-align: center;
+  padding: 1px 0;
   border-radius: 3px;
   line-height: 15px;
   background: var(--bg-hover);
