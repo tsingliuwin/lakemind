@@ -17,6 +17,7 @@ mod agent;
 mod fingerprint;
 mod usage;
 mod okf;
+mod tenets;
 
 use state::AppState;
 
@@ -25,6 +26,13 @@ pub fn run() {
     // Initialize the global SQLite metadata DB (workspaces / tasks / sources / config).
     if let Err(e) = db::init_global_db() {
         eprintln!("Failed to initialize central SQLite database: {e}");
+    }
+
+    // Seed the global analysis-tenets bundle (~/.lakemind/tenets/) on first
+    // launch. Non-fatal — a failure only means the agent's tenets tools will
+    // report "library not initialized" until a successful seed.
+    if let Err(e) = tenets::seed_tenets_if_empty() {
+        eprintln!("Failed to seed tenets bundle: {e}");
     }
 
     // Install the tracing subscriber: the custom [`SqliteEmitLayer`] persists

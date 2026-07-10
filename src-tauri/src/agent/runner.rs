@@ -335,13 +335,14 @@ pub(crate) async fn run_agent_chat_stream(
         }
     }
 
-    // Factory closure that builds a fresh set of the 14 tool instances. Called
+    // Factory closure that builds a fresh set of the 16 tool instances. Called
     // once per provider branch AND once per 429-retry (rig consumes the tools
     // when building the agent, so each retry needs a fresh set).
     let build_tools = || -> (ListTablesTool, DescribeTableTool, ExecuteQueryTool, SampleDataTool,
         LoadOkfBlockTool, WriteOkfBlockTool, SearchOkfRecipesTool, CheckSourceFingerprintTool,
         TidyOkfKnowledgeTool, MaterializeRemoteTableTool,
-        CreateTableTool, CreateViewTool, DropObjectTool, RenderChartTool) {
+        CreateTableTool, CreateViewTool, DropObjectTool, RenderChartTool,
+        SearchTenetsTool, LoadTenetsTool) {
         let ddl_shared = DdlToolShared {
             app_state: app_state.clone(),
             task_id: task_id.clone(),
@@ -363,6 +364,8 @@ pub(crate) async fn run_agent_chat_stream(
             CreateViewTool { shared: ddl_shared.clone() },
             DropObjectTool { shared: ddl_shared },
             RenderChartTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
+            SearchTenetsTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
+            LoadTenetsTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
         )
     };
 
@@ -378,7 +381,8 @@ pub(crate) async fn run_agent_chat_stream(
     // what the model really receives.
     let (list_tool, desc_tool, exec_tool, sample_tool,
         load_okf, write_okf, search_okf, check_okf, tidy_okf, materialize_tool,
-        create_table_tool, create_view_tool, drop_object_tool, render_chart_tool) = build_tools();
+        create_table_tool, create_view_tool, drop_object_tool, render_chart_tool,
+        search_tenets_tool, load_tenets_tool) = build_tools();
     let tool_defs = vec![
         list_tool.definition(String::new()).await,
         desc_tool.definition(String::new()).await,
@@ -394,6 +398,8 @@ pub(crate) async fn run_agent_chat_stream(
         check_okf.definition(String::new()).await,
         tidy_okf.definition(String::new()).await,
         materialize_tool.definition(String::new()).await,
+        search_tenets_tool.definition(String::new()).await,
+        load_tenets_tool.definition(String::new()).await,
     ];
     let tools_json = serde_json::to_string(&tool_defs).unwrap_or_default();
     let ws_dir = app_state.workspace_dir.lock().await.to_string_lossy().to_string();
@@ -425,7 +431,8 @@ pub(crate) async fn run_agent_chat_stream(
         // Build a fresh tool set each attempt (rig consumes them on .build()).
         let (list_tool, desc_tool, exec_tool, sample_tool,
             load_okf, write_okf, search_okf, check_okf, tidy_okf, materialize_tool,
-            create_table_tool, create_view_tool, drop_object_tool, render_chart_tool) = build_tools();
+            create_table_tool, create_view_tool, drop_object_tool, render_chart_tool,
+            search_tenets_tool, load_tenets_tool) = build_tools();
 
         let outcome = if format == "openai" {
             let base_url = sanitize_endpoint(&provider.endpoint);
@@ -452,7 +459,9 @@ pub(crate) async fn run_agent_chat_stream(
                 .tool(search_okf)
                 .tool(check_okf)
                 .tool(tidy_okf)
-                .tool(materialize_tool);
+                .tool(materialize_tool)
+                .tool(search_tenets_tool)
+                .tool(load_tenets_tool);
             if model_id.starts_with("o1") || model_id.starts_with("o3") {
                 agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
             }
@@ -488,7 +497,9 @@ pub(crate) async fn run_agent_chat_stream(
                 .tool(search_okf)
                 .tool(check_okf)
                 .tool(tidy_okf)
-                .tool(materialize_tool);
+                .tool(materialize_tool)
+                .tool(search_tenets_tool)
+                .tool(load_tenets_tool);
             if model_id.starts_with("o1") || model_id.starts_with("o3") {
                 agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
             }
@@ -525,6 +536,8 @@ pub(crate) async fn run_agent_chat_stream(
                 .tool(check_okf)
                 .tool(tidy_okf)
                 .tool(materialize_tool)
+                .tool(search_tenets_tool)
+                .tool(load_tenets_tool)
                 .build();
             let stream = agent.stream_chat(prompt.clone(), rig_history.clone())
                 .multi_turn(100)
