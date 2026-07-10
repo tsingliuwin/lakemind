@@ -2874,22 +2874,22 @@ body.is-resizing-column * {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--text-primary);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   transition: all 0.15s ease;
 }
 .ss-toggle.on {
-  background: var(--text-primary);
+  background: var(--brand);
 }
 .ss-toggle.on::after {
   transform: translateX(16px);
-  background: var(--bg-surface);
+  background: #fff;
 }
 button.ss-toggle:hover:not(:disabled) {
-  background: var(--text-dim);
+  opacity: 0.9;
   border: none;
 }
 button.ss-toggle.on:hover:not(:disabled) {
-  background: var(--text-primary);
   opacity: 0.9;
   border: none;
 }
