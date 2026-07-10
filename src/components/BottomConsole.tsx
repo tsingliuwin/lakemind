@@ -145,17 +145,12 @@ export default function BottomConsole(props: {
                 const rowCount = numFromDetail(log.detail?.rowCount);
                 const elapsedMs = numFromDetail(log.detail?.elapsedMs);
                 const expanded = expandedId() === log.id;
-                const hasExpand = hasDetail(log);
                 return (
                   <>
                     <div
                       class="log-row"
-                      classList={{ clickable: hasExpand, expanded }}
-                      onClick={() => {
-                        if (hasExpand) {
-                          setExpandedId((id) => (id === log.id ? null : log.id ?? null));
-                        }
-                      }}
+                      classList={{ clickable: true, expanded }}
+                      onClick={() => setExpandedId((id) => (id === log.id ? null : log.id ?? null))}
                     >
                       <span class="log-ts">{formatTs(log.ts)}</span>
                       <span class="log-badge" data-level={log.level} title={levelName(log.level)}>{log.category}</span>
@@ -168,11 +163,9 @@ export default function BottomConsole(props: {
                           <span>{elapsedMs}ms</span>
                         </Show>
                       </span>
-                      <Show when={hasExpand}>
-                        <span class="log-expand" data-open={expanded}>▸</span>
-                      </Show>
+                      <span class="log-expand" data-open={expanded}>▸</span>
                     </div>
-                    <Show when={hasExpand && expanded}>
+                    <Show when={expanded}>
                       <LogDetail log={log} copiedId={copiedId()} onCopied={(id) => setCopiedId(id)} />
                     </Show>
                   </>
@@ -229,12 +222,6 @@ function collapseSpaces(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
-/** Does this log carry an expandable detail panel (full SQL / error / fields)? */
-function hasDetail(log: UnifiedLog): boolean {
-  if (log.detail && Object.keys(log.detail).length > 0) return true;
-  return false;
-}
-
 /**
  * Expanded detail panel for one log row. Renders the full payload in up to four
  * sections (only those present): the full SQL (code block + copy), the error
@@ -261,6 +248,15 @@ function LogDetail(props: { log: UnifiedLog; copiedId: number | null; onCopied: 
 
   return (
     <div class="log-detail">
+      <Show when={sql == null}>
+        {/* Non-query logs: show the full (untruncated) message so the expanded
+         * panel always carries the complete text the row title summarized. */}
+        <div class="ld-section">
+          <span class="ld-label">{t("levelInfo")}</span>
+          <pre class="ld-code">{log.message}</pre>
+        </div>
+      </Show>
+
       <Show when={sql != null}>
         <div class="ld-section">
           <div class="ld-section-head">
