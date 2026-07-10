@@ -2733,7 +2733,7 @@ body.is-resizing-column * {
   gap: 4px;
 }
 
-/* Bottom brand area in the settings sidebar: logo + "LakeMind" (display only). */
+/* Bottom brand area in the settings sidebar: logo + "LakeMind" (clickable to exit). */
 .ss-brand {
   display: flex;
   align-items: center;
@@ -2744,6 +2744,15 @@ body.is-resizing-column * {
   font-weight: 600;
   flex: 1;
   min-width: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+.ss-brand:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
 }
 .ss-brand-name {
   letter-spacing: 0.2px;

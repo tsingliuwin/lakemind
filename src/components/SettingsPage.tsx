@@ -1149,10 +1149,14 @@ export default function SettingsPage(props: {
         </nav>
 
         <div class="ss-footer">
-          <div class="ss-brand">
+          <button
+            class="ss-brand"
+            onClick={() => props.onClose()}
+            title={t("backToWorkspace")}
+          >
             <img src={logoSrc()} alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
             <span class="ss-brand-name">LakeMind</span>
-          </div>
+          </button>
           <button
             class="ss-theme-toggle"
             onClick={() => setCurrentTheme(currentTheme() === "light" ? "geek-dark" : "light")}
