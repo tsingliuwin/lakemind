@@ -1149,6 +1149,26 @@ select:hover:not(:disabled) {
   letter-spacing: 0.2px;
 }
 
+.ln-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  padding: 0;
+}
+.ln-theme-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 /* --- Main Workbench Area --- */
 .main {
   grid-area: main;
