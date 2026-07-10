@@ -286,12 +286,57 @@ export default function LeftNav(props: {
   const [fileCtxMenu, setFileCtxMenu] = createSignal<{ path: string; name: string; x: number; y: number } | null>(null);
 
   const fileToTable = createMemo(() => {
-    const m = new Map<string, string>();
+    // A multi-sheet xlsx backs several tables sharing the same path, so map
+    // path → names[] (one-to-many). Single-sheet/non-Excel files still have a
+    // one-element array, keeping the highlight/lookup behavior identical.
+    const m = new Map<string, string[]>();
     for (const s of props.sources) {
-      if (s.path) m.set(s.path, s.name);
+      if (!s.path) continue;
+      const arr = m.get(s.path) ?? [];
+      arr.push(s.name);
+      m.set(s.path, arr);
     }
     return m;
   });
+
+  // Render model for the data tree. A group's sources are partitioned into:
+  //  - `flat`: single-source files rendered inline as before.
+  //  - `fileGroups`: multi-sheet xlsx files, each rendered as a collapsible
+  //    file node with its sheets as sub-leaves.
+  type DataLeaf =
+    | { tag: "leaf"; t: SourceTable }
+    | { tag: "file"; path: string; label: string; sheets: SourceTable[] };
+
+  const partitionLeaves = (tables: SourceTable[]): DataLeaf[] => {
+    const byPath = new Map<string, SourceTable[]>();
+    // Preserve first-seen order so the tree stays stable as sources stream in.
+    const order: string[] = [];
+    for (const t of tables) {
+      const key = t.path || t.name;
+      if (!byPath.has(key)) {
+        byPath.set(key, []);
+        order.push(key);
+      }
+      byPath.get(key)!.push(t);
+    }
+    const out: DataLeaf[] = [];
+    for (const key of order) {
+      const arr = byPath.get(key)!;
+      if (arr.length > 1) {
+        // Multi-sheet (or multi-table-per-path): collapsible file node.
+        const fileLabel = key.split(/[\\/]/).pop() ?? key;
+        out.push({ tag: "file", path: key, label: fileLabel, sheets: arr });
+      } else {
+        out.push({ tag: "leaf", t: arr[0] });
+      }
+    }
+    return out;
+  };
+
+  // Collapsed/expanded state for multi-sheet file nodes, keyed by file path.
+  const [expandedSheets, setExpandedSheets] = createSignal<Record<string, boolean>>({});
+  const toggleSheetGroup = (path: string) =>
+    setExpandedSheets((s) => ({ ...s, [path]: !s[path] }));
 
   const handleSelectTable = (t: SourceTable) => {
     setHighlightTable(t.name);
@@ -302,7 +347,9 @@ export default function LeftNav(props: {
   const handleFileClick = (item: FileItem) => {
     setSelectedFile(item.path);
     setHighlightFile(item.path);
-    setHighlightTable(fileToTable().get(item.path) ?? null);
+    const names = fileToTable().get(item.path);
+    // Highlight the first registered table for this file (if any).
+    setHighlightTable(names && names.length > 0 ? names[0] : null);
     props.onImportFile?.(item.path);
   };
 
@@ -1035,75 +1082,148 @@ export default function LeftNav(props: {
                                 <span>{shortDir(group[0])}</span>
                               </div>
                             </Show>
-                            <For each={group[1]}>
-                              {(t) => {
-                                // Hover text for an external-database view: reconstruct the
-                                // human-friendly origin (label = "<conn>.<schema>.<table>").
-                                // Falls back to the generic last-path-segment tip for local tables.
-                                const extTitle = () => {
-                                  const m = t.path.match(/^db:\/\/[^/]+\/([^/]*)\/(.*)$/);
-                                  const schema = m?.[1] ?? "";
-                                  const table = m?.[2] ?? t.name;
-                                  const dbKind = t.kind === "mysql" ? "MySQL" : t.kind === "sqlite" ? "SQLite" : "PostgreSQL";
-                                  // Connection name = label with the trailing "<schema>.<table>"
-                                  // stripped (handles connection names that contain dots).
-                                  const tail = schema ? `.${schema}.${table}` : `.${table}`;
-                                  const conn = t.label.endsWith(tail) ? t.label.slice(0, -tail.length) : t.label;
-                                  const origin = schema ? `${dbKind} · ${conn} · ${schema}.${table}` : `${dbKind} · ${conn} · ${table}`;
-                                  const rows = t.rowCountEstimate != null && t.rowCountEstimate > 0 ? `\n约 ${formatCount(t.rowCountEstimate!)} 行` : "";
-                                  return `${origin}${rows}`;
-                                };
-                                return (
-                                <button
-                                  class="tree-leaf"
-                                  classList={{ selected: props.selected === t.name }}
-                                  disabled={props.busy}
-                                  title={t.path.startsWith("db://") ? extTitle() : (t.path.split("/").pop() ?? t.path)}
-                                  onClick={() => handleSelectTable(t)}
-                                  onContextMenu={(e) => {
-                                    e.preventDefault();
-                                    setCtxMenu({ name: t.name, x: e.clientX, y: e.clientY });
-                                  }}
-                                  style={{
-                                    "padding-left": "8px",
-                                    background:
-                                      highlightTable() === t.name && props.selected !== t.name
-                                        ? "rgba(80, 160, 255, 0.12)"
-                                        : undefined,
-                                  }}
-                                >
-                                  <Show when={t.path.startsWith("db://")} fallback={
-                                    <Show when={categoryOf(t.name)} fallback={
-                                      <span class="kind-badge kind-badge--icon" data-kind={t.kind} title={t.kind}><KindIcon kind={t.kind} /></span>
-                                    }>
-                                      {(cat) => (
-                                        <span class="kind-badge kind-badge--icon kind-badge--category-icon" data-category={cat().label} data-kind={t.kind} title={cat().title}>
-                                          <KindIcon kind={t.kind} />
-                                        </span>
-                                      )}
-                                    </Show>
-                                  }>
-                                    {/* External database table: a zero-copy VIEW pointing
-                                        at Postgres/MySQL. A single eye icon reads as "view". */}
-                                    <span class="kind-badge kind-badge--icon kind-badge--extdb" title="外部数据库视图（实时读取，零拷贝）">
-                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
-                                        <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
-                                        <circle cx="12" cy="12" r="3"></circle>
-                                      </svg>
-                                    </span>
+                            <For each={partitionLeaves(group[1])}>
+                              {(leaf) => (
+                                <>
+                                  {/* Flat single-source leaf (unchanged rendering). */}
+                                  <Show when={leaf.tag === "leaf"}>
+                                    {(() => {
+                                      const t = (leaf as { tag: "leaf"; t: SourceTable }).t;
+                                      // Hover text for an external-database view: reconstruct the
+                                      // human-friendly origin (label = "<conn>.<schema>.<table>").
+                                      // Falls back to the generic last-path-segment tip for local tables.
+                                      const extTitle = () => {
+                                        const m = t.path.match(/^db:\/\/[^/]+\/([^/]*)\/(.*)$/);
+                                        const schema = m?.[1] ?? "";
+                                        const table = m?.[2] ?? t.name;
+                                        const dbKind = t.kind === "mysql" ? "MySQL" : t.kind === "sqlite" ? "SQLite" : "PostgreSQL";
+                                        const tail = schema ? `.${schema}.${table}` : `.${table}`;
+                                        const conn = t.label.endsWith(tail) ? t.label.slice(0, -tail.length) : t.label;
+                                        const origin = schema ? `${dbKind} · ${conn} · ${schema}.${table}` : `${dbKind} · ${conn} · ${table}`;
+                                        const rows = t.rowCountEstimate != null && t.rowCountEstimate > 0 ? `\n约 ${formatCount(t.rowCountEstimate!)} 行` : "";
+                                        return `${origin}${rows}`;
+                                      };
+                                      return (
+                                      <button
+                                        class="tree-leaf"
+                                        classList={{ selected: props.selected === t.name }}
+                                        disabled={props.busy}
+                                        title={t.path.startsWith("db://") ? extTitle() : (t.path.split("/").pop() ?? t.path)}
+                                        onClick={() => handleSelectTable(t)}
+                                        onContextMenu={(e) => {
+                                          e.preventDefault();
+                                          setCtxMenu({ name: t.name, x: e.clientX, y: e.clientY });
+                                        }}
+                                        style={{
+                                          "padding-left": "8px",
+                                          background:
+                                            highlightTable() === t.name && props.selected !== t.name
+                                              ? "rgba(80, 160, 255, 0.12)"
+                                              : undefined,
+                                        }}
+                                      >
+                                        <Show when={t.path.startsWith("db://")} fallback={
+                                          <Show when={categoryOf(t.name)} fallback={
+                                            <span class="kind-badge kind-badge--icon" data-kind={t.kind} title={t.kind}><KindIcon kind={t.kind} /></span>
+                                          }>
+                                            {(cat) => (
+                                              <span class="kind-badge kind-badge--icon kind-badge--category-icon" data-category={cat().label} data-kind={t.kind} title={cat().title}>
+                                                <KindIcon kind={t.kind} />
+                                              </span>
+                                            )}
+                                          </Show>
+                                        }>
+                                          {/* External database table: a zero-copy VIEW pointing
+                                              at Postgres/MySQL. A single eye icon reads as "view". */}
+                                          <span class="kind-badge kind-badge--icon kind-badge--extdb" title="外部数据库视图（实时读取，零拷贝）">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
+                                              <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
+                                              <circle cx="12" cy="12" r="3"></circle>
+                                            </svg>
+                                          </span>
+                                        </Show>
+                                        <span class="leaf-label">{t.name}</span>
+                                        <Show when={t.rowCountEstimate != null && t.rowCountEstimate! > 0}>
+                                          <span class="leaf-count">{formatCount(t.rowCountEstimate!)}</span>
+                                        </Show>
+                                        <Show when={t.partitionKeys.length > 0}>
+                                          <span class="leaf-part" title={`Hive partitions: ${t.partitionKeys.join(", ")}`}>
+                                            🗂 {t.partitionKeys.length}
+                                          </span>
+                                        </Show>
+                                      </button>
+                                      );
+                                    })()}
                                   </Show>
-                                  <span class="leaf-label">{t.name}</span>
-                                  <Show when={t.rowCountEstimate != null && t.rowCountEstimate! > 0}>
-                                    <span class="leaf-count">{formatCount(t.rowCountEstimate!)}</span>
+                                  {/* Collapsible multi-sheet file node. */}
+                                  <Show when={leaf.tag === "file"}>
+                                    {(() => {
+                                      const fg = leaf as { tag: "file"; path: string; label: string; sheets: SourceTable[] };
+                                      const open = () => expandedSheets()[fg.path] ?? true;
+                                      const anyActive = () => fg.sheets.some((s) => highlightTable() === s.name);
+                                      return (
+                                        <div class="tree-sheet-group">
+                                          <button
+                                            class="tree-leaf tree-file-node"
+                                            disabled={props.busy}
+                                            title={fg.path}
+                                            onClick={() => toggleSheetGroup(fg.path)}
+                                            style={{
+                                              "padding-left": "8px",
+                                              "font-weight": 500,
+                                              background: anyActive() && fg.sheets.every((s) => props.selected !== s.name)
+                                                ? "rgba(80, 160, 255, 0.12)"
+                                                : undefined,
+                                            }}
+                                          >
+                                            <span class="kind-badge kind-badge--icon" data-kind="excel" title="excel">
+                                              <KindIcon kind="excel" />
+                                            </span>
+                                            <span class="leaf-label">{fg.label}</span>
+                                            <span class="tree-section-arrow" style="margin-left: auto; font-size: 9px;">
+                                              {open() ? "▼" : "▶"}
+                                            </span>
+                                          </button>
+                                          <Show when={open()}>
+                                            <div style="margin-left: 14px;">
+                                              <For each={fg.sheets}>
+                                                {(t) => (
+                                                  <button
+                                                    class="tree-leaf"
+                                                    classList={{ selected: props.selected === t.name }}
+                                                    disabled={props.busy}
+                                                    title={`${fg.path} · ${t.sheet ?? t.name}`}
+                                                    onClick={() => handleSelectTable(t)}
+                                                    onContextMenu={(e) => {
+                                                      e.preventDefault();
+                                                      setCtxMenu({ name: t.name, x: e.clientX, y: e.clientY });
+                                                    }}
+                                                    style={{
+                                                      "padding-left": "8px",
+                                                      background:
+                                                        highlightTable() === t.name && props.selected !== t.name
+                                                          ? "rgba(80, 160, 255, 0.12)"
+                                                          : undefined,
+                                                    }}
+                                                  >
+                                                    <span class="kind-badge kind-badge--icon" data-kind={t.kind} title={t.kind}>
+                                                      <KindIcon kind={t.kind} />
+                                                    </span>
+                                                    <span class="leaf-label">{t.sheet ?? t.name}</span>
+                                                    <Show when={t.rowCountEstimate != null && t.rowCountEstimate! > 0}>
+                                                      <span class="leaf-count">{formatCount(t.rowCountEstimate!)}</span>
+                                                    </Show>
+                                                  </button>
+                                                )}
+                                              </For>
+                                            </div>
+                                          </Show>
+                                        </div>
+                                      );
+                                    })()}
                                   </Show>
-                                  <Show when={t.partitionKeys.length > 0}>
-                                    <span class="leaf-part" title={`Hive partitions: ${t.partitionKeys.join(", ")}`}>
-                                      🗂 {t.partitionKeys.length}
-                                    </span>
-                                  </Show>
-                                </button>
-                                );
-                              }}
+                                </>
+                              )}
                             </For>
                           </div>
                           );

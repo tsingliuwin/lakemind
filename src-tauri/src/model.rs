@@ -98,6 +98,11 @@ pub struct SourceTable {
     pub is_sampled: bool,
     /// The full row count on the remote database, if this is a sample.
     pub full_row_count: Option<i64>,
+    /// Worksheet name for multi-sheet Excel files. `None` for single-sheet
+    /// files and non-Excel sources. When set, this table is one of several
+    /// registered from the same `.xlsx` file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet: Option<String>,
 }
 
 /// Result of an ad-hoc SQL execution. Mirrors PRD §4.1 `SqlResult`.

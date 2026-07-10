@@ -65,6 +65,10 @@ export interface SourceTable {
   columns: ColumnInfo[];
   isSampled?: boolean;
   fullRowCount?: number | null;
+  /** Worksheet name for multi-sheet Excel files. Null/absent for single-sheet
+   *  files and non-Excel sources. When set, this table is one of several
+   *  registered from the same `.xlsx` file. */
+  sheet?: string | null;
 }
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };

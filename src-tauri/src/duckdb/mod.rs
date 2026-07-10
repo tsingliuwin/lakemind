@@ -202,6 +202,7 @@ mod tests {
             partition_keys: Vec::new(),
             file_size: u64::MAX,
             mtime: 0,
+            sheet: None,
         };
         let vt = register::register(&conn2, &view_entry, StorageKind::View, None).unwrap();
         let vn: i64 = conn2.query_row("SELECT count(*) FROM s_ext", [], |r| r.get(0)).unwrap();

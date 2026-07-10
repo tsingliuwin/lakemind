@@ -168,6 +168,7 @@ pub async fn list_tables_fast(
                 columns: d.columns.clone(),
                 is_sampled: false,
                 full_row_count: None,
+                sheet: None,
             });
         }
 
@@ -311,6 +312,7 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
                 partition_keys: rec_clone.partition_keys.clone(),
                 file_size: rec_clone.file_size as u64,
                 mtime: rec_clone.file_mtime,
+                sheet: rec_clone.sheet.clone(),
             };
             let storage = StorageKind::from_db_str(&rec_clone.storage);
             drop_lake_object(&guard, &rec_clone.table_name);
@@ -498,18 +500,31 @@ pub async fn delete_file(
 ) -> Result<String, String> {
     let ws_path = state.workspace_path.lock().await.clone();
 
-    // 1. Find the s_ table mapped to this file.
+    // 1. Find every s_ table mapped to this file. A multi-sheet `.xlsx` backs
+    //    several tables (one per sheet) sharing the same file_path, so collect
+    //    them all — otherwise deleting the file would orphan the other sheets.
     let sqlite = db::get_db_conn()?;
     let sources = db::list_sources(&sqlite, &ws_path)?;
-    let table_name = sources
+    let table_names: Vec<String> = sources
         .iter()
-        .find(|s| s.file_path == file_path || s.scan_path == file_path)
-        .map(|s| s.table_name.clone());
+        .filter(|s| s.file_path == file_path || s.scan_path == file_path)
+        .map(|s| s.table_name.clone())
+        .collect();
 
-    // 2. Cascade-delete the s_ table (+ downstreams) if it exists.
+    // 2. Cascade-delete each s_ table (+ downstreams) if it exists.
     let mut deleted_count = 0usize;
-    if let Some(tn) = table_name {
-        let cascade = fingerprint::cascade_delete_order(&sqlite, &ws_path, &tn);
+    if !table_names.is_empty() {
+        // Build the full cascade set across all matched tables (a downstream
+        // t_/v_ derived from one sheet may also appear under another; dedup so
+        // we don't double-count or drop twice).
+        let mut cascade: Vec<String> = Vec::new();
+        for tn in &table_names {
+            for name in fingerprint::cascade_delete_order(&sqlite, &ws_path, tn) {
+                if !cascade.contains(&name) {
+                    cascade.push(name);
+                }
+            }
+        }
         deleted_count = cascade.len();
         let conn = state.conn.clone();
         let ws_path2 = ws_path.clone();
@@ -638,14 +653,19 @@ pub async fn import_file_to_workspace(
 
     match &result {
         Ok(tables) => {
-            if let Some(t) = tables.first() {
-                let _ = window.emit("import-progress", ImportProgress {
-                    file: file_name.clone(), stage: "done".into(),
-                    table: Some(t.name.clone()),
-                    columns: Some(t.columns.len() as i64),
-                    rows: t.row_count_estimate,
-                    error: None,
-                });
+            if !tables.is_empty() {
+                // Report every registered table. A multi-sheet xlsx yields one
+                // table per sheet; emitting each lets the progress UI reflect
+                // them all instead of only the first.
+                for t in tables {
+                    let _ = window.emit("import-progress", ImportProgress {
+                        file: file_name.clone(), stage: "done".into(),
+                        table: Some(t.name.clone()),
+                        columns: Some(t.columns.len() as i64),
+                        rows: t.row_count_estimate,
+                        error: None,
+                    });
+                }
             } else {
                 // Nothing recognizable was found under the imported path. This
                 // is the common "picked a folder/file with no supported data
@@ -783,12 +803,19 @@ async fn sync_entries(
     use std::collections::{HashMap, HashSet};
     let sync_start = std::time::Instant::now();
 
-    // 1. Load existing mappings, indexed by scan_path (stable file identity).
+    // 1. Load existing mappings, indexed by (scan_path, sheet) — the stable file
+    //    identity. A multi-sheet `.xlsx` backs several rows that share scan_path
+    //    but differ by sheet, so sheet must be part of the identity key.
     let sqlite = db::get_db_conn()?;
     let existing = db::list_sources(&sqlite, &ws_path)?;
-    let existing_by_scan: HashMap<String, SourceRecord> =
-        existing.iter().map(|r| (r.scan_path.clone(), r.clone())).collect();
-    let entry_scan_paths: HashSet<String> = entries.iter().map(|e| e.scan_path.clone()).collect();
+    let existing_by_scan: HashMap<(String, Option<String>), SourceRecord> = existing
+        .iter()
+        .map(|r| ((r.scan_path.clone(), r.sheet.clone()), r.clone()))
+        .collect();
+    let entry_identities: HashSet<(String, Option<String>)> = entries
+        .iter()
+        .map(|e| (e.scan_path.clone(), e.sheet.clone()))
+        .collect();
     drop(sqlite);
 
     // 2. Decide each entry's target view name + name_source.
@@ -801,7 +828,7 @@ async fn sync_entries(
         .iter()
         .enumerate()
         .filter_map(|(i, e)| {
-            if let Some(rec) = existing_by_scan.get(&e.scan_path) {
+            if let Some(rec) = existing_by_scan.get(&(e.scan_path.clone(), e.sheet.clone())) {
                 if rec.name_source == "llm" || rec.name_source == "fallback" {
                     let src: &'static str = if rec.name_source == "llm" { "llm" } else { "fallback" };
                     decisions[i] = (rec.table_name.clone(), src);
@@ -872,7 +899,7 @@ async fn sync_entries(
         for (i, e) in entries.iter().enumerate() {
             let target = &final_names[i];
             let src = decisions[i].1;
-            let matched = existing_by_scan.get(&e.scan_path).cloned();
+            let matched = existing_by_scan.get(&(e.scan_path.clone(), e.sheet.clone())).cloned();
 
             if let Some(rec) = matched {
                 let storage = StorageKind::from_db_str(&rec.storage);
@@ -969,6 +996,7 @@ async fn sync_entries(
                         columns: cols,
                         is_sampled: false,
                         full_row_count: None,
+                        sheet: e.sheet.clone(),
                     };
                     let rec = source_record_from(&t, e, now, src);
                     let _ = db::upsert_source(&sqlite, &ws_path, &rec);
@@ -1008,7 +1036,7 @@ async fn sync_entries(
                 if rec.kind == "postgres" || rec.kind == "mysql" || rec.kind == "sqlite" {
                     continue;
                 }
-                if !entry_scan_paths.contains(&rec.scan_path) {
+                if !entry_identities.contains(&(rec.scan_path.clone(), rec.sheet.clone())) {
                     drop_lake_object(&guard, &rec.table_name);
                     let _ = db::delete_source_by_table(&sqlite, &ws_path, &rec.table_name);
                     let _ = crate::okf::delete_okf_files(&ws_dir_str, &rec.table_name);
@@ -1729,6 +1757,7 @@ fn hydrate_custom_object(
                 columns: def.columns,
                 is_sampled: false,
                 full_row_count: None,
+                sheet: None,
             };
         }
     }
@@ -1749,6 +1778,7 @@ fn hydrate_custom_object(
         columns: cols,
         is_sampled: false,
         full_row_count: None,
+        sheet: None,
     }
 }
 
@@ -1787,6 +1817,7 @@ fn build_source_table_from_record(rec: &SourceRecord) -> SourceTable {
         columns: rec.columns.clone(),
         is_sampled: rec.is_sampled,
         full_row_count: rec.full_row_count,
+        sheet: rec.sheet.clone(),
     }
 }
 
@@ -1816,6 +1847,7 @@ fn source_record_from(t: &SourceTable, e: &scan::ScanEntry, created_at: i64, nam
         } else {
             Some(db::mat_status::FULL.to_string())
         },
+        sheet: e.sheet.clone(),
     }
 }
 
@@ -2513,6 +2545,7 @@ pub async fn register_database_table(
             } else {
                 Some(db::mat_status::FULL.to_string())
             },
+            sheet: None,
         };
         
         db::upsert_source(&sqlite, &ws_path_clone, &record)?;
@@ -2536,6 +2569,7 @@ pub async fn register_database_table(
                 columns: d.columns.clone(),
                 is_sampled: false,
                 full_row_count: None,
+                sheet: None,
             });
         }
         
