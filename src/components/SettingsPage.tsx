@@ -900,7 +900,7 @@ export default function SettingsPage(props: {
           transition: all 0.15s ease;
         }
         .db-icon-btn:hover {
-          background: rgba(255, 255, 255, 0.06);
+          background: var(--bg-hover) !important;
           color: var(--text-primary);
           border-color: transparent !important;
         }
@@ -1613,7 +1613,7 @@ export default function SettingsPage(props: {
                         class="db-connection-item-row"
                       >
                         <div style="display: flex; align-items: center; gap: 14px;">
-                          <span style={`display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : c.dbType === 'sqlite' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : c.dbType === 'sqlite' ? '#10b981' : '#ffa500'}; border-radius: 8px; flex-shrink: 0;`}>
+                          <span style={`display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : c.dbType === 'sqlite' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : c.dbType === 'sqlite' ? 'var(--accent-green)' : 'var(--accent-amber)'}; border-radius: 8px; flex-shrink: 0;`}>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
                               <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
                               <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
@@ -1623,7 +1623,7 @@ export default function SettingsPage(props: {
                           <div>
                             <div style="display: flex; align-items: center; gap: 8px;">
                               <span style="font-weight: 600; font-size: 14px; color: var(--text-primary);">{c.name}</span>
-                              <span style={`font-size: 10px; font-weight: bold; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : c.dbType === 'sqlite' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : c.dbType === 'sqlite' ? '#10b981' : '#ffa500'}`}>{c.dbType}</span>
+                              <span style={`font-size: 10px; font-weight: bold; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : c.dbType === 'sqlite' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : c.dbType === 'sqlite' ? 'var(--accent-green)' : 'var(--accent-amber)'}`}>{c.dbType}</span>
                             </div>
                             <div style="font-size: 12px; color: var(--text-dim); margin-top: 4px; font-family: var(--font-mono, monospace); word-break: break-all;">
                               {c.dbType === 'sqlite' ? c.databaseName : `${c.username}@${c.host}:${c.port}/${c.databaseName}`}
