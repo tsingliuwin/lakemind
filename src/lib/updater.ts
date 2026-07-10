@@ -219,12 +219,12 @@ const store = createRoot(() => {
     try {
       const found = await checkForUpdate();
       if (!found) {
-        setStatus("idle");
         if (userInitiated) {
+          setModalOpen(false);
           const cur = await getVersion().catch(() => "");
           alert(t("latestVersionMsg") + (cur ? ` (v${cur})` : ""));
-          setModalOpen(false);
         }
+        setStatus("idle");
         return;
       }
       setInfo({ version: found.version, notes: found.notes });
@@ -235,12 +235,12 @@ const store = createRoot(() => {
       }
     } catch (e) {
       console.error("Update check failed:", e);
+      if (userInitiated) {
+        setModalOpen(false);
+        alert(t("updateCheckingFailed"));
+      }
       setStatus("error");
       setError(e instanceof Error ? e.message : String(e));
-      if (userInitiated) {
-        alert(t("updateCheckingFailed"));
-        setModalOpen(false);
-      }
     }
   };
 
