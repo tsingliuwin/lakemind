@@ -4457,6 +4457,47 @@ button.lm-select-trigger:hover:not(:disabled) {
   flex-direction: column;
   gap: 16px;
 }
+.chat-stream-inner {
+  position: relative;
+  transition: width 0.05s ease-out;
+}
+.chat-resizer-l,
+.chat-resizer-r {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  cursor: ew-resize;
+  z-index: 10;
+  user-select: none;
+}
+.chat-resizer-l {
+  left: -14px;
+}
+.chat-resizer-r {
+  right: -14px;
+}
+.chat-resizer-l::after,
+.chat-resizer-r::after {
+  content: "";
+  position: absolute;
+  top: 15%;
+  bottom: 15%;
+  width: 2px;
+  background: transparent;
+  border-radius: 1px;
+  transition: background 0.15s ease;
+}
+.chat-resizer-l::after {
+  left: 5px;
+}
+.chat-resizer-r::after {
+  right: 5px;
+}
+.chat-resizer-l:hover::after,
+.chat-resizer-r:hover::after {
+  background: var(--border-strong, rgba(255, 255, 255, 0.15));
+}
 
 .chat-empty {
   margin: auto;
