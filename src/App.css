@@ -1898,8 +1898,12 @@ body.is-resizing-column * {
   color: var(--text-dim);
   font-size: 10px;
   font-family: var(--font-mono);
-  padding-top: 2px;
+  padding-top: 4px;
   border-top: 1px dashed var(--border-faint);
+}
+.log-detail .ld-foot:first-child {
+  border-top: none;
+  padding-top: 0;
 }
 .log-detail .ld-tag {
   background: var(--bg-hover);

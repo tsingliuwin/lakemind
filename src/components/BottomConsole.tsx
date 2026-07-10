@@ -172,7 +172,7 @@ export default function BottomConsole(props: {
                       </span>
                       <span class="log-expand" data-open={expanded()}>▸</span>
                     </div>
-                    <Show when={expanded() && hasDetail}>
+                    <Show when={expanded()}>
                       <LogDetail log={log} copiedId={copiedId()} onCopied={(id) => setCopiedId(id)} />
                     </Show>
                   </div>
