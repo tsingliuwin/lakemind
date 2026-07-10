@@ -1149,7 +1149,8 @@ select:hover:not(:disabled) {
   letter-spacing: 0.2px;
 }
 
-.ln-theme-toggle {
+.ln-theme-toggle,
+.ss-theme-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1164,7 +1165,8 @@ select:hover:not(:disabled) {
   flex-shrink: 0;
   padding: 0;
 }
-.ln-theme-toggle:hover {
+.ln-theme-toggle:hover,
+.ss-theme-toggle:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
