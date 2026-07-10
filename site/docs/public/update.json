@@ -1,5 +1,5 @@
 {
-  "version": "v0.4.0",
+  "version": "v0.5.0",
   "changelog": "- 新增全局分析准则库（OKF bundle）：分析准则从硬编码在系统提示词里，重构为分层、标签化、按需检索的活知识库，随软件分发、所有工作区共享\n- 新增 search_tenets / load_tenets 两个 Agent 工具，支持渐进式披露（先看目录大纲再精读相关准则）\n- 系统提示词数据纪律章节重构：回退硬编码的行业具体案例，改为跨行业普适的核心准则，并引导 Agent 按需检索行业/主题准则\n- 扩展性：新增行业或主题只需添加一个带 frontmatter 的 Markdown 文件，零代码",
   "url": "https://upload.xi-n.com/"
 }
