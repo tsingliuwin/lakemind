@@ -1715,15 +1715,16 @@ body.is-resizing-column * {
   font-weight: 600;
 }
 .log-card {
-  border-bottom: 1px solid var(--border-faint);
-  transition: background-color 0.15s ease, border-color 0.15s ease, margin 0.15s ease, box-shadow 0.15s ease;
+  border: 1px solid transparent;
+  border-bottom-color: var(--border-faint);
+  transition: background-color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
 .log-card:hover:not(.expanded) {
   background: var(--bg-surface);
 }
 .log-card.expanded {
   background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
+  border-color: var(--border-strong);
   border-radius: 6px;
   margin: 6px 10px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
@@ -1735,7 +1736,6 @@ body.is-resizing-column * {
   padding: 4px 12px;
   font-size: 12px;
   cursor: default;
-  transition: padding 0.15s ease;
 }
 .log-row.clickable {
   cursor: pointer;
