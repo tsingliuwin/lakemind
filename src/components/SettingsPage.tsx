@@ -1130,21 +1130,22 @@ export default function SettingsPage(props: {
             <span>{t("settingsStats")}</span>
           </button>
 
-          <div class="ss-guide-container">
-            <button
-              class="ss-nav-item"
-              classList={{ active: activeTab() === "guide" }}
-              onClick={() => setActiveTab("guide")}
-              style={{ display: HIDDEN_TABS.has("guide") ? "none" : undefined }}
-            >
-              <span class="ss-nav-icon">
-                <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12.5 3.5c-1.5-1.5-5 0-6 1a25 25 0 0 0-2.5 3.5L2 9.5l2.5 2L6 14l1.5-2c1.5-.8 2.8-1.8 3.8-3.3 1-1 2.5-4.5 1.2-5.7zM4.5 11.5L2 14M9.5 6.5l.5.5" />
-                </svg>
-              </span>
-              <span>{t("settingsGuide")}</span>
-            </button>
-          </div>
+          <Show when={!HIDDEN_TABS.has("guide")}>
+            <div class="ss-guide-container">
+              <button
+                class="ss-nav-item"
+                classList={{ active: activeTab() === "guide" }}
+                onClick={() => setActiveTab("guide")}
+              >
+                <span class="ss-nav-icon">
+                  <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12.5 3.5c-1.5-1.5-5 0-6 1a25 25 0 0 0-2.5 3.5L2 9.5l2.5 2L6 14l1.5-2c1.5-.8 2.8-1.8 3.8-3.3 1-1 2.5-4.5 1.2-5.7zM4.5 11.5L2 14M9.5 6.5l.5.5" />
+                  </svg>
+                </span>
+                <span>{t("settingsGuide")}</span>
+              </button>
+            </div>
+          </Show>
         </nav>
 
         <div class="ss-footer">
