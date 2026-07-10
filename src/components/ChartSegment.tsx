@@ -381,18 +381,16 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
             <span class="chart-fullscreen-title">{props.seg.title || "图表预览"}</span>
             <div class="chart-fullscreen-actions">
               <button class="chart-fullscreen-btn" onClick={saveAsImage} title="保存为图片">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 4px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px;">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="7 10 12 15 17 10"></polyline>
                   <line x1="12" y1="15" x2="12" y2="3"></line>
                 </svg>
-                <span>保存图片</span>
               </button>
               <button class="chart-fullscreen-btn" onClick={() => setIsFullScreen(false)} title="退出全屏">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 4px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px;">
                   <path d="M18 6L6 18M6 6l12 12"></path>
                 </svg>
-                <span>退出全屏</span>
               </button>
             </div>
           </div>

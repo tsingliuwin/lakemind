@@ -5528,21 +5528,20 @@ button.lm-select-trigger:hover:not(:disabled) {
 .chart-fullscreen-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-strong);
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  border: none;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 .chart-fullscreen-btn:hover {
-  background: var(--bg-hover);
+  background: rgba(255, 255, 255, 0.1);
   color: var(--text-primary);
-  border-color: var(--border-strong);
 }
 .chart-fullscreen-body {
   flex: 1;
