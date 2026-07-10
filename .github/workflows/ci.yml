@@ -8,6 +8,9 @@ on:
 jobs:
   warm-cache:
     name: Warm Build Cache (${{ matrix.os }})
+    # 发版 commit（chore: bump version）会同时触发 Release workflow 来完整构建，
+    # 此时跳过 Cache Warmer 避免重复占用 CI 资源。
+    if: "!startsWith(github.event.head_commit.message, 'chore: bump version')"
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
