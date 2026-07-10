@@ -41,6 +41,16 @@ export default function BottomConsole(props: {
   /** Which log row is currently showing the "copied" checkmark feedback. */
   const [copiedId, setCopiedId] = createSignal<number | null>(null);
 
+  const copyLog = async (log: UnifiedLog, e: MouseEvent) => {
+    e.stopPropagation();
+    const text = formatLogForCopy(log);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(log.id ?? null);
+      setTimeout(() => setCopiedId(null), 1500);
+    } catch {}
+  };
+
   /** Logs filtered by the active tab's category set. */
   const visibleLogs = createMemo(() => {
     const tab = TABS.find((tb) => tb.key === activeTab());
@@ -170,7 +180,25 @@ export default function BottomConsole(props: {
                           <span>{elapsedMs}ms</span>
                         </Show>
                       </span>
-                      <span class="log-expand" data-open={expanded()}>▸</span>
+                      <button
+                        class="log-row-copy"
+                        title={copiedId() === log.id ? "已复制" : "复制日志"}
+                        onClick={(e) => copyLog(log, e)}
+                      >
+                        <Show
+                          when={copiedId() === log.id}
+                          fallback={
+                            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                          }
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green, #10b981)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                          </svg>
+                        </Show>
+                      </button>
                     </div>
                     <Show when={expanded()}>
                       <LogDetail log={log} copiedId={copiedId()} onCopied={(id) => setCopiedId(id)} />
@@ -311,4 +339,34 @@ function LogDetail(props: { log: UnifiedLog; copiedId: number | null; onCopied: 
       </div>
     </div>
   );
+}
+
+function formatLogForCopy(log: UnifiedLog): string {
+  const tsStr = new Date(log.ts).toLocaleString();
+  const levelStr = log.level.toUpperCase();
+  const catStr = log.category.toUpperCase();
+  let text = `[${tsStr}] [${levelStr}] [${catStr}] ${log.message}`;
+  
+  if (log.detail) {
+    const detail = log.detail;
+    if (typeof detail.sql === "string" && detail.sql.trim()) {
+      text += `\n\nSQL:\n${detail.sql}`;
+    }
+    if (typeof detail.error === "string" && detail.error.trim()) {
+      text += `\n\nError:\n${detail.error}`;
+    }
+    const extraFields = Object.entries(detail).filter(([k]) => k !== "sql" && k !== "error");
+    if (extraFields.length > 0) {
+      text += `\n\nFields:\n` + extraFields.map(([k, v]) => `  ${k}: ${String(v)}`).join("\n");
+    }
+  }
+  
+  if (log.workspace) {
+    text += `\nWorkspace: ${log.workspace}`;
+  }
+  if (log.taskId) {
+    text += `\nTask ID: ${log.taskId}`;
+  }
+  
+  return text;
 }

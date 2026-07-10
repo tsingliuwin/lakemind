@@ -1794,16 +1794,25 @@ body.is-resizing-column * {
   padding: 0 5px;
   border-radius: 3px;
 }
-/* Expand chevron — only shown when the row has a detail panel. */
-.log-row .log-expand {
-  flex: 0 0 12px;
+/* Copy button on the right of the row. */
+.log-row-copy {
+  flex: 0 0 24px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
   color: var(--text-dim);
-  font-size: 10px;
-  text-align: center;
-  transition: transform 0.12s ease;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0;
+  transition: all 0.12s ease;
+  margin-left: 4px;
 }
-.log-row .log-expand[data-open="true"] {
-  transform: rotate(90deg);
+.log-row-copy:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 /* --- Expanded detail panel (shown when a row is clicked) --- */
 .log-detail {
