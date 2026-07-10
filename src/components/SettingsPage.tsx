@@ -905,11 +905,11 @@ export default function SettingsPage(props: {
           border-color: transparent !important;
         }
         .db-icon-btn.active {
-          background: rgba(80, 160, 255, 0.12);
+          background: transparent !important;
           color: var(--brand);
         }
         .db-icon-btn.active:hover {
-          background: rgba(80, 160, 255, 0.18);
+          background: var(--bg-hover) !important;
           color: var(--brand);
           border-color: transparent !important;
         }
