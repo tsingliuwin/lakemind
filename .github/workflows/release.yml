@@ -165,46 +165,70 @@ jobs:
         shell: bash
         run: |
           TAG_NAME="${{ needs.prepare.outputs.tag_name }}"
-          
-          # 定位生成的文件（安装包 + 对应的 .sig 更新签名）
+          mkdir -p updater-sigs
+
+          # 每个平台有两类产物：
+          #   1) 安装包（dmg/exe/AppImage）—— 供用户手动下载安装
+          #   2) updater 产物 + .sig 签名 —— 供应用内自动更新校验
+          # macOS 的 updater 产物是 .app.tar.gz（不是 dmg），Windows/Linux
+          # 的 updater 产物就是安装包本身。latest.json 的 url/sig 指向后者。
+
           if [ "${{ matrix.settings.os }}" = "windows-latest" ]; then
-            FILE_PATH=$(find src-tauri/target/release/bundle/nsis -name "*.exe" | head -n 1)
-            FILE_NAME="lakemind-${TAG_NAME}.exe"
+            # --- Windows (nsis) ---
+            INST_PATH=$(find src-tauri/target/release/bundle/nsis -name "*-setup.exe" | head -n 1)
+            INST_NAME="lakemind-${TAG_NAME}.exe"
+            # updater 用同一个 exe + 它的 .sig
+            UP_PATH="$INST_PATH"; UP_NAME="$INST_NAME"
+            UP_SIG_PATH="${INST_PATH}.sig"; UP_SIG_NAME="${INST_NAME}.sig"
           elif [ "${{ matrix.settings.os }}" = "macos-latest" ]; then
             if [[ "${{ matrix.settings.args }}" == *"--target x86_64-apple-darwin"* ]]; then
-              FILE_PATH=$(find src-tauri/target/x86_64-apple-darwin/release/bundle/dmg -name "*.dmg" | head -n 1)
-              FILE_NAME="lakemind-${TAG_NAME}-x64.dmg"
+              INST_PATH=$(find src-tauri/target/x86_64-apple-darwin/release/bundle/dmg -name "*.dmg" | head -n 1)
+              INST_NAME="lakemind-${TAG_NAME}-x64.dmg"
+              # updater 用 macos/ 下的 app.tar.gz（不是 dmg）
+              UP_PATH=$(find src-tauri/target/x86_64-apple-darwin/release/bundle/macos -name "*.app.tar.gz" | head -n 1)
+              UP_NAME="lakemind-${TAG_NAME}-x64.app.tar.gz"
             else
-              FILE_PATH=$(find src-tauri/target/aarch64-apple-darwin/release/bundle/dmg -name "*.dmg" | head -n 1)
-              if [ -z "$FILE_PATH" ]; then
-                FILE_PATH=$(find src-tauri/target/release/bundle/dmg -name "*.dmg" | head -n 1)
+              INST_PATH=$(find src-tauri/target/aarch64-apple-darwin/release/bundle/dmg -name "*.dmg" | head -n 1)
+              if [ -z "$INST_PATH" ]; then
+                INST_PATH=$(find src-tauri/target/release/bundle/dmg -name "*.dmg" | head -n 1)
               fi
-              FILE_NAME="lakemind-${TAG_NAME}-arm64.dmg"
+              INST_NAME="lakemind-${TAG_NAME}-arm64.dmg"
+              UP_PATH=$(find src-tauri/target/aarch64-apple-darwin/release/bundle/macos -name "*.app.tar.gz" | head -n 1)
+              if [ -z "$UP_PATH" ]; then
+                UP_PATH=$(find src-tauri/target/release/bundle/macos -name "*.app.tar.gz" | head -n 1)
+              fi
+              UP_NAME="lakemind-${TAG_NAME}-arm64.app.tar.gz"
             fi
+            UP_SIG_PATH="${UP_PATH}.sig"; UP_SIG_NAME="${UP_NAME}.sig"
           elif [ "${{ matrix.settings.os }}" = "ubuntu-22.04" ]; then
-            FILE_PATH=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" | head -n 1)
-            FILE_NAME="lakemind-${TAG_NAME}.AppImage"
-          fi
-          
-          if [ -n "$FILE_PATH" ] && [ -f "$FILE_PATH" ]; then
-            echo "Uploading $FILE_PATH to R2 as $FILE_NAME..."
-            aws s3 cp "$FILE_PATH" "s3://lakemind/$FILE_NAME" --endpoint-url ${{ secrets.R2_ENDPOINT }}
-          else
-            echo "Error: Built installer not found at $FILE_PATH!"
-            exit 1
+            # --- Linux (AppImage) ---
+            INST_PATH=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" | head -n 1)
+            INST_NAME="lakemind-${TAG_NAME}.AppImage"
+            UP_PATH="$INST_PATH"; UP_NAME="$INST_NAME"
+            UP_SIG_PATH="${INST_PATH}.sig"; UP_SIG_NAME="${INST_NAME}.sig"
           fi
 
-          # 上传 .sig 签名文件（与安装包同名加 .sig 后缀，由 createUpdaterArtifacts 生成）
-          SIG_PATH="${FILE_PATH}.sig"
-          SIG_NAME="${FILE_NAME}.sig"
-          if [ -f "$SIG_PATH" ]; then
-            echo "Uploading $SIG_PATH to R2 as $SIG_NAME..."
-            aws s3 cp "$SIG_PATH" "s3://lakemind/$SIG_NAME" --endpoint-url ${{ secrets.R2_ENDPOINT }}
-            # 同时复制到统一位置，供 artifact 上传使用
-            mkdir -p updater-sigs
-            cp "$SIG_PATH" "updater-sigs/$SIG_NAME"
+          # 1) 上传安装包（dmg/exe/AppImage）
+          if [ -n "$INST_PATH" ] && [ -f "$INST_PATH" ]; then
+            echo "Uploading installer $INST_PATH -> $INST_NAME"
+            aws s3 cp "$INST_PATH" "s3://lakemind/$INST_NAME" --endpoint-url ${{ secrets.R2_ENDPOINT }}
           else
-            echo "::warning::Signature file not found at $SIG_PATH — updater artifacts may be disabled."
+            echo "::warning::Installer not found at $INST_PATH"
+          fi
+
+          # 2) 上传 updater 产物（macOS 是 app.tar.gz；Win/Linux 与安装包相同）
+          if [ -n "$UP_PATH" ] && [ -f "$UP_PATH" ] && [ "$UP_PATH" != "$INST_PATH" ]; then
+            echo "Uploading updater artifact $UP_PATH -> $UP_NAME"
+            aws s3 cp "$UP_PATH" "s3://lakemind/$UP_NAME" --endpoint-url ${{ secrets.R2_ENDPOINT }}
+          fi
+
+          # 3) 上传 updater 签名 + 收集到 artifact 供 latest.json 生成
+          if [ -n "$UP_SIG_PATH" ] && [ -f "$UP_SIG_PATH" ]; then
+            echo "Uploading signature $UP_SIG_PATH -> $UP_SIG_NAME"
+            aws s3 cp "$UP_SIG_PATH" "s3://lakemind/$UP_SIG_NAME" --endpoint-url ${{ secrets.R2_ENDPOINT }}
+            cp "$UP_SIG_PATH" "updater-sigs/$UP_SIG_NAME"
+          else
+            echo "::error::Updater signature not found at $UP_SIG_PATH — check TAURI_SIGNING_PRIVATE_KEY secret."
           fi
 
       - name: Upload updater signature artifact
@@ -212,13 +236,16 @@ jobs:
         with:
           name: updater-sig-${{ matrix.settings.os }}-${{ matrix.settings.target }}
           path: updater-sigs/*.sig
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
 
   # 自动化更新官网配置并提交
+  # 始终运行（即使部分平台构建失败），latest.json 只会包含成功生成签名
+  # 的平台，因此不会出现签名缺失导致校验失败的情况。
   update-website-config:
     name: Update Website Config
     needs: [prepare, build]
+    if: always() && needs.prepare.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -249,10 +276,12 @@ jobs:
             const version = tag.replace(/^v/, "");
             const downloadBase = "https://upload.xi-n.com";
 
-            // 文件名 → Tauri 平台键的映射
+            // sig 文件名 → Tauri 平台键 + updater 下载 url 的映射。
+            // 注意：macOS updater 下载的是 .app.tar.gz（不是 dmg），其 sig
+            // 文件名也是 *.app.tar.gz.sig。
             const FILE_TO_PLATFORM = [
-              { re: /-arm64\.dmg\.sig$/, platform: "darwin-aarch64", file: `lakemind-${tag}-arm64.dmg` },
-              { re: /-x64\.dmg\.sig$/, platform: "darwin-x86_64", file: `lakemind-${tag}-x64.dmg` },
+              { re: /-arm64\.app\.tar\.gz\.sig$/, platform: "darwin-aarch64", file: `lakemind-${tag}-arm64.app.tar.gz` },
+              { re: /-x64\.app\.tar\.gz\.sig$/, platform: "darwin-x86_64", file: `lakemind-${tag}-x64.app.tar.gz` },
               { re: /\.exe\.sig$/, platform: "windows-x86_64", file: `lakemind-${tag}.exe` },
               { re: /\.AppImage\.sig$/, platform: "linux-x86_64", file: `lakemind-${tag}.AppImage` },
             ];
@@ -284,7 +313,12 @@ jobs:
               try { notes = JSON.parse(fs.readFileSync(updateJsonPath, "utf8")).changelog || ""; } catch {}
             }
 
-            // 生成 Tauri 标准 latest.json
+            // 生成 Tauri 标准 latest.json（仅当至少有一个平台签名时才写入，
+            // 避免发布一个空 platforms 的 manifest 让客户端误判为无更新或报错）
+            if (Object.keys(platforms).length === 0) {
+              console.warn("No signed platforms found — skipping latest.json generation.");
+              process.exit(0);
+            }
             const latest = {
               version,
               notes,
@@ -306,7 +340,9 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add site/docs/public/latest.json site/docs/public/update.json
+          # latest.json 可能因无签名而未生成，单独 add 避免报错
+          git add site/docs/public/latest.json 2>/dev/null || true
+          git add site/docs/public/update.json
           git commit -m "chore: release ${{ needs.prepare.outputs.tag_name }} [skip ci]" || echo "No changes to commit"
           git push origin main
 
