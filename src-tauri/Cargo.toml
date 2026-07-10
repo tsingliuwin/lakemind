@@ -36,3 +36,10 @@ rfd = "0.17"
 
 [profile.dev]
 debug = 0
+
+[profile.release]
+opt-level = 3
+codegen-units = 16
+lto = "thin"
+panic = "abort"
+strip = true
