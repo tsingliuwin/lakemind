@@ -598,6 +598,38 @@ pub fn init_global_db() -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to create db_connection_tables table: {e}"))?;
 
+    // logs: the unified, queryable log store. Every log line from the backend
+    // (tracing) and the frontend (append_log command) lands here, indexed for
+    // the multi-tab console's time/level/category filters and the future
+    // log-analysis module. No FK to workspaces — logs are retained independently
+    // so deleting a workspace doesn't erase its history.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS logs (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts       INTEGER NOT NULL,
+            level    TEXT NOT NULL,
+            category TEXT NOT NULL,
+            message  TEXT NOT NULL,
+            detail   TEXT,
+            workspace TEXT,
+            task_id  TEXT
+        )",
+        [],
+    )
+    .map_err(|e| format!("Failed to create logs table: {e}"))?;
+    // First indexes in the codebase: cover the console's and the analysis
+    // module's dominant access paths — newest-first time scans, per-category
+    // and per-level filtered listings.
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts DESC);", []);
+    let _ = conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_logs_cat_ts ON logs(category, ts DESC);",
+        [],
+    );
+    let _ = conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_logs_level_ts ON logs(level, ts DESC);",
+        [],
+    );
+
     // Seed the default workspace on first run.
     let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM workspaces", [], |row| row.get(0))
@@ -896,7 +928,7 @@ pub fn attach_one(conn: &duckdb::Connection, r: &DbConnectionRecord) -> Result<(
 
     conn.execute(&attach_sql, [])
         .map(|e| {
-            println!("Auto-attached database connection: {} AS {}", r.name, conn_name);
+            tracing::info!(category = "link", "auto-attached database connection: {} AS {}", r.name, conn_name);
             e
         })
         .map_err(|e| format!("连接数据库失败: {e}"))?;
@@ -909,7 +941,7 @@ pub fn detach_one(conn: &duckdb::Connection, name: &str) -> Result<(), String> {
     let conn_name = workspace_attach_alias(name);
     conn.execute(&format!("DETACH {conn_name};"), [])
         .map_err(|e| e.to_string())?;
-    println!("Detached database connection: {} AS {}", name, conn_name);
+    tracing::info!(category = "link", "detached database connection: {} AS {}", name, conn_name);
     Ok(())
 }
 
@@ -918,10 +950,203 @@ pub fn attach_workspace_connections(conn: &duckdb::Connection, ws_path: &str) ->
     let linked = list_workspace_connections(&sqlite, ws_path)?;
     for r in linked {
         if let Err(e) = attach_one(conn, &r) {
-            eprintln!("Auto-attach warning: failed to ATTACH connection {}: {e}", r.name);
+            tracing::warn!(category = "link", "auto-attach warning: failed to ATTACH connection {}: {e}", r.name);
         }
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// logs: the unified, queryable log store
+// ---------------------------------------------------------------------------
+
+/// Insert one log row. Returns the new autoincrement id.
+///
+/// Called from the tracing `SqliteEmitLayer` (every backend event) and the
+/// `append_log` Tauri command (every frontend log). Failures here MUST be
+/// non-fatal — logging can never take the app down — so callers swallow the
+/// error; we keep the `Result` only for the rare `&Connection` misuse path.
+pub fn insert_log(conn: &Connection, rec: &crate::model::LogRecord) -> Result<i64, String> {
+    let detail = rec
+        .detail
+        .as_ref()
+        .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "null".into()));
+    conn.execute(
+        "INSERT INTO logs (ts, level, category, message, detail, workspace, task_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        rusqlite::params![
+            rec.ts,
+            rec.level.as_str(),
+            rec.category,
+            rec.message,
+            detail,
+            rec.workspace,
+            rec.task_id,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Query logs with optional filters, newest-first. Used by the console's
+/// history load and the future log-analysis module. `limit` defaults to 200 when
+/// non-positive.
+pub fn query_logs(conn: &Connection, filter: &crate::model::LogFilter) -> Result<Vec<crate::model::LogRecord>, String> {
+    let limit = if filter.limit <= 0 { 200 } else { filter.limit };
+    let offset = filter.offset.max(0);
+
+    let mut where_parts: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some(cats) = &filter.categories {
+        if !cats.is_empty() {
+            let placeholders = vec!["?"; cats.len()].join(",");
+            where_parts.push(format!("category IN ({placeholders})"));
+            for c in cats {
+                params.push(Box::new(c.clone()));
+            }
+        }
+    }
+    if let Some(levels) = &filter.levels {
+        if !levels.is_empty() {
+            let placeholders = vec!["?"; levels.len()].join(",");
+            where_parts.push(format!("level IN ({placeholders})"));
+            for l in levels {
+                params.push(Box::new(l.clone()));
+            }
+        }
+    }
+    if let Some(from) = filter.from_ts {
+        where_parts.push("ts >= ?".to_string());
+        params.push(Box::new(from));
+    }
+    if let Some(to) = filter.to_ts {
+        where_parts.push("ts <= ?".to_string());
+        params.push(Box::new(to));
+    }
+    if let Some(kw) = filter.keyword.as_ref().filter(|s| !s.trim().is_empty()) {
+        where_parts.push("LOWER(message) LIKE LOWER(?)".to_string());
+        params.push(Box::new(format!("%{}%", kw.trim())));
+    }
+
+    let where_clause = if where_parts.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", where_parts.join(" AND "))
+    };
+
+    let sql = format!(
+        "SELECT id, ts, level, category, message, detail, workspace, task_id
+         FROM logs {where_clause}
+         ORDER BY ts DESC, id DESC
+         LIMIT ? OFFSET ?"
+    );
+    params.push(Box::new(limit));
+    params.push(Box::new(offset));
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let rows = stmt
+        .query_map(param_refs.as_slice(), |row| {
+            let level_str: String = row.get(2)?;
+            let detail_str: Option<String> = row.get(5).ok();
+            let detail = detail_str
+                .filter(|s| !s.is_empty())
+                .and_then(|s| serde_json::from_str(&s).ok());
+            Ok(crate::model::LogRecord {
+                id: Some(row.get(0)?),
+                ts: row.get(1)?,
+                level: crate::model::LogLevel::from_db_str(&level_str),
+                category: row.get(3)?,
+                message: row.get(4)?,
+                detail,
+                workspace: row.get(6).ok(),
+                task_id: row.get(7).ok(),
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut out = Vec::new();
+    for r in rows {
+        if let Ok(rec) = r {
+            out.push(rec);
+        }
+    }
+    Ok(out)
+}
+
+/// Count logs matching the same filter (without LIMIT/OFFSET), for pagination.
+/// Reserved for the future log-analysis module's paginated view.
+#[allow(dead_code)]
+pub fn count_logs(conn: &Connection, filter: &crate::model::LogFilter) -> Result<i64, String> {
+    let mut where_parts: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some(cats) = &filter.categories {
+        if !cats.is_empty() {
+            let placeholders = vec!["?"; cats.len()].join(",");
+            where_parts.push(format!("category IN ({placeholders})"));
+            for c in cats {
+                params.push(Box::new(c.clone()));
+            }
+        }
+    }
+    if let Some(levels) = &filter.levels {
+        if !levels.is_empty() {
+            let placeholders = vec!["?"; levels.len()].join(",");
+            where_parts.push(format!("level IN ({placeholders})"));
+            for l in levels {
+                params.push(Box::new(l.clone()));
+            }
+        }
+    }
+    if let Some(from) = filter.from_ts {
+        where_parts.push("ts >= ?".to_string());
+        params.push(Box::new(from));
+    }
+    if let Some(to) = filter.to_ts {
+        where_parts.push("ts <= ?".to_string());
+        params.push(Box::new(to));
+    }
+    if let Some(kw) = filter.keyword.as_ref().filter(|s| !s.trim().is_empty()) {
+        where_parts.push("LOWER(message) LIKE LOWER(?)".to_string());
+        params.push(Box::new(format!("%{}%", kw.trim())));
+    }
+
+    let where_clause = if where_parts.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", where_parts.join(" AND "))
+    };
+    let sql = format!("SELECT COUNT(*) FROM logs {where_clause}");
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    stmt.query_row(param_refs.as_slice(), |row| row.get(0))
+        .map_err(|e| e.to_string())
+}
+
+/// Delete logs. `before = None` clears ALL logs; `Some(ts)` deletes rows with
+/// `ts < before` (used for retention, e.g. "older than 7 days").
+pub fn clear_logs(conn: &Connection, before: Option<i64>) -> Result<(), String> {
+    match before {
+        Some(ts) => {
+            conn.execute("DELETE FROM logs WHERE ts < ?", [ts])
+                .map_err(|e| e.to_string())?;
+        }
+        None => {
+            conn.execute("DELETE FROM logs", []).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Current Unix-ms timestamp. Local helper mirroring the inline calls elsewhere
+/// in this file; kept here so log helpers are self-contained.
+pub fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }
 
 

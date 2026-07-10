@@ -45,7 +45,7 @@ pub fn ensure_ducklake_loaded(conn: &Connection) -> AppResult<()> {
     // Try to LOAD ducklake first to avoid unnecessary INSTALL check/network requests.
     if conn.execute("LOAD ducklake;", []).is_err() {
         if let Err(e) = conn.execute("INSTALL ducklake;", []) {
-            eprintln!("INSTALL ducklake failed: {e}");
+            tracing::warn!(category = "duckdb", "INSTALL ducklake failed: {e}");
         }
         conn.execute("LOAD ducklake;", []).map_err(|e| {
             AppError::new(format!(
@@ -57,7 +57,7 @@ pub fn ensure_ducklake_loaded(conn: &Connection) -> AppResult<()> {
     // Try to LOAD sqlite first to avoid unnecessary INSTALL check/network requests.
     if conn.execute("LOAD sqlite;", []).is_err() {
         if let Err(e) = conn.execute("INSTALL sqlite;", []) {
-            eprintln!("INSTALL sqlite failed: {e}");
+            tracing::warn!(category = "duckdb", "INSTALL sqlite failed: {e}");
         }
         conn.execute("LOAD sqlite;", [])
             .map_err(|e| AppError::new(format!("无法加载 sqlite 扩展: {e}")))?;
@@ -114,12 +114,12 @@ pub fn attach_workspace_lake(conn: &Connection, ws_dir: &Path) -> AppResult<()> 
         // destructive recovery first: drop just the stale WAL and re-ATTACH. Only
         // if that also fails (catalog genuinely corrupt/truncated) do we wipe the
         // whole lake store and let `register_workspace_sources` re-materialize.
-        eprintln!("ducklake: WAL mismatch after crash, attempting WAL-only recovery: {msg}");
+        tracing::warn!(category = "duckdb", "ducklake WAL mismatch after crash, attempting WAL-only recovery: {msg}");
         let _ = std::fs::remove_file(&wal_str);
         if conn.execute(&sql, []).is_ok() {
-            eprintln!("ducklake: recovered via WAL drop (catalog intact)");
+            tracing::info!(category = "duckdb", "ducklake recovered via WAL drop (catalog intact)");
         } else {
-            eprintln!("ducklake: WAL drop failed, rebuilding lake store");
+            tracing::warn!(category = "duckdb", "ducklake WAL drop failed, rebuilding lake store");
             let _ = std::fs::remove_file(&catalog);
             let _ = std::fs::remove_dir_all(&data_dir);
             std::fs::create_dir_all(&data_dir)

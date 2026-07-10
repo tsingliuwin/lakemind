@@ -1,9 +1,10 @@
-import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
+import { For, Show, createMemo, createSignal, createEffect, onCleanup } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import type { SourceTable, QueryTask, Workspace, FileItem, RegisterStatus, ImportProgress, DbConnection } from "../lib/types";
 import type { SettingsTab } from "./SettingsPage";
+import { logError } from "../lib/logger";
 import { t } from "../lib/i18n";
-import { logoSrc } from "../lib/theme";
+import { logoSrc, currentTheme, setCurrentTheme } from "../lib/theme";
 import { updater } from "../lib/updater";
 
 const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
@@ -131,10 +132,30 @@ export default function LeftNav(props: {
     if (s === "downloading") return "新版本正在后台下载中...";
     return "";
   };
+
+  const [showRelaunchConfirm, setShowRelaunchConfirm] = createSignal(false);
+
+  createEffect(() => {
+    if (showRelaunchConfirm()) {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          setShowRelaunchConfirm(false);
+        } else if (e.key === "Enter") {
+          setShowRelaunchConfirm(false);
+          updater.installAndRelaunch();
+        }
+      };
+      window.addEventListener("keydown", handleKeyDown, { capture: true });
+      onCleanup(() => {
+        window.removeEventListener("keydown", handleKeyDown, { capture: true });
+      });
+    }
+  });
+
   const onBadgeClick = () => {
-    // If already downloaded, install immediately.
+    // If already downloaded, show confirmation modal first.
     if (updater.status() === "ready") {
-      updater.installAndRelaunch();
+      setShowRelaunchConfirm(true);
     }
   };
 
@@ -201,7 +222,7 @@ export default function LeftNav(props: {
       const list = await invoke<DbConnection[]>("list_workspace_connections", { wsPath: ws });
       setWorkspaceConns(list);
     } catch (err) {
-      console.error("Failed to list workspace db connections:", err);
+      logError("ui", "Failed to list workspace db connections", err);
     }
   };
 
@@ -218,7 +239,7 @@ export default function LeftNav(props: {
       });
       setDbTables({ ...dbTables(), [id]: list });
     } catch (err) {
-      console.error("Failed to load tables for connection " + c.name, err);
+      logError("ui", "Failed to load tables for connection " + c.name, err);
     } finally {
       setLoadingDbConns({ ...loadingDbConns(), [id]: false });
     }
@@ -392,7 +413,7 @@ export default function LeftNav(props: {
       const items = await invoke<FileItem[]>("read_directory", { path: dirPath });
       setDirectoryContents((prev) => ({ ...prev, [dirPath]: items }));
     } catch (e) {
-      console.error("Failed to read dir:", e);
+      logError("ui", "Failed to read dir", e);
     }
   };
 
@@ -416,7 +437,7 @@ export default function LeftNav(props: {
       <div class="fe-tree-container" style={{ "padding-left": `${depth > 0 ? 12 : 0}px` }}>
         <For each={filteredContents}>
           {(item) => {
-            const isExpanded = !!expandedPaths()[item.path];
+            const isExpanded = () => !!expandedPaths()[item.path];
             return (
               <div class="fe-tree-node">
                 <div
@@ -440,7 +461,7 @@ export default function LeftNav(props: {
                   }}
                   onClick={() => {
                     if (item.is_dir) {
-                      toggleFolder(item.path);
+                       toggleFolder(item.path);
                     } else {
                       handleFileClick(item);
                     }
@@ -461,7 +482,7 @@ export default function LeftNav(props: {
                     }
                   >
                     <span class="fe-node-icon" style="font-size: 11px;">
-                      {isExpanded ? "▾ 📁" : "▸ 📁"}
+                      {isExpanded() ? "▾ 📁" : "▸ 📁"}
                     </span>
                   </Show>
                   <span class="fe-node-name" style="flex: 1; font-size: 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -473,7 +494,7 @@ export default function LeftNav(props: {
                     </Show>
                   </Show>
                 </div>
-                <Show when={item.is_dir && isExpanded}>
+                <Show when={item.is_dir && isExpanded()}>
                   {renderFileTree(item.path, depth + 1)}
                 </Show>
               </div>
@@ -1246,13 +1267,65 @@ export default function LeftNav(props: {
       <div class="ln-footer">
         <button
           class="ln-brand"
-          title={t("settings")}
           onClick={() => props.onOpenSettings()}
         >
           <img src={logoSrc()} alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
           <span class="ln-brand-name">LakeMind</span>
         </button>
+        <button
+          class="ln-theme-toggle"
+          onClick={() => setCurrentTheme(currentTheme() === "light" ? "geek-dark" : "light")}
+          title={t("interfaceTheme")}
+        >
+          <Show when={currentTheme() === "light"} fallback={
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+          }>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+          </Show>
+        </button>
       </div>
+
+      <Show when={showRelaunchConfirm()}>
+        <div class="modal-overlay" onClick={() => setShowRelaunchConfirm(false)}>
+          <div class="modal-card update-confirm-card" onClick={(e) => e.stopPropagation()} style="width: 440px; padding: 20px 24px; border-radius: 12px; display: flex; flex-direction: column; gap: 12px;">
+            <div style="font-size: 14px; font-weight: 600; color: var(--text-primary);">
+              确认更新到 v{updater.info().version}？
+            </div>
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 8px;">
+              应用将立即退出并启动安装程序，正在进行的会话会被中断。
+            </div>
+            <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px;">
+              <button
+                onClick={() => setShowRelaunchConfirm(false)}
+                style="background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-strong); color: var(--text-secondary); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 8px;"
+              >
+                稍后 <span style="font-size: 10px; opacity: 0.5; background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px;">esc</span>
+              </button>
+              <button
+                onClick={() => {
+                  setShowRelaunchConfirm(false);
+                  updater.installAndRelaunch();
+                }}
+                style="background: #fff; border: none; color: #000; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px;"
+              >
+                立即重启更新 <span style="font-size: 10px; opacity: 0.6; font-family: monospace;">↵</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
     </nav>
   );
 }

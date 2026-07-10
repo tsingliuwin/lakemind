@@ -1,5 +1,6 @@
 import { onCleanup, onMount, createSignal, For, Show, createEffect } from "solid-js";
 import * as echarts from "echarts";
+import { invoke } from "@tauri-apps/api/core";
 import type { Segment, SqlResult } from "../lib/types";
 import { currentTheme, Theme } from "../lib/theme";
 
@@ -77,6 +78,27 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
   let container: HTMLDivElement | undefined;
   let chart: echarts.ECharts | undefined;
   const [chartType, setChartType] = createSignal<ChartType>(props.seg.chartType);
+  const [isFullScreen, setIsFullScreen] = createSignal(false);
+  let fullscreenContainer: HTMLDivElement | undefined;
+  let fullscreenChart: echarts.ECharts | undefined;
+
+  function saveAsImage() {
+    const activeChart = isFullScreen() ? fullscreenChart : chart;
+    if (!activeChart) return;
+
+    const isLight = currentTheme() === "light";
+    const url = activeChart.getDataURL({
+      type: "png",
+      pixelRatio: 2,
+      backgroundColor: isLight ? "#ffffff" : "#121214",
+    });
+
+    const fileName = `${props.seg.title || "chart"}.png`;
+    invoke("save_image_from_base64", {
+      base64Data: url,
+      defaultName: fileName,
+    }).catch((e) => console.error("[chart] save image failed:", e));
+  }
 
   /** Build ECharts option from SqlResult + chart config. */
   function buildOption(type: ChartType, table: SqlResult, xField?: string, yFields?: string[], title?: string): echarts.EChartsOption {
@@ -303,30 +325,127 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
     if (t === chartType()) return;
     setChartType(t);
     render();
+    // Also update the fullscreen chart if it's open
+    if (fullscreenChart) {
+      const opt = buildOption(t, props.seg.table, props.seg.xField, props.seg.yFields, props.seg.title);
+      fullscreenChart.setOption(opt, true);
+    }
   }
 
   const switchable = SWITCHABLE_TYPES.includes(props.seg.chartType);
 
   return (
     <div class="chart-seg">
-      <Show when={switchable}>
-        <div class="chart-seg__toolbar">
-          <For each={CHART_TYPES}>
-            {(ct) => (
-              <button
-                class="chart-seg__type-btn"
-                classList={{ active: chartType() === ct.type }}
-                title={ct.label}
-                onClick={() => switchType(ct.type)}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: inline-block; vertical-align: middle;" innerHTML={ct.svg} />
-                <span>{ct.label}</span>
+      <div class="chart-seg__toolbar">
+        <div class="chart-seg__toolbar-left">
+          <Show when={switchable}>
+            <For each={CHART_TYPES}>
+              {(ct) => (
+                <button
+                  class="chart-seg__type-btn"
+                  classList={{ active: chartType() === ct.type }}
+                  title={ct.label}
+                  onClick={() => switchType(ct.type)}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: inline-block; vertical-align: middle;" innerHTML={ct.svg} />
+                  <span>{ct.label}</span>
+                </button>
+              )}
+            </For>
+          </Show>
+        </div>
+        <div class="chart-seg__toolbar-right">
+          <button
+            class="chart-seg__action-btn"
+            title="保存为图片"
+            onClick={saveAsImage}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </button>
+          <button
+            class="chart-seg__action-btn"
+            title="全屏查看"
+            onClick={() => setIsFullScreen(true)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 13px; height: 13px;">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div ref={container} class="chart-seg__canvas" />
+
+      {/* Fullscreen Overlay Dialog */}
+      <Show when={isFullScreen()}>
+        <div class="chart-fullscreen-overlay">
+          <div class="chart-fullscreen-header">
+            <span class="chart-fullscreen-title">{props.seg.title || "图表预览"}</span>
+            <Show when={switchable}>
+              <div class="chart-fullscreen-tabs">
+                <For each={CHART_TYPES}>
+                  {(ct) => (
+                    <button
+                      class="chart-seg__type-btn"
+                      classList={{ active: chartType() === ct.type }}
+                      title={ct.label}
+                      onClick={() => switchType(ct.type)}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: inline-block; vertical-align: middle;" innerHTML={ct.svg} />
+                      <span>{ct.label}</span>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
+            <div class="chart-fullscreen-actions">
+              <button class="chart-fullscreen-btn" onClick={saveAsImage} title="保存为图片">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px;">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
               </button>
-            )}
-          </For>
+              <button class="chart-fullscreen-btn" onClick={() => setIsFullScreen(false)} title="退出全屏">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px;">
+                  <path d="M4 14h6v6m10-6h-6v6M4 10h6V4m10 6h-6V4"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="chart-fullscreen-body" onClick={() => setIsFullScreen(false)}>
+            <div 
+              ref={(el) => {
+                if (el) {
+                  fullscreenContainer = el;
+                  fullscreenChart = echarts.init(el);
+                  const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.title);
+                  fullscreenChart.setOption(opt);
+                  
+                  const ro = new ResizeObserver(() => fullscreenChart?.resize());
+                  ro.observe(el);
+                  
+                  (el as any)._cleanup = () => {
+                    ro.disconnect();
+                    fullscreenChart?.dispose();
+                    fullscreenChart = undefined;
+                  };
+                } else {
+                  if (fullscreenContainer && (fullscreenContainer as any)._cleanup) {
+                    (fullscreenContainer as any)._cleanup();
+                  }
+                  fullscreenContainer = undefined;
+                }
+              }} 
+              class="chart-fullscreen-canvas" 
+              onClick={(e) => e.stopPropagation()} 
+            />
+          </div>
         </div>
       </Show>
-      <div ref={container} class="chart-seg__canvas" />
     </div>
   );
 }

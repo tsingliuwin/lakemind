@@ -12,11 +12,12 @@ import SettingsPage, { type SettingsTab } from "./components/SettingsPage";
 import HomePanel from "./components/HomePanel";
 import { executeSql, importFileToWorkspace, selectDirectory, selectFiles } from "./lib/duckdb";
 import { tryFormatDuckdbSql } from "./lib/sqlFormat";
-import type { LogEntry, SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage, RegisterStatus, ImportProgress, DepInfo, ModelOption } from "./lib/types";
+import type { SourceTable, SqlResult, QueryTask, Workspace, TaskKind, ChatMessage, RegisterStatus, ImportProgress, DepInfo, ModelOption } from "./lib/types";
 import { modelKeyOf, modelIdOfKey, providerIdOfKey } from "./lib/types";
 import ChatView from "./components/ChatView";
 import { appendDelta, pushToolCall, pushChart, mergeToolResult, normalizeMessage } from "./lib/chat";
 import { mergeUsage } from "./lib/metrics";
+import { logsSignal, logInfo, logError, installAppLogListener, clearLogsStore } from "./lib/logger";
 import "./App.css";
 
 /**
@@ -45,7 +46,7 @@ export default function App() {
       const r = await invoke<{ status: string }>("workspace_register_status", { workspacePath: wsPath });
       setRegisterStatus(r.status as RegisterStatus);
     } catch (e) {
-      console.error("refresh register status failed:", e);
+      logError("sync", "refresh register status failed", e);
     }
   }
 
@@ -80,9 +81,10 @@ export default function App() {
   const [rightWidth, setRightWidth] = createSignal<number>(280);
   const [bottomHeight, setBottomHeight] = createSignal<number>(180);
 
-  // --- execution log ---
-  const [logs, setLogs] = createSignal<LogEntry[]>([]);
-  let logSeq = 0;
+  // --- execution log --- backed by the unified logger module (src/lib/logger.ts),
+  // which holds the in-memory signal, persists to SQLite via append_log, and
+  // receives backend tracing events via the "app-log" channel.
+  const logs = logsSignal;
 
   const [isDraggingLeft, setIsDraggingLeft] = createSignal<boolean>(false);
   const [isDraggingRight, setIsDraggingRight] = createSignal<boolean>(false);
@@ -129,7 +131,7 @@ export default function App() {
     // always falling back to DefaultProject. Fire-and-forget; the config store
     // is the app's existing key/value persistence layer.
     invoke("set_app_config", { key: "workspace.last", value: ws.path }).catch((e) =>
-      console.error("Failed to persist last workspace:", e)
+      logError("ui", "Failed to persist last workspace", e)
     );
   }
 
@@ -211,7 +213,7 @@ export default function App() {
         }
       }
     } catch (err) {
-      console.error("Failed to load settings models:", err);
+      logError("ui", "Failed to load settings models", err);
     }
   }
 
@@ -239,14 +241,12 @@ export default function App() {
         error: `失败：${p.error ?? "未知错误"}`,
       };
       const desc = `导入 ${p.file} · ${stageText[p.stage] ?? p.stage}`;
-      setLogs((prev) => [{
-        id: ++logSeq,
-        ts: Date.now(),
-        sql: desc,
-        status: p.stage === "error" ? "error" as const : "ok" as const,
-        rowCount: p.stage === "done" ? (p.rows ?? undefined) : undefined,
-        error: p.stage === "error" ? (p.error ?? undefined) : undefined,
-      }, ...prev].slice(0, 100));
+      const level = p.stage === "error" ? "error" : "info";
+      if (level === "error") {
+        logError("import", desc, p.error, p.table ? { table: p.table, rows: p.rows, columns: p.columns } : undefined);
+      } else {
+        logInfo("import", desc, p.table ? { table: p.table, rows: p.rows, columns: p.columns } : undefined);
+      }
 
       if (p.stage === "done" || p.stage === "error") {
         const clearMs = p.stage === "done" ? 3000 : 8000;
@@ -325,7 +325,7 @@ export default function App() {
               ) {
                 invoke<SourceTable[]>("list_duckdb_tables")
                   .then(setSources)
-                  .catch((err) => console.error("Failed to refresh sources after DDL:", err));
+                  .catch((err) => logError("query", "Failed to refresh sources after DDL", err));
               }
             }
           } else if (kind === "usage" && payload.text) {
@@ -396,7 +396,7 @@ export default function App() {
         }
       }
     } catch (err) {
-      console.error("Failed to load workspaces:", err);
+      logError("ui", "Failed to load workspaces", err);
     }
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -416,8 +416,12 @@ export default function App() {
       }
     };
     window.addEventListener("keydown", handleGlobalKeyDown);
+    // Backend tracing events → unified log signal (backend logs appear in the
+    // console alongside frontend logs).
+    const unlistenAppLog = await installAppLogListener();
     onCleanup(() => {
       window.removeEventListener("keydown", handleGlobalKeyDown);
+      unlistenAppLog();
       unlistenAgent();
       unlistenImport();
     });
@@ -478,23 +482,23 @@ export default function App() {
             .then((merged) => {
               if (currentWorkspace()?.path === ws.path) setSources(merged);
             })
-            .catch((err) => console.error("Failed to refresh table list:", err));
+            .catch((err) => logError("sync", "Failed to refresh table list", err));
           // Warm up in the background: verifies each lake object is usable and
           // rebuilds any that went missing. Refreshes the tree if rebuilds ran.
           void invoke<SourceTable[]>("warmup_sources")
             .then((warmed) => {
               if (currentWorkspace()?.path === ws.path) setSources(warmed);
             })
-            .catch((err) => console.error("Failed to warmup sources:", err));
+            .catch((err) => logError("sync", "Failed to warmup sources", err));
         })
         .catch((err) => {
           if (currentWorkspace()?.path === ws.path) {
-            console.error("Failed to sync workspace sources:", err);
+            logError("sync", "Failed to sync workspace sources", err);
           }
         });
     } catch (err) {
       if (currentWorkspace().path === ws.path) {
-        console.error("Failed to load workspace tasks & sources:", err);
+        logError("ui", "Failed to load workspace tasks & sources", err);
       }
     } finally {
       if (currentWorkspace().path === ws.path) {
@@ -516,7 +520,7 @@ export default function App() {
       const ws = { name, path };
       changeWorkspace(ws);
     } catch (err) {
-      console.error("Failed to add workspace:", err);
+      logError("ui", "Failed to add workspace", err);
     }
   }
 
@@ -546,7 +550,7 @@ export default function App() {
         changeWorkspace(nextList[0]);
       }
     } catch (err) {
-      console.error("Failed to remove workspace:", err);
+      logError("ui", "Failed to remove workspace", err);
     }
   }
 
@@ -605,7 +609,7 @@ export default function App() {
         tokenUsage,
       });
     } catch (err) {
-      console.error("Failed to save chat task to backend:", err);
+      logError("agent", "Failed to save chat task to backend", err);
     }
   }
 
@@ -619,7 +623,7 @@ export default function App() {
       // the stream is stuck in a tool call.
       setStreamingTaskId(null);
     } catch (err) {
-      console.error("Failed to abort chat:", err);
+      logError("agent", "Failed to abort chat", err);
     }
   }
 
@@ -665,7 +669,7 @@ export default function App() {
         confirmMode: selectedConfirm(),
       });
     } catch (err) {
-      console.error("Failed to start agent chat:", err);
+      logError("agent", "Failed to start agent chat", err);
       setStreamingTaskId(null);
       const errorMsg: ChatMessage = {
         id: `msg-err-${Date.now()}`,
@@ -732,7 +736,7 @@ export default function App() {
         confirmMode: selectedConfirm(),
       });
     } catch (err) {
-      console.error("Failed to start agent chat:", err);
+      logError("agent", "Failed to start agent chat", err);
       setStreamingTaskId(null);
       const errorMsg: ChatMessage = {
         id: `msg-err-${Date.now()}`,
@@ -796,7 +800,7 @@ export default function App() {
         confirmMode: selectedConfirm(),
       });
     } catch (err) {
-      console.error("Failed to start agent chat:", err);
+      logError("agent", "Failed to start agent chat", err);
       setStreamingTaskId(null);
       const errorMsg: ChatMessage = {
         id: `msg-err-${Date.now()}`,
@@ -831,7 +835,7 @@ export default function App() {
         approved,
       });
     } catch (err) {
-      console.error("Failed to resolve tool confirmation:", err);
+      logError("agent", "Failed to resolve tool confirmation", err);
     }
   }
 
@@ -858,7 +862,7 @@ export default function App() {
     try {
       await invoke("delete_task", { taskId: id });
     } catch (err) {
-      console.error("Failed to delete task:", err);
+      logError("ui", "Failed to delete task", err);
     }
   }
 
@@ -931,7 +935,7 @@ export default function App() {
         sql: task.sql,
       });
     } catch (err) {
-      console.error("Failed to save SQL task:", err);
+      logError("query", "Failed to save SQL task", err);
     }
   }
 
@@ -1032,9 +1036,14 @@ export default function App() {
     window.addEventListener("mouseup", onMouseUp);
   }
 
-  /** 控制台三档循环：折叠 → 默认 → 展开 → 折叠。 */
+  /** 控制台折叠与开启切换（仅在 folded 与 default 状态间切换）。 */
   function cycleConsole() {
-    setConsoleState((s) => (s === "folded" ? "default" : s === "default" ? "expanded" : "folded"));
+    setConsoleState((s) => (s === "folded" ? "default" : "folded"));
+  }
+
+  /** 控制台全屏/退出全屏状态切换。 */
+  function toggleConsoleFullscreen() {
+    setConsoleState((s) => (s === "expanded" ? "default" : "expanded"));
   }
 
   /** Shared import path for drag-drop, the file picker, and the folder picker.
@@ -1058,7 +1067,7 @@ export default function App() {
       }
       refreshRegisterStatus(currentWorkspace().path);
     } catch (e) {
-      console.error("Failed to import data source:", e);
+      logError("import", "Failed to import data source", e);
     } finally {
       setBusy(false);
     }
@@ -1084,7 +1093,7 @@ export default function App() {
       }
       refreshRegisterStatus(currentWorkspace().path);
     } catch (e) {
-      console.error("Failed to import file:", e);
+      logError("import", "Failed to import file", e);
     } finally {
       setBusy(false);
     }
@@ -1096,7 +1105,7 @@ export default function App() {
       const paths = await selectFiles();
       if (paths && paths.length) await importPaths(paths);
     } catch (e) {
-      console.error("Failed to select files:", e);
+      logError("import", "Failed to select files", e);
     }
   }
 
@@ -1106,7 +1115,7 @@ export default function App() {
       const path = await selectDirectory("请选择要扫描的数据文件夹");
       if (path) await importPaths([path]);
     } catch (e) {
-      console.error("Failed to select directory:", e);
+      logError("import", "Failed to select directory", e);
     }
   }
 
@@ -1116,7 +1125,6 @@ export default function App() {
     if (!q || busy()) return;
     setBusy(true);
     const started = Date.now();
-    let entry: LogEntry;
 
     const tabId = `tab-${Date.now()}`;
     const taskId = activeTaskId();
@@ -1165,15 +1173,12 @@ export default function App() {
         });
       }
 
-      entry = {
-        id: ++logSeq,
-        ts: started,
+      logInfo("query", "查询执行成功", {
         sql: q,
-        status: "ok",
         rowCount: res.rowCount,
         truncated: res.truncated,
         elapsedMs: res.elapsedMs,
-      };
+      });
 
       // Refresh the data tree only when the query may have changed the schema
       // (DDL). A plain SELECT (e.g. table preview) leaves the tree unchanged, so
@@ -1186,7 +1191,7 @@ export default function App() {
           const dbTables = await invoke<SourceTable[]>("list_duckdb_tables");
           setSources(dbTables);
         } catch (refreshErr) {
-          console.error("refresh table list failed:", refreshErr);
+          logError("query", "refresh table list failed", refreshErr);
         }
       }
     } catch (e) {
@@ -1200,12 +1205,11 @@ export default function App() {
           };
         });
       }
-      entry = { id: ++logSeq, ts: started, sql: q, status: "error", error: msg, elapsedMs: Date.now() - started };
+      logError("query", "查询执行失败", e, { sql: q, elapsedMs: Date.now() - started });
       setConsoleState((s) => (s === "folded" ? "default" : s));
     } finally {
       setBusy(false);
     }
-    setLogs((prev) => [entry, ...prev].slice(0, 100));
   }
 
   /** 点击侧栏表：选中并在右侧检查器展示其 schema，同时自动执行 LIMIT 50 预览查询。 */
@@ -1234,21 +1238,10 @@ export default function App() {
       setSources(dbTables);
       if (selectedTable()?.name === name) setSelectedTable(null);
       setDeps(null);
-      setLogs((prev) => [{
-        id: ++logSeq,
-        ts: Date.now(),
-        sql: `删除 ${name}`,
-        status: "ok" as const,
-      }, ...prev].slice(0, 100));
+      logInfo("query", `删除表 ${name}`);
     } catch (e) {
       const msg = typeof e === "string" ? e : "删除失败";
-      setLogs((prev) => [{
-        id: ++logSeq,
-        ts: Date.now(),
-        sql: `删除 ${name}`,
-        status: "error" as const,
-        error: msg,
-      }, ...prev].slice(0, 100));
+      logError("query", `删除表 ${name} 失败`, e, { error: msg });
     }
   }
 
@@ -1263,21 +1256,10 @@ export default function App() {
       setFileTrigger((t) => t + 1);
       if (selectedTable()?.path === path) setSelectedTable(null);
       setDeps(null);
-      setLogs((prev) => [{
-        id: ++logSeq,
-        ts: Date.now(),
-        sql: `删除文件 ${fileName}`,
-        status: "ok" as const,
-      }, ...prev].slice(0, 100));
+      logInfo("import", `删除文件 ${fileName}`);
     } catch (e) {
       const msg = typeof e === "string" ? e : "删除失败";
-      setLogs((prev) => [{
-        id: ++logSeq,
-        ts: Date.now(),
-        sql: `删除文件 ${fileName}`,
-        status: "error" as const,
-        error: msg,
-      }, ...prev].slice(0, 100));
+      logError("import", `删除文件 ${fileName} 失败`, e, { error: msg });
     }
   }
 
@@ -1320,8 +1302,15 @@ export default function App() {
   const bottomHeightActual = () => {
     if (settingsOpen()) return "0px";
     if (consoleState() === "folded") return "32px";
-    if (consoleState() === "expanded") return `${bottomHeight() * 1.8}px`;
+    if (consoleState() === "expanded") return "100%";
     return `${bottomHeight()}px`;
+  };
+
+  const gridTemplateRows = () => {
+    if (settingsOpen()) return "1fr 0px";
+    if (consoleState() === "folded") return "1fr 32px";
+    if (consoleState() === "expanded") return "0px 1fr";
+    return `1fr ${bottomHeight()}px`;
   };
 
   return (
@@ -1417,7 +1406,7 @@ export default function App() {
             class="right-content-layout"
             style={{
               "grid-template-columns": `1fr ${rightWidthActual()}`,
-              "grid-template-rows": `1fr ${bottomHeightActual()}`,
+              "grid-template-rows": gridTemplateRows(),
             }}
           >
             <Show when={inspectorOpen()}>
@@ -1429,12 +1418,12 @@ export default function App() {
               />
             </Show>
 
-            <Show when={consoleState() !== "folded"}>
+            <Show when={consoleState() === "default"}>
               <div 
                 class="resizer-h" 
                 classList={{ dragging: isDraggingBottom() }}
                 style={{ 
-                  bottom: `${parseFloat(bottomHeightActual()) - 3}px`,
+                  bottom: `${bottomHeight() - 3}px`,
                   left: 0,
                   right: rightWidthActual()
                 }} 
@@ -1645,7 +1634,8 @@ export default function App() {
               logs={logs()}
               state={consoleState()}
               onCycleState={cycleConsole}
-              onClear={() => setLogs([])}
+              onToggleFullscreen={toggleConsoleFullscreen}
+              onClear={() => void clearLogsStore()}
             />
           </div>
         </div>

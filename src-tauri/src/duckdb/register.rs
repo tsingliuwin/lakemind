@@ -113,9 +113,9 @@ fn try_create_and_validate(conn: &Connection, table_name: &str, source_fn: &str)
     let _ = conn.execute(&drop_sql, []);
 
     let create_sql = format!("CREATE TABLE \"{table_name}\" AS SELECT * FROM {source_fn};");
-    println!("Executing creation query: {}", create_sql);
+    tracing::debug!(category = "duckdb", "executing creation query: {}", create_sql);
     if let Err(e) = conn.execute(&create_sql, []) {
-        println!("Execution failed: {}", e);
+        tracing::debug!(category = "duckdb", "execution failed: {}", e);
         return Ok(false);
     }
 
@@ -126,9 +126,9 @@ fn try_create_and_validate(conn: &Connection, table_name: &str, source_fn: &str)
     // `col_count > 1` check used to accept that, masking the real failure.
     let columns = schema::describe_view(conn, table_name).unwrap_or_default();
     let col_count = columns.len() as i64;
-    println!("Succeeded! Column count: {}", col_count);
+    tracing::debug!(category = "duckdb", "succeeded — column count: {}", col_count);
     if col_count <= 1 {
-        println!("Rejected (column count <= 1)");
+        tracing::debug!(category = "duckdb", "rejected (column count <= 1)");
         let _ = conn.execute(&drop_sql, []);
         return Ok(false);
     }
@@ -137,7 +137,7 @@ fn try_create_and_validate(conn: &Connection, table_name: &str, source_fn: &str)
     // encoding-mismatch / dropped-header read; later strategies (e.g. GBK)
     // stand a real chance once this one stops short-circuiting.
     if looks_auto_generated(&columns) {
-        println!("Rejected (all headers are auto-generated columnNN)");
+        tracing::debug!(category = "duckdb", "rejected (all headers are auto-generated columnNN)");
         let _ = conn.execute(&drop_sql, []);
         return Ok(false);
     }
@@ -294,9 +294,9 @@ fn evaluate_candidate(conn: &Connection, table_name: &str, source_fn: &str) -> A
     let _ = conn.execute(&drop_sql, []);
 
     let create_sql = format!("CREATE TABLE \"{table_name}\" AS SELECT * FROM {source_fn};");
-    println!("Evaluating candidate creation query: {}", create_sql);
+    tracing::debug!(category = "duckdb", "evaluating candidate creation query: {}", create_sql);
     if let Err(e) = conn.execute(&create_sql, []) {
-        println!("Candidate evaluation failed: {}", e);
+        tracing::debug!(category = "duckdb", "candidate evaluation failed: {}", e);
         return Ok(None);
     }
 
@@ -304,7 +304,7 @@ fn evaluate_candidate(conn: &Connection, table_name: &str, source_fn: &str) -> A
     let columns = match schema::describe_view(conn, table_name) {
         Ok(cols) => cols,
         Err(e) => {
-            println!("Failed to describe table columns: {}", e);
+            tracing::debug!(category = "duckdb", "failed to describe table columns: {}", e);
             let _ = conn.execute(&drop_sql, []);
             return Ok(None);
         }
@@ -312,7 +312,7 @@ fn evaluate_candidate(conn: &Connection, table_name: &str, source_fn: &str) -> A
 
     let col_count = columns.len() as i64;
     if col_count <= 1 {
-        println!("Rejected candidate: column count <= 1");
+        tracing::debug!(category = "duckdb", "rejected candidate: column count <= 1");
         let _ = conn.execute(&drop_sql, []);
         return Ok(None);
     }
@@ -349,7 +349,7 @@ fn evaluate_candidate(conn: &Connection, table_name: &str, source_fn: &str) -> A
     // Clean up candidate table
     let _ = conn.execute(&drop_sql, []);
 
-    println!("Candidate succeeded! Columns: {}, Original Score: {}, Penalty: {}, Final Score: {}", col_count, header_score, penalty, final_score);
+    tracing::debug!(category = "duckdb", "candidate succeeded — columns: {}, original score: {}, penalty: {}, final score: {}", col_count, header_score, penalty, final_score);
     Ok(Some(IngestionCandidate {
         source_fn: source_fn.to_string(),
         col_count,
@@ -427,7 +427,7 @@ fn load_xlsx_as_table(
         });
 
         let best = &candidates[0];
-        println!("Selected best Excel ingestion strategy: {} (score: {}, cols: {})", best.source_fn, best.header_score, best.col_count);
+        tracing::debug!(category = "duckdb", "selected best Excel ingestion strategy: {} (score: {}, cols: {})", best.source_fn, best.header_score, best.col_count);
         if let Some(p) = progress { p("过滤空列空行"); }
         return create_xlsx_table_pruned(conn, table_name, &best.source_fn);
     }
@@ -497,7 +497,7 @@ fn create_xlsx_table_pruned(conn: &Connection, table_name: &str, source_fn: &str
     }) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("[xlsx] non-null count query failed: {e}, skipping prune");
+            tracing::warn!(category = "duckdb", "xlsx non-null count query failed: {e}, skipping prune");
             cleanup_tmp();
             let create_sql = format!("CREATE TABLE \"{table_name}\" AS SELECT * FROM {source_fn};");
             conn.execute(&create_sql, [])?;
@@ -514,8 +514,9 @@ fn create_xlsx_table_pruned(conn: &Connection, table_name: &str, source_fn: &str
         .map(|(i, _)| i)
         .collect();
 
-    println!(
-        "[xlsx] {}: {} total cols, {} non-empty cols → keeping {}",
+    tracing::debug!(
+        category = "duckdb",
+        "xlsx {}: {} total cols, {} non-empty cols → keeping {}",
         table_name, columns.len(), kept_positions.len(), kept_positions.len()
     );
 
@@ -540,9 +541,9 @@ fn create_xlsx_table_pruned(conn: &Connection, table_name: &str, source_fn: &str
         tmp = tmp_name.replace('"', "\"\""),
         filter = row_filter.join(" OR ")
     );
-    println!("Executing creation query: {}", create_sql);
+    tracing::debug!(category = "duckdb", "executing creation query: {}", create_sql);
     if let Err(e) = conn.execute(&create_sql, []) {
-        eprintln!("[xlsx] pruned create failed: {e}, falling back to raw");
+        tracing::warn!(category = "duckdb", "xlsx pruned create failed: {e}, falling back to raw");
         cleanup_tmp();
         let fallback = format!("CREATE TABLE \"{table_name}\" AS SELECT * FROM {source_fn};");
         conn.execute(&fallback, [])?;

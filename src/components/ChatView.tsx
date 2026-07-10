@@ -53,6 +53,32 @@ export default function ChatView(props: {
   const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false);
   const [priorityDropdownOpen, setPriorityDropdownOpen] = createSignal(false);
   const [confirmDropdownOpen, setConfirmDropdownOpen] = createSignal(false);
+
+  const [chatWidth, setChatWidth] = createSignal<number>(
+    parseInt(localStorage.getItem("chat_width") || "800")
+  );
+
+  const startDraggingChatWidth = (e: MouseEvent, side: "left" | "right") => {
+    e.preventDefault();
+    document.body.classList.add("dragging-active");
+    const stream = scrollEl;
+    if (!stream) return;
+    const rect = stream.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const deltaFromCenter = Math.abs(moveEvent.clientX - centerX);
+      const newWidth = Math.max(400, Math.min(rect.width - 48, deltaFromCenter * 2));
+      setChatWidth(newWidth);
+      localStorage.setItem("chat_width", String(newWidth));
+    };
+    const onMouseUp = () => {
+      document.body.classList.remove("dragging-active");
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
   // Group selectable models by provider so duplicate model ids across
   // providers stay distinguishable (each group shows its provider name).
   const groupedModels = createMemo(() => {
@@ -453,7 +479,7 @@ export default function ChatView(props: {
           fallback={
             <button
               class="header-close-btn"
-              title="关闭并删除对话"
+              title="删除该对话"
               onClick={() => {
                 if (props.messages.length > 0) {
                   setShowConfirm(true);
@@ -462,7 +488,10 @@ export default function ChatView(props: {
                 }
               }}
             >
-              ✕
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 10px; height: 10px;">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
             </button>
           }
         >
@@ -487,13 +516,30 @@ export default function ChatView(props: {
         </Show>
       </div>
       <div class="chat-stream" ref={scrollEl} onScroll={handleScroll} onWheel={handleWheel}>
-        <Show
-          when={props.messages.length > 0}
-          fallback={<div class="chat-empty">向 LakeMind 提问，开始探索你的数据。</div>}
+        <div
+          class="chat-stream-inner"
+          style={{
+            width: `${chatWidth()}px`,
+            "max-width": "100%",
+            margin: "0 auto",
+            position: "relative",
+            display: "flex",
+            "flex-direction": "column",
+            gap: "16px",
+            height: props.messages.length > 0 ? "auto" : "100%",
+            "justify-content": props.messages.length > 0 ? "flex-start" : "center"
+          }}
         >
-          <Index each={props.messages}>
-            {(msg) => (
-              <div class={`chat-msg chat-msg--${msg().role}`}>
+          <div class="chat-resizer-l" onMouseDown={(e) => startDraggingChatWidth(e, "left")} />
+          <div class="chat-resizer-r" onMouseDown={(e) => startDraggingChatWidth(e, "right")} />
+
+          <Show
+            when={props.messages.length > 0}
+            fallback={<div class="chat-empty">向 LakeMind 提问，开始探索你的数据。</div>}
+          >
+            <Index each={props.messages}>
+              {(msg) => (
+                <div class={`chat-msg chat-msg--${msg().role}`}>
                 <div class="chat-msg__body">
                   {/* Single ordered loop: preserves the real reasoning → tool →
                       … → text transcript instead of grouping by type. */}
@@ -625,6 +671,7 @@ export default function ChatView(props: {
             </div>
           </Show>
         </Show>
+        </div>
       </div>
 
       <Show when={showScrollDown()}>
@@ -644,7 +691,17 @@ export default function ChatView(props: {
       </Show>
 
       <div class="chat-composer">
-        <div class="chat-composer__box">
+        <div
+          class="chat-composer-inner"
+          style={{
+            width: "100%",
+            "max-width": `${chatWidth()}px`,
+            margin: "0 auto",
+            display: "flex",
+            "flex-direction": "column"
+          }}
+        >
+          <div class="chat-composer__box">
           <textarea
             class="chat-composer__input"
             placeholder="向 LakeMind 提问（Enter 发送 · Shift+Enter 换行）…"
@@ -929,6 +986,7 @@ export default function ChatView(props: {
               </Show>
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>

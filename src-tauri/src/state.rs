@@ -119,9 +119,9 @@ impl AppState {
                 Ok(())
             }).await;
             if let Err(e) = res {
-                eprintln!("Background workspace initialization panicked: {e}");
+                tracing::error!(category = "system", "background workspace initialization panicked: {e}");
             } else if let Ok(Err(e)) = res {
-                eprintln!("Background workspace initialization failed: {e}");
+                tracing::error!(category = "system", "background workspace initialization failed: {e}");
             }
         });
 

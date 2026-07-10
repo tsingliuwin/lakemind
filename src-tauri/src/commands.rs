@@ -172,8 +172,9 @@ pub async fn list_tables_fast(
             });
         }
 
-        eprintln!(
-            "[boot] list_tables_fast: {} objects from SQLite in {}ms",
+        tracing::info!(
+            category = "sync",
+            "list_tables_fast: {} objects from SQLite in {}ms",
             result.len(),
             start.elapsed().as_millis()
         );
@@ -301,7 +302,7 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
                 return false;
             }
             // Lake object missing/corrupt despite a matching fingerprint → rebuild.
-            eprintln!("[warmup] {} not usable, rebuilding from scan_path", rec_clone.table_name);
+            tracing::info!(category = "sync", "warmup: {} not usable, rebuilding from scan_path", rec_clone.table_name);
             let kind = str_to_kind(&rec_clone.kind);
             let entry = scan::ScanEntry {
                 label: rec_clone.label.clone(),
@@ -327,7 +328,7 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
                     true
                 }
                 Err(e) => {
-                    eprintln!("[warmup] rebuild {} failed: {e}", rec_clone.table_name);
+                    tracing::warn!(category = "sync", "warmup rebuild {} failed: {e}", rec_clone.table_name);
                     false
                 }
             }
@@ -402,7 +403,7 @@ pub async fn warmup_sources(state: State<'_, AppState>) -> Result<Vec<SourceTabl
     })
     .await;
 
-    eprintln!("[warmup] done: {} sources in {}ms", records.len(), warmup_start.elapsed().as_millis());
+    tracing::info!(category = "sync", "warmup done: {} sources in {}ms", records.len(), warmup_start.elapsed().as_millis());
     // Silence unused warning while keeping conn available for future use.
     let _ = conn;
     result
@@ -917,11 +918,11 @@ async fn sync_entries(
                     // metadata query takes ~1s per table, so verifying all-reused
                     // sources added seconds of pointless startup latency. Only when
                     // the fingerprint differs do we query DuckLake (to decide rebuild).
-                    println!("[sync] {}: fingerprint match → reuse (cached)", e.label);
+                    tracing::info!(category = "sync", "{}: fingerprint match → reuse (cached)", e.label);
                     if needs_rename {
                         // Rename preserves the data; no re-materialization.
                         if let Err(err) = rename_lake_object(&guard, &rec.table_name, target, storage) {
-                            eprintln!("rename {} -> {} failed: {err}", rec.table_name, target);
+                            tracing::warn!(category = "sync", "rename {} -> {} failed: {err}", rec.table_name, target);
                             result.push(build_source_table_from_record(&rec));
                             continue;
                         }
@@ -949,7 +950,7 @@ async fn sync_entries(
                     result.push(build_source_table_from_record(&updated));
                 } else {
                     // Fingerprint changed → rebuild under the target name.
-                    println!("[sync] {}: fingerprint changed → rebuild", e.label);
+                    tracing::info!(category = "sync", "{}: fingerprint changed → rebuild", e.label);
                     lake_mutated = true;
                     let mut work = if storage == StorageKind::Table {
                         materialize_into_workspace(e, &ws_dir)?
@@ -970,7 +971,7 @@ async fn sync_entries(
                             let _ = crate::okf::write_pipeline_okf(&ws_dir_str, target, &e.label, &e.path, &new_rec.storage);
                             result.push(t);
                         }
-                        Err(err) => eprintln!("rebuild {} failed: {err}", e.label),
+                        Err(err) => tracing::warn!(category = "sync", "rebuild {} failed: {err}", e.label),
                     }
                 }
             } else {
@@ -981,7 +982,7 @@ async fn sync_entries(
                 // object is genuinely absent.
                 let storage = decide_storage(e);
                 if table_exists_in_lake(&guard, target) {
-                    println!("[sync] {}: new mapping, lake object exists → adopt", e.label);
+                    tracing::info!(category = "sync", "{}: new mapping, lake object exists → adopt", e.label);
                     let cols = schema::describe_view(&guard, target).unwrap_or_default();
                     let count = count_rows(&guard, target);
                     let t = SourceTable {
@@ -1014,7 +1015,7 @@ async fn sync_entries(
                     if let Some(p) = prog { p(target); }
                     match register::register(&guard, &work, storage, prog) {
                         Ok(t) => {
-                            println!("[sync] {}: new source → register", e.label);
+                            tracing::info!(category = "sync", "{}: new source → register", e.label);
                             lake_mutated = true;
                             let rec = source_record_from(&t, e, now, src);
                             let _ = db::upsert_source(&sqlite, &ws_path, &rec);
@@ -1022,7 +1023,7 @@ async fn sync_entries(
                             let _ = crate::okf::write_pipeline_okf(&ws_dir_str, target, &e.label, &e.path, &rec.storage);
                             result.push(t);
                         }
-                        Err(err) => eprintln!("register {} failed: {err}", e.label),
+                        Err(err) => tracing::warn!(category = "sync", "register {} failed: {err}", e.label),
                     }
                 }
             }
@@ -1059,7 +1060,7 @@ async fn sync_entries(
                         while let Ok(Some(row)) = rows.next() {
                             if let Ok(name) = row.get::<_, String>(0) {
                                 if name.starts_with("s_") && !active_s_names.contains(&name) {
-                                    println!("[sync] dropping untracked/polluted lake object: {name}");
+                                    tracing::info!(category = "sync", "dropping untracked/polluted lake object: {name}");
                                     drop_lake_object(&guard, &name);
                                     let _ = db::delete_source_by_table(&sqlite, &ws_path, &name);
                                     let _ = crate::okf::delete_okf_files(&ws_dir_str, &name);
@@ -1082,7 +1083,7 @@ async fn sync_entries(
                     if !view_okf.exists() && !table_okf.exists() {
                         let probe = format!("SELECT * FROM \"{}\" LIMIT 0", def.table_name.replace('"', "\"\""));
                         if guard.execute(&probe, []).is_err() {
-                            println!("[sync] dropping polluted/broken custom object: {}", def.table_name);
+                            tracing::info!(category = "sync", "dropping polluted/broken custom object: {}", def.table_name);
                             drop_lake_object(&guard, &def.table_name);
                             let _ = db::delete_object_def(&sqlite, &ws_path, &def.table_name);
                             lake_mutated = true;
@@ -1104,7 +1105,7 @@ async fn sync_entries(
         // with no writes is pure waste.
         if lake_mutated {
             if let Err(e) = guard.execute("CHECKPOINT;", []) {
-                eprintln!("[sync] checkpoint warning: {e}");
+                tracing::warn!(category = "sync", "checkpoint warning: {e}");
             }
         }
 
@@ -1114,7 +1115,7 @@ async fn sync_entries(
         let mut cache = sources_cache.blocking_lock();
         cache.clear();
         cache.extend(result.iter().cloned());
-        eprintln!("[sync] done: {} tables in {}ms", result.len(), sync_start.elapsed().as_millis());
+        tracing::info!(category = "sync", "sync done: {} tables in {}ms", result.len(), sync_start.elapsed().as_millis());
         Ok(result)
     })
     .await;
@@ -1436,17 +1437,48 @@ pub async fn save_chat_task(
     Ok(())
 }
 
+// ===========================================================================
+// Unified logging commands
+// ===========================================================================
+//
+// The frontend writes logs through `append_log` (one row per log call) so every
+// UI-side error/event is persisted alongside backend tracing output. `query_logs`
+// backs the console's history view and the future log-analysis module;
+// `clear_logs` powers the console's clear button and retention sweeps.
+
+/// Append one log row from the frontend. `ts` is filled server-side so callers
+/// can't forge timestamps. The row is also emitted to the `app-log` channel so
+/// other open windows (if any) see it live — but NOT echoed back to the sender,
+// since the frontend logger already holds it in its in-memory signal.
 #[tauri::command]
-pub async fn log_debug_info(info: String) -> Result<(), String> {
-    use std::fs::OpenOptions;
-    use std::io::Write;
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/Users/liuyq/rustproject/lakemind/debug_log.txt")
-        .map_err(|e| e.to_string())?;
-    writeln!(file, "{}", info).map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn append_log(
+    app: tauri::AppHandle,
+    mut record: crate::model::LogRecord,
+) -> Result<i64, String> {
+    use tauri::Emitter;
+    record.ts = crate::db::now_ms();
+    let conn = db::get_db_conn()?;
+    let id = db::insert_log(&conn, &record)?;
+    // Broadcast to other windows; the originating window already has it.
+    let mut to_emit = record.clone();
+    to_emit.id = Some(id);
+    let _ = app.emit("app-log", &to_emit);
+    Ok(id)
+}
+
+/// Query historical logs with optional filters. Returns newest-first.
+#[tauri::command]
+pub async fn query_logs(filter: crate::model::LogFilter) -> Result<Vec<crate::model::LogRecord>, String> {
+    let conn = db::get_db_conn()?;
+    db::query_logs(&conn, &filter)
+}
+
+/// Clear logs. `before = None` clears everything; `Some(ts)` deletes rows older
+/// than `ts` (Unix ms) — used for retention sweeps.
+#[tauri::command]
+pub async fn clear_logs(before: Option<i64>) -> Result<(), String> {
+    let conn = db::get_db_conn()?;
+    db::clear_logs(&conn, before)
 }
 
 #[tauri::command]
@@ -1493,7 +1525,7 @@ pub async fn start_agent_chat(
         )
         .await
         {
-            eprintln!("Agent execution error: {e}");
+            tracing::error!(category = "agent", "agent execution error: {e}");
             let _ = window.emit(
                 "agent-event",
                 crate::agent::AgentStreamEvent {
@@ -2165,13 +2197,13 @@ pub async fn link_connection_to_workspace(
     .map_err(|e| format!("task join error: {e}"))?;
 
     if let Err(e) = attach_result {
-        eprintln!("[link] ATTACH failed for {}: {e}", name_for_log);
+        tracing::warn!(category = "link", "ATTACH failed for {}: {e}", name_for_log);
         // Roll back the persisted link so the UI doesn't show "enabled" while
         // the database isn't actually attached.
         let _ = db::unlink_connection_from_workspace(&sqlite, &ws_path, &conn_id);
         return Err(format!("启用连接失败: {e}"));
     }
-    eprintln!("[link] {} attached to session", name_for_log);
+    tracing::info!(category = "link", "{} attached to session", name_for_log);
     Ok(())
 }
 
@@ -2205,8 +2237,8 @@ pub async fn unlink_connection_from_workspace(
         .map_err(|e| format!("task join error: {e}"))?;
         // DETACH may fail if the database was never attached — that's fine.
         match res {
-            Ok(()) => eprintln!("[unlink] {} detached from session", name_for_log),
-            Err(e) => eprintln!("[unlink] detach warning for {}: {e}", name_for_log),
+            Ok(()) => tracing::info!(category = "link", "{} detached from session", name_for_log),
+            Err(e) => tracing::warn!(category = "link", "detach warning for {}: {e}", name_for_log),
         }
     }
     Ok(())
@@ -2250,7 +2282,7 @@ pub async fn list_db_connection_tables(
         .map_err(|e| format!("task join error: {e}"))?
         .unwrap_or_default();
         if !cached.is_empty() {
-            eprintln!("[db_tables] cache hit: {} ({} tables)", cname, cached.len());
+            tracing::info!(category = "link", "db_tables cache hit: {} ({} tables)", cname, cached.len());
             return Ok(cached
                 .into_iter()
                 .map(|c| DbTableItem { schema: c.schema, name: c.name, kind: c.kind })
@@ -2281,8 +2313,9 @@ pub async fn list_db_connection_tables(
     .map_err(|e| format!("task join error: {e}"))?
     {
         Ok(t) => {
-            eprintln!(
-                "[db_tables] live query (attached) {} -> {} tables in {}ms",
+            tracing::info!(
+                category = "link",
+                "db_tables live query (attached) {} -> {} tables in {}ms",
                 name_clone,
                 t.len(),
                 start.elapsed().as_millis()
@@ -2290,8 +2323,9 @@ pub async fn list_db_connection_tables(
             t
         }
         Err(e) => {
-            eprintln!(
-                "[db_tables] attached query failed for {} ({}), falling back to fresh connection",
+            tracing::warn!(
+                category = "link",
+                "db_tables attached query failed for {} ({}), falling back to fresh connection",
                 conn_name, e
             );
             let config2 = config.clone();
@@ -2313,12 +2347,12 @@ pub async fn list_db_connection_tables(
     let _ = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let mut sqlite = db::get_db_conn()?;
         db::save_db_connection_tables(&mut sqlite, &cid2, &cached_items)?;
-        eprintln!("[db_tables] cached {} tables for {}", cached_items.len(), cname2);
+        tracing::info!(category = "link", "db_tables cached {} tables for {}", cached_items.len(), cname2);
         Ok(())
     })
     .await;
 
-    eprintln!("[db_tables] returning {} tables for {}", tables.len(), conn_name);
+    tracing::info!(category = "link", "db_tables returning {} tables for {}", tables.len(), conn_name);
     Ok(tables)
 }
 
@@ -2658,6 +2692,53 @@ pub async fn get_table_ddl(
         Err(AppError::new(format!("未找到表或视图 \"{}\" 的 DDL 定义", table_name_clone)))
     })
     .await
+}
+
+fn decode_base64(s: &str) -> Option<Vec<u8>> {
+    let mut table = [0u8; 256];
+    for (i, &c) in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".iter().enumerate() {
+        table[c as usize] = i as u8;
+    }
+    let bytes = s.as_bytes();
+    let mut out = Vec::new();
+    let mut buffer = 0u32;
+    let mut bits = 0;
+    for &b in bytes {
+        if b == b'=' { break; }
+        let val = table[b as usize];
+        if val == 0 && b != b'A' { continue; }
+        buffer = (buffer << 6) | (val as u32);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
+#[tauri::command]
+pub async fn save_image_from_base64(base64_data: String, default_name: String) -> Result<(), String> {
+    let base64_str = if let Some(pos) = base64_data.find("base64,") {
+        &base64_data[pos + 7..]
+    } else {
+        &base64_data
+    };
+
+    let decoded_bytes = decode_base64(base64_str)
+        .ok_or_else(|| "Failed to decode base64 data".to_string())?;
+
+    let file_path = rfd::FileDialog::new()
+        .set_file_name(&default_name)
+        .add_filter("PNG Image", &["png"])
+        .save_file();
+
+    if let Some(path) = file_path {
+        std::fs::write(&path, decoded_bytes)
+            .map_err(|e| format!("Failed to write file: {}", e))?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

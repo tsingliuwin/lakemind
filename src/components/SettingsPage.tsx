@@ -10,6 +10,7 @@ import {
 } from "../lib/codeConfig";
 import type { DbConnection } from "../lib/types";
 import { selectFile } from "../lib/duckdb";
+import { logError } from "../lib/logger";
 
 const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
@@ -231,7 +232,7 @@ export default function SettingsPage(props: {
       const list = await invoke<DbConnection[]>("get_db_connections");
       setConnections(list);
     } catch (err) {
-      console.error("Failed to load db connections:", err);
+      logError("ui", "Failed to load db connections", err);
     }
   };
 
@@ -245,7 +246,7 @@ export default function SettingsPage(props: {
       }
       setLinkedConns(map);
     } catch (err) {
-      console.error("Failed to load workspace connections:", err);
+      logError("ui", "Failed to load workspace connections", err);
     }
   };
 
@@ -648,7 +649,7 @@ export default function SettingsPage(props: {
         }
       }
     } catch (err) {
-      console.error("Failed to load settings:", err);
+      logError("ui", "Failed to load settings", err);
     }
 
     // Load database sampling configurations
@@ -665,7 +666,7 @@ export default function SettingsPage(props: {
         }
       }
     } catch (err) {
-      console.error("Failed to load app config settings:", err);
+      logError("ui", "Failed to load app config settings", err);
     }
 
     loadConnections();
@@ -677,7 +678,7 @@ export default function SettingsPage(props: {
     const updated = { ...settings(), [key]: value };
     setSettings(updated);
     invoke("save_settings_json", { json: JSON.stringify(updated, null, 2) }).catch(err => {
-      console.error("Failed to save settings:", err);
+      logError("ui", "Failed to save settings", err);
     });
   };
 
@@ -686,7 +687,7 @@ export default function SettingsPage(props: {
     try {
       await invoke("set_app_config", { key: "explore.materialized_sample_enabled", value: enabled ? "true" : "false" });
     } catch (err) {
-      console.error("Failed to save explore.materialized_sample_enabled:", err);
+      logError("ui", "Failed to save explore.materialized_sample_enabled", err);
     }
   };
 
@@ -695,7 +696,7 @@ export default function SettingsPage(props: {
     try {
       await invoke("set_app_config", { key: "explore.materialized_sample_limit", value: limit.toString() });
     } catch (err) {
-      console.error("Failed to save explore.materialized_sample_limit:", err);
+      logError("ui", "Failed to save explore.materialized_sample_limit", err);
     }
   };
 
@@ -899,16 +900,16 @@ export default function SettingsPage(props: {
           transition: all 0.15s ease;
         }
         .db-icon-btn:hover {
-          background: rgba(255, 255, 255, 0.06);
+          background: var(--bg-hover) !important;
           color: var(--text-primary);
           border-color: transparent !important;
         }
         .db-icon-btn.active {
-          background: rgba(80, 160, 255, 0.12);
+          background: transparent !important;
           color: var(--brand);
         }
         .db-icon-btn.active:hover {
-          background: rgba(80, 160, 255, 0.18);
+          background: var(--bg-hover) !important;
           color: var(--brand);
           border-color: transparent !important;
         }
@@ -1129,28 +1130,56 @@ export default function SettingsPage(props: {
             <span>{t("settingsStats")}</span>
           </button>
 
-          <div class="ss-guide-container">
-            <button
-              class="ss-nav-item"
-              classList={{ active: activeTab() === "guide" }}
-              onClick={() => setActiveTab("guide")}
-              style={{ display: HIDDEN_TABS.has("guide") ? "none" : undefined }}
-            >
-              <span class="ss-nav-icon">
-                <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12.5 3.5c-1.5-1.5-5 0-6 1a25 25 0 0 0-2.5 3.5L2 9.5l2.5 2L6 14l1.5-2c1.5-.8 2.8-1.8 3.8-3.3 1-1 2.5-4.5 1.2-5.7zM4.5 11.5L2 14M9.5 6.5l.5.5" />
-                </svg>
-              </span>
-              <span>{t("settingsGuide")}</span>
-            </button>
-          </div>
+          <Show when={!HIDDEN_TABS.has("guide")}>
+            <div class="ss-guide-container">
+              <button
+                class="ss-nav-item"
+                classList={{ active: activeTab() === "guide" }}
+                onClick={() => setActiveTab("guide")}
+              >
+                <span class="ss-nav-icon">
+                  <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12.5 3.5c-1.5-1.5-5 0-6 1a25 25 0 0 0-2.5 3.5L2 9.5l2.5 2L6 14l1.5-2c1.5-.8 2.8-1.8 3.8-3.3 1-1 2.5-4.5 1.2-5.7zM4.5 11.5L2 14M9.5 6.5l.5.5" />
+                  </svg>
+                </span>
+                <span>{t("settingsGuide")}</span>
+              </button>
+            </div>
+          </Show>
         </nav>
 
         <div class="ss-footer">
-          <div class="ss-brand">
+          <button
+            class="ss-brand"
+            onClick={() => props.onClose()}
+            title={t("backToWorkspace")}
+          >
             <img src={logoSrc()} alt="LakeMind" style="width: 18px; height: 18px; object-fit: contain;" />
             <span class="ss-brand-name">LakeMind</span>
-          </div>
+          </button>
+          <button
+            class="ss-theme-toggle"
+            onClick={() => setCurrentTheme(currentTheme() === "light" ? "geek-dark" : "light")}
+            title={t("interfaceTheme")}
+          >
+            <Show when={currentTheme() === "light"} fallback={
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+              </svg>
+            }>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
+                <circle cx="12" cy="12" r="5"></circle>
+                <line x1="12" y1="1" x2="12" y2="3"></line>
+                <line x1="12" y1="21" x2="12" y2="23"></line>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                <line x1="1" y1="12" x2="3" y2="12"></line>
+                <line x1="21" y1="12" x2="23" y2="12"></line>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+              </svg>
+            </Show>
+          </button>
         </div>
       </aside>
 
@@ -1611,7 +1640,7 @@ export default function SettingsPage(props: {
                         class="db-connection-item-row"
                       >
                         <div style="display: flex; align-items: center; gap: 14px;">
-                          <span style={`display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : c.dbType === 'sqlite' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : c.dbType === 'sqlite' ? '#10b981' : '#ffa500'}; border-radius: 8px; flex-shrink: 0;`}>
+                          <span style={`display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : c.dbType === 'sqlite' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : c.dbType === 'sqlite' ? 'var(--accent-green)' : 'var(--accent-amber)'}; border-radius: 8px; flex-shrink: 0;`}>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
                               <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
                               <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
@@ -1621,7 +1650,7 @@ export default function SettingsPage(props: {
                           <div>
                             <div style="display: flex; align-items: center; gap: 8px;">
                               <span style="font-weight: 600; font-size: 14px; color: var(--text-primary);">{c.name}</span>
-                              <span style={`font-size: 10px; font-weight: bold; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : c.dbType === 'sqlite' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : c.dbType === 'sqlite' ? '#10b981' : '#ffa500'}`}>{c.dbType}</span>
+                              <span style={`font-size: 10px; font-weight: bold; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : c.dbType === 'sqlite' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : c.dbType === 'sqlite' ? 'var(--accent-green)' : 'var(--accent-amber)'}`}>{c.dbType}</span>
                             </div>
                             <div style="font-size: 12px; color: var(--text-dim); margin-top: 4px; font-family: var(--font-mono, monospace); word-break: break-all;">
                               {c.dbType === 'sqlite' ? c.databaseName : `${c.username}@${c.host}:${c.port}/${c.databaseName}`}
@@ -1937,7 +1966,7 @@ export default function SettingsPage(props: {
 
         {/* Tab 2: Model Settings (模型设置) - Premium High-Fidelity Details */}
         <Show when={activeTab() === "modelSettings"}>
-          <div class="settings-view-header">
+          <div class="settings-view-header wide-header">
             <h2>{t("modelSettings")}</h2>
             <p class="settings-view-subtitle">{t("settingsSubtitle")}</p>
           </div>

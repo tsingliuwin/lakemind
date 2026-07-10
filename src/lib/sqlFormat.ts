@@ -5,6 +5,7 @@
 
 import { format } from "sql-formatter";
 import type { FormatOptionsWithLanguage } from "sql-formatter";
+import { logError } from "./logger";
 
 /**
  * DuckDB 方言格式化配置：保留原大小写、2 空格缩进、表达式宽度 100 列。
@@ -33,7 +34,7 @@ export function tryFormatDuckdbSql(sql: string): string {
   try {
     return formatDuckdbSql(sql);
   } catch (err) {
-    console.error("[sqlFormat] format failed, falling back to original:", err);
+    logError("ui", "sqlFormat format failed, falling back to original", err);
     return sql;
   }
 }

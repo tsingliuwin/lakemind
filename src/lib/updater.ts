@@ -10,6 +10,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { createSignal, createRoot } from "solid-js";
+import { logError, logWarn } from "./logger";
 
 /** True when the Tauri webview internals exist (i.e. running inside the app). */
 const inTauri = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
@@ -75,7 +76,7 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
     if (!update) return null;
     return { version: update.version, notes: update.body ?? "" };
   } catch (e) {
-    console.warn("Updater plugin check failed, falling back to legacy manifest:", e);
+    logWarn("system", "Updater plugin check failed, falling back to legacy manifest", { detail: e });
     return legacyCheck();
   }
 }
@@ -227,7 +228,7 @@ const store = createRoot(() => {
       setStatus("available");
       void runDownload();
     } catch (e) {
-      console.error("Update check failed:", e);
+      logError("system", "Update check failed", e);
       if (userInitiated) {
         setStatus("error");
         setError(e instanceof Error ? e.message : String(e));
@@ -252,7 +253,7 @@ const store = createRoot(() => {
       await downloadAndInstallUpdate((p) => setProgress(p));
       setStatus("ready");
     } catch (e) {
-      console.error("Download failed:", e);
+      logError("system", "Download failed", e);
       setStatus("error");
       setError(e instanceof Error ? e.message : String(e));
       setTimeout(() => {
@@ -269,7 +270,7 @@ const store = createRoot(() => {
     try {
       await relaunch();
     } catch (e) {
-      console.error("Relaunch failed:", e);
+      logError("system", "Relaunch failed", e);
       setStatus("error");
       setError(e instanceof Error ? e.message : String(e));
     }

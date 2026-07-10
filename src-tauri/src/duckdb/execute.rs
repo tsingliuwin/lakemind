@@ -24,8 +24,9 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
         let (tx, rx) = std::sync::mpsc::channel::<()>();
         std::thread::spawn(move || {
             if rx.recv_timeout(std::time::Duration::from_secs(timeout_secs)).is_err() {
-                println!(
-                    "[timeout] Query exceeded {} s — firing interrupt at +{} ms after query start",
+                tracing::warn!(
+                    category = "query",
+                    "query exceeded {}s soft limit — interrupt fired at +{}ms",
                     timeout_secs,
                     query_start.elapsed().as_millis()
                 );
@@ -64,15 +65,15 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
     // Phase-level timing so we can see WHERE a query spends its time. Each `?`
     // logs the elapsed time on failure too, so an interrupted query reveals
     // exactly which phase (prepare / execute / fetch) was stuck and for how long.
-    println!("[run_query] START cap={:?} timeout={}s sql: {}", cap, timeout_secs, wrapped);
+    tracing::debug!(category = "query", "START cap={:?} timeout={}s sql: {}", cap, timeout_secs, wrapped);
 
     let query_res = (|| -> AppResult<SqlResult> {
         let t_prepare = Instant::now();
         let mut stmt = conn.prepare(&wrapped).map_err(|e| {
-            println!("[run_query] prepare FAILED after {} ms: {}", t_prepare.elapsed().as_millis(), e);
+            tracing::warn!(category = "query", "prepare FAILED after {}ms: {}", t_prepare.elapsed().as_millis(), e);
             e
         })?;
-        println!("[run_query] prepare ok: {} ms", t_prepare.elapsed().as_millis());
+        tracing::debug!(category = "query", "prepare ok: {}ms", t_prepare.elapsed().as_millis());
 
         let mut rows_out: Vec<Vec<serde_json::Value>> = Vec::new();
         if let Some(cap_val) = cap {
@@ -88,16 +89,16 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
         let mut ncol: usize = 0;
         {
             let mut iter = stmt.query([]).map_err(|e| {
-                println!("[run_query] query FAILED after {} ms: {}", t_fetch.elapsed().as_millis(), e);
+                tracing::warn!(category = "query", "query FAILED after {}ms: {}", t_fetch.elapsed().as_millis(), e);
                 e
             })?;
             let mut logged_first = false;
             while let Some(row) = iter.next().map_err(|e| {
-                println!("[run_query] row fetch FAILED after {} ms: {}", t_fetch.elapsed().as_millis(), e);
+                tracing::warn!(category = "query", "row fetch FAILED after {}ms: {}", t_fetch.elapsed().as_millis(), e);
                 e
             })? {
                 if !logged_first {
-                    println!("[run_query] first row: {} ms", t_fetch.elapsed().as_millis());
+                    tracing::debug!(category = "query", "first row: {}ms", t_fetch.elapsed().as_millis());
                     logged_first = true;
                 }
 
@@ -115,12 +116,7 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
                     let mut out = Vec::with_capacity(ncol);
                     for idx in 0..ncol {
                         let val: DuckValue = row.get(idx).map_err(|e| {
-                            println!(
-                                "[run_query] col {} get FAILED after {} ms: {}",
-                                idx,
-                                t_fetch.elapsed().as_millis(),
-                                e
-                            );
+                            tracing::warn!(category = "query", "col {} get FAILED after {}ms: {}", idx, t_fetch.elapsed().as_millis(), e);
                             e
                         })?;
                         out.push(duck_value_to_json(val));
@@ -135,7 +131,7 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
         let column_names: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
         let column_types: Vec<String> = schema.fields().iter().map(|f| format!("{}", f.data_type())).collect();
 
-        println!("[run_query] all rows: {} ms ({} rows)", t_fetch.elapsed().as_millis(), rows_out.len());
+        tracing::debug!(category = "query", "all rows: {}ms ({} rows)", t_fetch.elapsed().as_millis(), rows_out.len());
 
         let truncated = cap.map_or(false, |n| rows_out.len() >= n);
         let row_count = rows_out.len();
@@ -150,7 +146,7 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
         })
     })();
 
-    println!("[run_query] END total: {} ms", start.elapsed().as_millis());
+    tracing::debug!(category = "query", "END total: {}ms", start.elapsed().as_millis());
 
     if let Some(tx) = timer_cancel {
         let _ = tx.send(());
@@ -165,8 +161,9 @@ pub fn run_query(conn: &duckdb::Connection, sql: &str, cap: Option<usize>) -> Ap
                 // the interrupt *took effect* — the gap between this and
                 // timeout_secs is the uninterruptible phase we're diagnosing.
                 let hard = crate::agent::get_query_hard_timeout();
-                println!(
-                    "[run_query] interrupt resolved after {} ms (soft limit {} s, hard limit {} s; uninterruptible gap ~{} ms)",
+                tracing::warn!(
+                    category = "query",
+                    "interrupt resolved after {}ms (soft limit {}s, hard limit {}s; uninterruptible gap ~{}ms)",
                     start.elapsed().as_millis(),
                     timeout_secs,
                     hard,

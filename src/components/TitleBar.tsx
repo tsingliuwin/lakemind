@@ -2,6 +2,7 @@ import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
 import type { SourceTable } from "../lib/types";
+import { logError } from "../lib/logger";
 import { t } from "../lib/i18n";
 import { logoSrc } from "../lib/theme";
 import { updater } from "../lib/updater";
@@ -53,7 +54,7 @@ export default function TitleBar(props: {
   onMount(() => {
     document.addEventListener("mousedown", handleClickOutside);
     if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
-      getVersion().then((v) => setAppVersion(`v${v}`)).catch(console.error);
+      getVersion().then((v) => setAppVersion(`v${v}`)).catch((e) => logError("ui", "get version failed", e));
     }
     onCleanup(() => {
       document.removeEventListener("mousedown", handleClickOutside);

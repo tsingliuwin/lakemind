@@ -107,6 +107,54 @@ export interface LogEntry {
   error?: string;
 }
 
+// ---------------------------------------------------------------------------
+// 统一日志 —— 与 src-tauri/src/model.rs LogRecord / LogFilter 一一对应。
+// ---------------------------------------------------------------------------
+
+/** 日志级别。后端 tracing Level 映射后的小写字符串。 */
+export type LogLevel = "debug" | "info" | "warn" | "error";
+
+/** 日志分类的固定枚举。控制台多 Tab 与日志分析模块据此过滤。
+ * 必须与后端 model::LOG_CATEGORIES 保持一致。 */
+export type LogCategory =
+  | "query"
+  | "import"
+  | "agent"
+  | "sync"
+  | "duckdb"
+  | "link"
+  | "system"
+  | "ui";
+
+/** 一条统一日志。对应 SQLite `logs` 表的一行，也是 `app-log` 事件的 payload。
+ * `detail` 是按类别而异的结构化字段（sql / rowCount / elapsedMs / error / ...）。 */
+export interface UnifiedLog {
+  id?: number;
+  /** Unix 毫秒时间戳。 */
+  ts: number;
+  level: LogLevel;
+  category: LogCategory;
+  /** 单行人类可读摘要。 */
+  message: string;
+  /** 结构化明细（JSON 对象，字段随 category 变化）。 */
+  detail?: Record<string, unknown>;
+  /** 关联 workspace（全局日志为 undefined）。 */
+  workspace?: string;
+  /** 关联 task（agent 类日志必填）。 */
+  taskId?: string;
+}
+
+/** `query_logs` 命令的过滤参数。与后端 LogFilter 对应。 */
+export interface LogFilter {
+  categories?: LogCategory[];
+  levels?: LogLevel[];
+  fromTs?: number;
+  toTs?: number;
+  keyword?: string;
+  limit: number;
+  offset?: number;
+}
+
 /** 将 DuckDB 类型名归类到检查器徽标用的颜色族。 */
 export type TypeFamily = "int" | "float" | "str" | "time" | "bool" | "other";
 

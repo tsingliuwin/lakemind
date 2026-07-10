@@ -5,6 +5,7 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { sql } from "@codemirror/lang-sql";
 import { githubLight, githubDark } from "@uiw/codemirror-theme-github";
 import { formatDuckdbSql } from "../lib/sqlFormat";
+import { logError } from "../lib/logger";
 import { isLightCodeTheme, codeLineNumbers, codeWrap, codeFontSize } from "../lib/codeConfig";
 import { ROW_CAP_OPTIONS } from "../lib/types";
 import { t } from "../lib/i18n";
@@ -106,7 +107,7 @@ export default function SqlEditor(props: {
       const msg = err instanceof Error ? err.message : String(err);
       setFormatErr(msg);
       setFormatState("err");
-      console.error("[SqlEditor] format failed:", msg);
+      logError("ui", "SqlEditor format failed", msg);
       setTimeout(() => setFormatState("idle"), 3000);
     }
   }
@@ -314,8 +315,11 @@ export default function SqlEditor(props: {
               </svg>
             </Show>
           </button>
-          <button class="header-close-btn" title="关闭并放弃查询" onClick={() => props.onClose?.()}>
-            ✕
+          <button class="header-close-btn" title="删除该查询" onClick={() => props.onClose?.()}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 10px; height: 10px;">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
           </button>
           <button class="icon-btn" title={`${t("run")} (Ctrl/Cmd+Enter)`} disabled={props.busy} onClick={() => props.onRun()}>
             <Show when={props.busy} fallback={
