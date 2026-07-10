@@ -5448,10 +5448,120 @@ button.lm-select-trigger:hover:not(:disabled) {
 .chart-seg__toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
+  justify-content: space-between;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border-faint);
   background: var(--bg-elevated);
+}
+.chart-seg__toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.chart-seg__toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chart-seg__action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+.chart-seg__action-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* Fullscreen Overlay Styles */
+.chart-fullscreen-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(10, 10, 11, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.chart-fullscreen-header {
+  height: 52px;
+  padding: 0 24px;
+  background: rgba(0, 0, 0, 0.25);
+  border-bottom: 1px solid var(--border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+.chart-fullscreen-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+.chart-fullscreen-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.chart-fullscreen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.chart-fullscreen-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+.chart-fullscreen-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  box-sizing: border-box;
+}
+.chart-fullscreen-canvas {
+  width: 100%;
+  height: 100%;
+  background: var(--bg-surface);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border-strong);
+  padding: 24px;
+  box-sizing: border-box;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.35);
 }
 .chart-seg__label {
   font-size: 11px;
