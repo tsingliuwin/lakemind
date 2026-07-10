@@ -2654,7 +2654,7 @@ body.is-resizing-column * {
 
 .ss-nav-item.active {
   background: var(--bg-active) !important;
-  color: #fff !important;
+  color: var(--text-primary) !important;
   border: none !important;
   border-radius: 8px !important;
   padding-left: 12px !important;
