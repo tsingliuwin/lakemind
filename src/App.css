@@ -2743,6 +2743,9 @@ body.is-resizing-column * {
   flex-shrink: 0;
   max-width: 680px;
 }
+.settings-view-header.wide-header {
+  max-width: 900px;
+}
 
 .settings-view-header h2 {
   font-size: 20px;
@@ -2783,6 +2786,7 @@ body.is-resizing-column * {
   border-radius: 10px;
   background: var(--bg-surface);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  max-width: 900px !important;
 }
 
 /* Generic settings section card and row controls */

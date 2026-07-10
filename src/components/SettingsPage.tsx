@@ -1939,7 +1939,7 @@ export default function SettingsPage(props: {
 
         {/* Tab 2: Model Settings (模型设置) - Premium High-Fidelity Details */}
         <Show when={activeTab() === "modelSettings"}>
-          <div class="settings-view-header">
+          <div class="settings-view-header wide-header">
             <h2>{t("modelSettings")}</h2>
             <p class="settings-view-subtitle">{t("settingsSubtitle")}</p>
           </div>
