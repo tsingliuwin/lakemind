@@ -1714,23 +1714,36 @@ body.is-resizing-column * {
   color: var(--text-primary);
   font-weight: 600;
 }
+.log-card {
+  border-bottom: 1px solid var(--border-faint);
+  transition: background-color 0.15s ease, border-color 0.15s ease, margin 0.15s ease, box-shadow 0.15s ease;
+}
+.log-card:hover:not(.expanded) {
+  background: var(--bg-surface);
+}
+.log-card.expanded {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  margin: 6px 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
+}
 .log-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 12px;
+  padding: 4px 12px;
   font-size: 12px;
-  border-bottom: 1px solid var(--border-faint);
   cursor: default;
+  transition: padding 0.15s ease;
 }
 .log-row.clickable {
   cursor: pointer;
 }
-.log-row:hover {
-  background: var(--bg-surface);
-}
-.log-row.expanded {
-  background: var(--bg-surface);
+.log-card.expanded .log-row {
+  align-items: flex-start;
+  padding-top: 8px;
+  padding-bottom: 6px;
 }
 .log-row .log-ts {
   flex: 0 0 56px;
@@ -1769,6 +1782,10 @@ body.is-resizing-column * {
   text-overflow: ellipsis;
   font-size: 12px;
 }
+.log-card.expanded .log-row .log-title {
+  white-space: normal;
+  word-break: break-word;
+}
 .log-row .log-meta {
   flex-shrink: 0;
   color: var(--text-secondary);
@@ -1795,16 +1812,15 @@ body.is-resizing-column * {
 }
 /* --- Expanded detail panel (shown when a row is clicked) --- */
 .log-detail {
-  margin: 0 12px 6px 74px;
-  padding: 6px 12px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  margin: 0 12px 10px 74px;
+  padding: 0 0 4px 0;
+  background: transparent;
+  border: none;
   font-size: 11px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
+  box-shadow: none;
 }
 .log-detail .ld-section {
   display: flex;

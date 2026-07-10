@@ -145,8 +145,15 @@ export default function BottomConsole(props: {
                 const rowCount = numFromDetail(log.detail?.rowCount);
                 const elapsedMs = numFromDetail(log.detail?.elapsedMs);
                 const expanded = () => expandedId() === log.id;
+
+                const detail = log.detail ?? {};
+                const hasSql = typeof detail.sql === "string";
+                const hasError = typeof detail.error === "string" && detail.error.length > 0;
+                const extraFields = Object.entries(detail).filter(([k]) => k !== "sql" && k !== "error");
+                const hasDetail = hasSql || hasError || extraFields.length > 0 || log.workspace || log.taskId;
+
                 return (
-                  <>
+                  <div class="log-card" classList={{ expanded: expanded() }}>
                     <div
                       class="log-row"
                       classList={{ clickable: true, expanded: expanded() }}
@@ -165,10 +172,10 @@ export default function BottomConsole(props: {
                       </span>
                       <span class="log-expand" data-open={expanded()}>▸</span>
                     </div>
-                    <Show when={expanded()}>
+                    <Show when={expanded() && hasDetail}>
                       <LogDetail log={log} copiedId={copiedId()} onCopied={(id) => setCopiedId(id)} />
                     </Show>
-                  </>
+                  </div>
                 );
               }}
             </For>
@@ -248,14 +255,6 @@ function LogDetail(props: { log: UnifiedLog; copiedId: number | null; onCopied: 
 
   return (
     <div class="log-detail">
-      <Show when={sql == null}>
-        {/* Non-query logs: show the full (untruncated) message so the expanded
-         * panel always carries the complete text the row title summarized. */}
-        <div class="ld-section">
-          <span class="ld-label">{t("levelInfo")}</span>
-          <pre class="ld-code">{log.message}</pre>
-        </div>
-      </Show>
 
       <Show when={sql != null}>
         <div class="ld-section">
