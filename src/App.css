@@ -1156,6 +1156,7 @@ select:hover:not(:disabled) {
   min-width: 0;
   min-height: 0;
   background: var(--bg-base);
+  overflow: hidden;
 }
 
 /* --- SqlEditor card --- */
@@ -1632,7 +1633,7 @@ body.is-resizing-column * {
   height: var(--bottom-height, 180px);
 }
 .bottom.state-expanded {
-  height: calc(var(--bottom-height, 180px) * 1.8);
+  height: 100%;
 }
 
 .bottom .console-header {

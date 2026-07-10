@@ -1302,8 +1302,15 @@ export default function App() {
   const bottomHeightActual = () => {
     if (settingsOpen()) return "0px";
     if (consoleState() === "folded") return "32px";
-    if (consoleState() === "expanded") return `${bottomHeight() * 1.8}px`;
+    if (consoleState() === "expanded") return "100%";
     return `${bottomHeight()}px`;
+  };
+
+  const gridTemplateRows = () => {
+    if (settingsOpen()) return "1fr 0px";
+    if (consoleState() === "folded") return "1fr 32px";
+    if (consoleState() === "expanded") return "0px 1fr";
+    return `1fr ${bottomHeight()}px`;
   };
 
   return (
@@ -1399,7 +1406,7 @@ export default function App() {
             class="right-content-layout"
             style={{
               "grid-template-columns": `1fr ${rightWidthActual()}`,
-              "grid-template-rows": `1fr ${bottomHeightActual()}`,
+              "grid-template-rows": gridTemplateRows(),
             }}
           >
             <Show when={inspectorOpen()}>
@@ -1411,12 +1418,12 @@ export default function App() {
               />
             </Show>
 
-            <Show when={consoleState() !== "folded"}>
+            <Show when={consoleState() === "default"}>
               <div 
                 class="resizer-h" 
                 classList={{ dragging: isDraggingBottom() }}
                 style={{ 
-                  bottom: `${parseFloat(bottomHeightActual()) - 3}px`,
+                  bottom: `${bottomHeight() - 3}px`,
                   left: 0,
                   right: rightWidthActual()
                 }} 
