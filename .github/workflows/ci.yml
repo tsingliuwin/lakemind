@@ -12,14 +12,23 @@ on:
 
 jobs:
   warm-cache:
-    name: Warm Build Cache (${{ matrix.os }})
+    name: Warm Build Cache (${{ matrix.os }} ${{ matrix.target }})
     # 发版 commit（chore: bump version）会同时触发 Release workflow 来完整构建，
     # 此时跳过 Cache Warmer 避免重复占用 CI 资源。
     if: "!startsWith(github.event.head_commit.message, 'chore: bump version')"
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-22.04]
+        include:
+          # 每个 target 独立一个 job，确保缓存 key 和 Release 矩阵一一对应
+          - os: windows-latest
+            target: ""
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            target: ""
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,13 +36,16 @@ jobs:
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
         with:
-          # macOS 同时预热 arm64 和 x64 的依赖缓存
-          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+          # shared-key 必须和 release.yml 中完全一致，这样 Release 构建就能
+          # 直接命中 CI 预热的缓存，跳过依赖编译。
+          shared-key: "tauri-${{ matrix.os }}-${{ matrix.target }}"
+          save-if: "true"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -54,11 +66,9 @@ jobs:
       - name: Compile Rust Dependencies (Release)
         shell: bash
         run: |
-          if [ "${{ matrix.os }}" = "macos-latest" ]; then
-            cd src-tauri
-            cargo build --release --target aarch64-apple-darwin
-            cargo build --release --target x86_64-apple-darwin
+          cd src-tauri
+          if [ -n "${{ matrix.target }}" ]; then
+            cargo build --release --target ${{ matrix.target }}
           else
-            cd src-tauri
             cargo build --release
           fi
