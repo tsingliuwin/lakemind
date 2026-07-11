@@ -5511,6 +5511,9 @@ button.lm-select-trigger:hover:not(:disabled) {
   box-sizing: border-box;
   flex-shrink: 0;
 }
+.chart-fullscreen-header.mac-padding {
+  padding-left: 80px;
+}
 .chart-fullscreen-title {
   font-size: 15px;
   font-weight: 600;
@@ -5518,8 +5521,8 @@ button.lm-select-trigger:hover:not(:disabled) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 200px;
-  flex-shrink: 0;
+  max-width: 35%;
+  flex-shrink: 1;
 }
 .chart-fullscreen-tabs {
   display: flex;

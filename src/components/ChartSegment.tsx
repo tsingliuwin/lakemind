@@ -3,6 +3,7 @@ import * as echarts from "echarts";
 import { invoke } from "@tauri-apps/api/core";
 import type { Segment, SqlResult } from "../lib/types";
 import { currentTheme, Theme } from "../lib/theme";
+import { Portal } from "solid-js/web";
 
 /**
  * Inline chart segment — renders an ECharts visualization from a SqlResult.
@@ -74,6 +75,8 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
+
 export default function ChartSegment(props: { seg: Extract<Segment, { type: "chart" }> }) {
   let container: HTMLDivElement | undefined;
   let chart: echarts.ECharts | undefined;
@@ -143,7 +146,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
         legend: { bottom: 2, type: "scroll", textStyle: { color: styles.legendColor, fontSize: 11 }, itemWidth: 8, itemHeight: 8, itemGap: 12 },
         series: [{
           type: "pie",
-          radius: ["42%", "68%"],
+          radius: ["40%", "60%"],
           center: ["50%", "50%"],
           data,
           label: { color: styles.textColor, fontSize: 11, formatter: "{b}: {d}%", fontWeight: 500 },
@@ -162,7 +165,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
         color: styles.palette,
         title: title ? TITLE_STYLE(title) : undefined,
         tooltip: { trigger: "item", ...TOOLTIP_STYLE },
-        grid: { left: 60, right: 24, top: title ? 44 : 20, bottom: 32 },
+        grid: { left: 60, right: 24, top: title ? 44 : 20, bottom: 32, containLabel: true },
         xAxis: { type: "value", name: xField ?? cols[xIdx] ?? "X", nameTextStyle: { color: styles.axisLabelColor, fontSize: 11 }, scale: true, ...AXIS_STYLE },
         yAxis: { type: "value", name: yCols[0] ?? "Y", nameTextStyle: { color: styles.axisLabelColor, fontSize: 11 }, scale: true, ...AXIS_STYLE },
         series: [{
@@ -216,8 +219,8 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
         tooltip: { ...TOOLTIP_STYLE },
         series: [{
           type: "gauge",
-          center: ["50%", "58%"],
-          radius: "82%",
+          center: ["50%", "55%"],
+          radius: "70%",
           min: 0,
           max: (() => {
             // Auto-scale max: round up to a nice number (×1, ×2, ×5 × 10^n).
@@ -289,7 +292,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
       tooltip: { trigger: "axis", ...TOOLTIP_STYLE },
       legend: { bottom: 2, type: "scroll", textStyle: { color: styles.legendColor, fontSize: 11 }, itemWidth: 8, itemHeight: 8, itemGap: 12 },
       // bottom space: legend (~22px) + X axis label (~18px normal / ~40px rotated) + gaps
-      grid: { left: 60, right: 24, top: title ? 44 : 20, bottom: rotated ? 72 : 52 },
+      grid: { left: 60, right: 24, top: title ? 44 : 20, bottom: rotated ? 72 : 52, containLabel: true },
       xAxis: { type: "category", data: categoryData, ...AXIS_STYLE, axisLabel: { ...AXIS_STYLE.axisLabel, rotate: rotated ? 30 : 0 } },
       yAxis: { type: "value", ...AXIS_STYLE },
       series,
@@ -306,19 +309,33 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
     // Establish dependency on current theme for automatic re-rendering
     currentTheme();
     render();
+    if (fullscreenChart) {
+      const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.title);
+      fullscreenChart.setOption(opt, true);
+    }
   });
 
   onMount(() => {
     if (!container) return;
     chart = echarts.init(container);
     render();
-    const ro = new ResizeObserver(() => chart?.resize());
-    ro.observe(container);
-    onCleanup(() => ro.disconnect());
-  });
+    
+    // Trigger initial resize in the next frame to ensure layout calculations are complete
+    requestAnimationFrame(() => {
+      chart?.resize();
+    });
 
-  onCleanup(() => {
-    chart?.dispose();
+    const ro = new ResizeObserver(() => {
+      chart?.resize();
+    });
+    ro.observe(container);
+    onCleanup(() => {
+      ro.disconnect();
+      if (chart) {
+        chart.dispose();
+        chart = undefined;
+      }
+    });
   });
 
   function switchType(t: ChartType) {
@@ -381,70 +398,82 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
 
       {/* Fullscreen Overlay Dialog */}
       <Show when={isFullScreen()}>
-        <div class="chart-fullscreen-overlay">
-          <div class="chart-fullscreen-header">
-            <span class="chart-fullscreen-title">{props.seg.title || "图表预览"}</span>
-            <Show when={switchable}>
-              <div class="chart-fullscreen-tabs">
-                <For each={CHART_TYPES}>
-                  {(ct) => (
-                    <button
-                      class="chart-seg__type-btn"
-                      classList={{ active: chartType() === ct.type }}
-                      title={ct.label}
-                      onClick={() => switchType(ct.type)}
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: inline-block; vertical-align: middle;" innerHTML={ct.svg} />
-                      <span>{ct.label}</span>
-                    </button>
-                  )}
-                </For>
+        <Portal>
+          <div class="chart-fullscreen-overlay">
+            <div class="chart-fullscreen-header" classList={{ "mac-padding": isMac }} data-tauri-drag-region>
+              <span class="chart-fullscreen-title">{props.seg.title || "图表预览"}</span>
+              <Show when={switchable}>
+                <div class="chart-fullscreen-tabs">
+                  <For each={CHART_TYPES}>
+                    {(ct) => (
+                      <button
+                        class="chart-seg__type-btn"
+                        classList={{ active: chartType() === ct.type }}
+                        title={ct.label}
+                        onClick={() => switchType(ct.type)}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: inline-block; vertical-align: middle;" innerHTML={ct.svg} />
+                        <span>{ct.label}</span>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </Show>
+              <div class="chart-fullscreen-actions">
+                <button class="chart-fullscreen-btn" onClick={saveAsImage} title="保存为图片">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px;">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                </button>
+                <button class="chart-fullscreen-btn" onClick={() => setIsFullScreen(false)} title="退出全屏">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px;">
+                    <path d="M4 14h6v6m10-6h-6v6M4 10h6V4m10 6h-6V4"></path>
+                  </svg>
+                </button>
               </div>
-            </Show>
-            <div class="chart-fullscreen-actions">
-              <button class="chart-fullscreen-btn" onClick={saveAsImage} title="保存为图片">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px;">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-              </button>
-              <button class="chart-fullscreen-btn" onClick={() => setIsFullScreen(false)} title="退出全屏">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px;">
-                  <path d="M4 14h6v6m10-6h-6v6M4 10h6V4m10 6h-6V4"></path>
-                </svg>
-              </button>
+            </div>
+            <div class="chart-fullscreen-body" onClick={() => setIsFullScreen(false)}>
+              <div 
+                ref={(el) => {
+                  if (el) {
+                    fullscreenContainer = el;
+                    
+                    fullscreenChart = echarts.init(el);
+                    const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.title);
+                    fullscreenChart.setOption(opt);
+                    
+                    // Trigger initial resize in the next frame to ensure Portal layout calculations are complete
+                    requestAnimationFrame(() => {
+                      fullscreenChart?.resize();
+                    });
+
+                    const ro = new ResizeObserver(() => {
+                      fullscreenChart?.resize();
+                    });
+                    ro.observe(el);
+                    
+                    (el as any)._cleanup = () => {
+                      ro.disconnect();
+                      if (fullscreenChart) {
+                        fullscreenChart.dispose();
+                        fullscreenChart = undefined;
+                      }
+                    };
+                  } else {
+                    if (fullscreenContainer && (fullscreenContainer as any)._cleanup) {
+                      (fullscreenContainer as any)._cleanup();
+                    }
+                    fullscreenContainer = undefined;
+                  }
+                }} 
+                class="chart-fullscreen-canvas" 
+                onClick={(e) => e.stopPropagation()} 
+              />
             </div>
           </div>
-          <div class="chart-fullscreen-body" onClick={() => setIsFullScreen(false)}>
-            <div 
-              ref={(el) => {
-                if (el) {
-                  fullscreenContainer = el;
-                  fullscreenChart = echarts.init(el);
-                  const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.title);
-                  fullscreenChart.setOption(opt);
-                  
-                  const ro = new ResizeObserver(() => fullscreenChart?.resize());
-                  ro.observe(el);
-                  
-                  (el as any)._cleanup = () => {
-                    ro.disconnect();
-                    fullscreenChart?.dispose();
-                    fullscreenChart = undefined;
-                  };
-                } else {
-                  if (fullscreenContainer && (fullscreenContainer as any)._cleanup) {
-                    (fullscreenContainer as any)._cleanup();
-                  }
-                  fullscreenContainer = undefined;
-                }
-              }} 
-              class="chart-fullscreen-canvas" 
-              onClick={(e) => e.stopPropagation()} 
-            />
-          </div>
-        </div>
+        </Portal>
       </Show>
     </div>
   );
