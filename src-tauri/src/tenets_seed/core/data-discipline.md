@@ -23,7 +23,7 @@ resource: lakemind://tenets/core/data-discipline
 
 **抽象反例**：你查到"满足条件 X 的记录共 N 条"（查询的筛选条件是 X），却写成"对象 Y 有 N 条"——只要对象 Y 的范围与条件 X 不一致，这个数字就是错的。即便 Y 看似和 X 相关，也必须用针对 Y 的查询重新验证。
 
-> 各行业的具体张冠李戴案例见 `/industry/` 下对应文件（如 `/industry/education.md`）。
+> 各行业的具体张冠李戴案例见 `industry/` 下对应文件（如 `industry/education/index.md`）。
 
 ## 3. 输出任何具体数字前，自检三问
 
@@ -45,4 +45,4 @@ resource: lakemind://tenets/core/data-discipline
 
 # Citations
 
-- 来源：LakeMind 真实对话教训。一次会话中 agent 连犯两错（整数截断制造假差异 + 把 A 查询数字挪用到 B 对象），用户据此提炼出本五条红线。行业具体案例见 `/industry/education.md`。
+- 来源：LakeMind 真实对话教训。一次会话中 agent 连犯两错（整数截断制造假差异 + 把 A 查询数字挪用到 B 对象），用户据此提炼出本五条红线。行业具体案例见 `industry/education/index.md`。

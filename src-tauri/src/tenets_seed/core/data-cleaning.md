@@ -56,6 +56,16 @@ resource: lakemind://tenets/core/data-cleaning
 | 统计意义上的极端值 | 不自动删除！先确认是否正常 | 用分位数了解分布后再决策 |
 | 超范围值（年龄 > 150、百分比 > 100） | 标记或修正 | 具体看业务逻辑 |
 
+### JOIN 爆炸（极易被忽略）
+多表关联后行数暴涨——通常是一对多关系被无意放大。比如订单表 JOIN 订单明细表，一个订单有 N 条明细，JOIN 后订单数看起来翻了 N 倍。
+
+| 场景 | 策略 | 示例 |
+|---|---|---|
+| JOIN 后行数变多（一对多放大） | 先 `COUNT` 对比关联前后行数，确认是否被放大 | `SELECT COUNT(*) FROM a` vs `SELECT COUNT(*) FROM a JOIN b ...` |
+| 需要左表粒度的指标 | 先聚合右表再 JOIN，或用子查询 | `JOIN (SELECT order_id, SUM(amount) FROM details GROUP BY order_id)` |
+
+**关键**：任何 JOIN 之后，都要 `COUNT` 一下结果行数，和关联前对比。如果行数变了但你预期不变，就是被放大了——此时基于 JOIN 结果做 `COUNT(订单)` 会算错。
+
 ## 3. 清洗的标准流程
 
 ```

@@ -11,4 +11,4 @@ resource: lakemind://tenets/topic/growth
 
 本主题准则待积累。欢迎贡献你遇到的用户增长分析陷阱与案例（如留存口径、新老用户定义、DAU/MAU 统计等）。
 
-可参考已沉淀的主题案例格式：`/topic/conversion.md`。
+可参考已沉淀的主题案例格式：`topic/conversion.md`。

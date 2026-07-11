@@ -31,6 +31,8 @@ const SEED_DATA_PROFILING: &str = include_str!("tenets_seed/core/data-profiling.
 const SEED_DATA_CLEANING: &str = include_str!("tenets_seed/core/data-cleaning.md");
 const SEED_DATA_ANALYSIS: &str = include_str!("tenets_seed/core/data-analysis.md");
 const SEED_DATA_PRESENTATION: &str = include_str!("tenets_seed/core/data-presentation.md");
+const SEED_DATA_SECURITY: &str = include_str!("tenets_seed/core/data-security.md");
+const SEED_DATA_METRICS: &str = include_str!("tenets_seed/core/data-metrics.md");
 const SEED_META_GOVERNANCE: &str = include_str!("tenets_seed/core/meta-governance.md");
 const SEED_INDUSTRY_INDEX: &str = include_str!("tenets_seed/industry/index.md");
 const SEED_EDUCATION_INDEX: &str = include_str!("tenets_seed/industry/education/index.md");
@@ -52,6 +54,8 @@ const SEED_FILES: &[(&str, &str)] = &[
     ("core/data-cleaning.md", SEED_DATA_CLEANING),
     ("core/data-analysis.md", SEED_DATA_ANALYSIS),
     ("core/data-presentation.md", SEED_DATA_PRESENTATION),
+    ("core/data-security.md", SEED_DATA_SECURITY),
+    ("core/data-metrics.md", SEED_DATA_METRICS),
     ("core/meta-governance.md", SEED_META_GOVERNANCE),
     ("industry/index.md", SEED_INDUSTRY_INDEX),
     ("industry/education/index.md", SEED_EDUCATION_INDEX),

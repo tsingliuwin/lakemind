@@ -54,10 +54,15 @@ resource: lakemind://tenets/core/meta-governance
 准则体系有明确的层级关系：
 
 ```
-总则（general-principles） > 数据纪律红线（data-discipline） > 分则 > 行业/主题准则
+总则（general-principles）
+  ├─ 数据纪律红线（data-discipline）   ┐ 都是横切红线、不可触碰
+  ├─ 数据安全准则（data-security）      ┘ 纪律管真实性，安全管合规
+  ├─ 分则（data-profiling / data-metrics / data-cleaning / data-analysis / data-presentation）
+  └─ 行业/主题准则（industry/ topic/）
 ```
 
 - **下级准则不得与上级冲突。** 如果行业准则的某条建议与总则矛盾，以总则为准。
+- **数据纪律红线与数据安全准则是总则之下的两条横切底线**，优先级高于分则和行业/主题准则。
 - **行业准则是总则的特化，不是例外。** 行业准则只能在总则框架内补充行业特有的规范，不能推翻总则。
 - **当两条同级准则冲突时**，以更具体的那条为准（特别法优于一般法）。
 

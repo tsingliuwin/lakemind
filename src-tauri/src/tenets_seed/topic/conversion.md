@@ -27,9 +27,9 @@ resource: lakemind://tenets/topic/conversion
 
 ## 整数截断制造假差异
 
-计算转化率、折扣率时，用 `CAST AS BIGINT` 或 `::INTEGER` 会把小数截断，制造"前后对不上"的假差异。取整用 `ROUND()`。详见 `/core/data-discipline.md` 第 4 条。
+计算转化率、折扣率时，用 `CAST AS BIGINT` 或 `::INTEGER` 会把小数截断，制造"前后对不上"的假差异。取整用 `ROUND()`。详见 `core/data-discipline.md` 第 4 条。
 
 # Citations
 
-- 相关：转化归因的具体行业案例见 `/industry/education.md`（体验课订单归因错误）。
-- 核心准则：`/core/data-discipline.md`。
+- 相关：转化归因的具体行业案例见 `industry/education/index.md`（体验课订单归因错误）。
+- 核心准则：`core/data-discipline.md`。
