@@ -20,7 +20,8 @@ export default defineConfig({
     nav: [
       { text: '首页', link: '/' },
       { text: '产品手册', link: '/guide/' },
-      { text: '技术架构', link: '/guide/architecture' }
+      { text: '技术架构', link: '/guide/architecture' },
+      { text: '变更日志', link: '/changelog' }
     ],
 
     sidebar: [
@@ -28,7 +29,8 @@ export default defineConfig({
         text: '产品介绍',
         items: [
           { text: '关于 LakeMind', link: '/guide/' },
-          { text: '产品设计与范式思考', link: '/guide/dilemmas-and-paradigm' }
+          { text: '产品设计与范式思考', link: '/guide/dilemmas-and-paradigm' },
+          { text: '版本变更日志', link: '/changelog' }
         ]
       },
       {
@@ -36,7 +38,8 @@ export default defineConfig({
         items: [
           { text: '快速入门', link: '/guide/getting-started' },
           { text: 'Agent 核心工具', link: '/guide/agent-skills' },
-          { text: '谷歌 OKF 统一标准', link: '/guide/okf-knowledge' }
+          { text: '谷歌 OKF 统一标准', link: '/guide/okf-knowledge' },
+          { text: '可进化的分析准则', link: '/guide/evolving-tenets' }
         ]
       },
       {
@@ -47,7 +50,9 @@ export default defineConfig({
       }
     ],
 
-    socialLinks: [],
+    socialLinks: [
+      { icon: 'github', link: 'https://github.com/tsingliuwin/lakemind' }
+    ],
     
     footer: {
       message: '本网站内容版权归 LakeMind 所有，未经授权请勿转载。',

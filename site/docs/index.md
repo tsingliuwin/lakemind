@@ -5,17 +5,17 @@ layout: home
 hero:
   name: "LakeMind"
   text: "本地优先的 AI 智能数据探索工作台"
-  tagline: "打通本地文件与关系数据库的零 ETL 混合联邦执行。基于极致低延迟的“快速试错-纠偏环”，融合谷歌开源 OKF 标准，让 Agent 真正深入数据清洗、多步加工与业务记忆积累。"
+  tagline: "开源 (AGPL-3.0) 且本地优先的 AI 数据分析 Agent 工作台。基于 DuckDB 零 ETL 联邦执行与“快速试错-纠偏环”，融合谷歌开源 OKF 标准，实现分析准则的自主演化与业务记忆沉淀。"
   actions:
     - theme: brand
-      text: 下载 Lakemind
-      link: https://1860052934.share.123pan.cn/123pan/bSOzvd-fmBmh
+      text: 立即下载 (GitHub Releases)
+      link: https://github.com/tsingliuwin/lakemind/releases
+    - theme: alt
+      text: GitHub 仓库 ↗
+      link: https://github.com/tsingliuwin/lakemind
     - theme: alt
       text: 快速入门
       link: /guide/getting-started
-    - theme: alt
-      text: 了解架构
-      link: /guide/architecture
 ---
 
 <!-- 1. CSS 桌面端 UI 模拟器 -->
@@ -164,6 +164,12 @@ hero:
 <h3 class="feature-title">隔离的多工作区设计</h3>
 <p class="feature-desc">每个工作区拥有独立的本地 DuckDB 实例与元数据索引。超大文件支持 In-place 注册免去磁盘占用，小规模数据支持便携式复制归档以供同事开箱即用。</p>
 </div>
+
+<div class="feature-card">
+<span class="feature-icon">📜</span>
+<h3 class="feature-title">AGPL-3.0 开源与可进化准则</h3>
+<p class="feature-desc">项目完全开源。首创以“宪法总则-阶段分则-行业分则”层级治理的分析准则库，随运行动态检索注入，并可根据真实分析教训持续补充与自主演化。</p>
+</div>
 </div>
 </div>
 
@@ -218,6 +224,12 @@ hero:
 <td class="highlight">谷歌开源 OKF 统一标准 (Markdown 随行，Git 友好)</td>
 <td>保存在云端私有格式或无保存 (语义流转即断层)</td>
 <td>仅本地保存 SQL 历史脚本记录 (无语义背景)</td>
+</tr>
+<tr>
+<td>开源状态与协议</td>
+<td class="highlight">完全开源 (AGPL-3.0 协议)</td>
+<td>闭源 (SaaS 订阅 / 商业绑定)</td>
+<td>部分开源或闭源</td>
 </tr>
 </tbody>
 </table>

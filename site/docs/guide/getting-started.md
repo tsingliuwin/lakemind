@@ -8,18 +8,20 @@
 
 如果您不需要修改 LakeMind 源码或参与开发，可以直接下载我们预先编译打包好的正式版本，开箱即用：
 
-- **下载地址**：[123云盘下载通道](https://1860052934.share.123pan.cn/123pan/bSOzvd-fmBmh)
+- **下载地址**：[GitHub Releases 官方下载通道](https://github.com/tsingliuwin/lakemind/releases)
 
 ---
 
 ## 2. 从源码编译与启动（开发者）
 
-如果您是开发者，想要定制软件或贡献代码，可以按照以下步骤进行本地编译与启动：
+作为一个开源项目，如果您是开发者，想要定制软件或贡献代码，可以按照以下步骤在本地进行编译与启动。
 
-确保您的开发环境已安装 [Node.js](https://nodejs.org/) 以及 Rust 编译链（Tauri 开发基础）。
+首先，确保您的开发环境已安装 [Node.js](https://nodejs.org/) 以及 Rust 编译链（Tauri 开发基础）。
 
 ```bash
 # 1. 克隆代码库并安装依赖
+git clone https://github.com/tsingliuwin/lakemind.git
+cd lakemind
 npm install --include=dev
 
 # 2. 启动 Tauri 开发服务器 (首次编译需要 5-15 分钟下载并编译 DuckDB 源码)
