@@ -1,15 +1,15 @@
 {
-  "version": "0.5.1",
-  "notes": "- 补充核心准则分则：新增数据安全与隐私、指标体系与口径管理等层级，规范 PII 数据脱敏与指标文档化\n- 行业准则库结构优化：教育行业重构为总分级架构，新增 K12 子行业特有分析红线，避免硬编码的案例污染\n- 修复 Agent 运行期因缺少 core/ 路径前缀而可能导致分则知识加载失败的 Bug",
-  "pubdate": "2026-07-11T02:39:40.190Z",
+  "version": "0.5.2",
+  "notes": "- 全局浅色主题重构：引入 premium 的 Slate & Indigo 全局亮色配色，彻底解决侧边栏选中节点文字/时间戳对比度过低看不清的问题\n- 对话与代码对比度提升：修复了行内代码背景与文本太浅、CodeMirror 编辑器在浅色模式下误载入深色语法主题而导致关键字/字符串显示苍白难读的问题\n- 上下文容量面板自适应：支持在深/浅色模式间自适应缩放展现卡片阴影与配色，用量指示条颜色亦按主题调整\n- 复制 SQL 交互简化：将表结构 SQL 定义下方的“复制 SQL”文字边框按钮，改造为右上角绝对定位悬浮的扁平无边框 SVG 图标按钮，成功后展现绿勾反馈\n- 选项按钮图标对齐：使用 Flexbox 精确对齐输入框下方下拉选项按钮（模型/优先/确认模式）中图标与文字的几何中线\n- 全屏图表视觉去噪：去除全屏图表底部的浮动 card 冗余外边框线与背景，防止与 header 边框形成错乱 of “双横线”效果；全屏 overlay 亦完美适配浅色毛玻璃背景",
+  "pubdate": "2026-07-11T05:02:00.000Z",
   "platforms": {
     "darwin-aarch64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK2R3OG9Pb0p0R0JrRlhQRk40Q3d2QjBkdC9zSUEzTkVDQWhYcFd3WUF0NU1ycGU1QlNRZUVPMm9hM1BGOFBaVUVhNUNNazFGKzRwS0w4NS96dFBqN1E4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzNzM3MDMxCWZpbGU6bGFrZW1pbmQuYXBwLnRhci5negptbm5QS3lubEEyNnRUMG5PNWR4QlpzcVZOUXJzZlV0dXRNRklpYVVpQkgwNDkwTG16SUE4M1FzcjducDdBOWxMc3R3UWhrYVdHN2hUN0hubkRscmtCQT09Cg==",
-      "url": "https://upload.xi-n.com/lakemind-v0.5.1-arm64.app.tar.gz"
+      "url": "https://upload.xi-n.com/lakemind-v0.5.2-arm64.app.tar.gz"
     },
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK2NUZ3ZsUG9UUVd3V0hVMFozTE5jM1NLRnpaV0VFTDNNaTZLRkxlK3N0SitEVXQrTFVGbFdUWnlBMFlkSUZIaUJHdUh1OFN3TC8zSW9kUWNXWXVKbWdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzNzM3NDg1CWZpbGU6bGFrZW1pbmRfMC41LjFfeDY0LXNldHVwLmV4ZQp5aTRXUEpBSnZpOTBDc0czaUNEaHRJaHFVVUprVm5nZkQ0ZW1SdkZOdnZDMnBWY2ttL04yeDZSMW9yUHE5ZUQ2a1RFbG4vcUZiWktsM1VYOUM2WkVEZz09Cg==",
-      "url": "https://upload.xi-n.com/lakemind-v0.5.1.exe"
+      "url": "https://upload.xi-n.com/lakemind-v0.5.2.exe"
     }
   }
 }
