@@ -2300,19 +2300,22 @@ body.is-resizing-column * {
 }
 .ri-ddl-copy-btn {
   align-self: flex-end;
-  padding: 4px 8px;
+  padding: 4px;
   border-radius: 4px;
-  border: 1px solid var(--border-strong);
-  background: var(--bg-button, rgba(255, 255, 255, 0.05));
+  border: none;
+  background: transparent;
   color: var(--text-secondary);
-  font-size: 11px;
   cursor: pointer;
+  opacity: 0.75;
   transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .ri-ddl-copy-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
-  border-color: var(--border-strongest, #4b5563);
+  opacity: 1;
 }
 
 /* Right-click context menu for data tree leaves. */
