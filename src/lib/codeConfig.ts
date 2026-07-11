@@ -49,7 +49,20 @@ function loadConfig(): CodeConfig {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_CONFIG;
     const parsed = JSON.parse(raw);
-    return { ...DEFAULT_CONFIG, ...parsed };
+
+    const lightTheme = (LIGHT_CODE_THEMES as readonly string[]).includes(parsed.lightTheme)
+      ? parsed.lightTheme
+      : "github-light";
+    const darkTheme = (DARK_CODE_THEMES as readonly string[]).includes(parsed.darkTheme)
+      ? parsed.darkTheme
+      : "github-dark";
+
+    return {
+      ...DEFAULT_CONFIG,
+      ...parsed,
+      lightTheme,
+      darkTheme,
+    };
   } catch {
     return DEFAULT_CONFIG;
   }
