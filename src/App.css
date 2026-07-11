@@ -4703,6 +4703,10 @@ button.lm-select-trigger:hover:not(:disabled) {
   font-size: 0.88em;
   font-weight: 500;
 }
+:root.light .md-rendered code:not(pre code) {
+  background: rgba(79, 70, 229, 0.08);
+  color: var(--accent-blue);
+}
 
 /* 代码块 — 截图中深色背景 + 语言标签 */
 /* Shiki-highlighted code blocks: Shiki emits its own background/border-radius
