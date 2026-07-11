@@ -19,6 +19,8 @@ pub(crate) struct RenderChartArgs {
     #[serde(default)]
     y_fields: Option<Vec<String>>,
     #[serde(default)]
+    right_y_fields: Option<Vec<String>>,
+    #[serde(default)]
     title: Option<String>,
 }
 
@@ -58,6 +60,7 @@ impl Tool for RenderChartTool {
                     "chart_type": { "type": "string", "enum": ["bar", "line", "pie", "scatter", "funnel", "gauge"], "description": "图表类型：bar(柱状对比)、line(趋势)、pie(占比)、scatter(相关性)、funnel(转化漏斗)、gauge(单值指标)" },
                     "x_field": { "type": "string", "description": "X 轴/分类列名（饼图时为名称列）" },
                     "y_fields": { "type": "array", "items": { "type": "string" }, "description": "Y 轴/数值列名，支持多列（多系列）。饼图时取第一个" },
+                    "right_y_fields": { "type": "array", "items": { "type": "string" }, "description": "双 Y 轴：放到右轴的列名（须为 y_fields 的子集）。仅当序列数量级差异大、单轴会把小量级序列压成直线时使用；同量级同语义序列不要分轴。默认全部在左轴" },
                     "title": { "type": "string", "description": "图表标题（可选）" }
                 },
                 "required": ["sql", "chart_type"]
@@ -88,6 +91,7 @@ impl Tool for RenderChartTool {
             "chart_type": args.chart_type,
             "x_field": args.x_field,
             "y_fields": args.y_fields,
+            "right_y_fields": args.right_y_fields,
         }));
 
         let start = std::time::Instant::now();
@@ -124,6 +128,7 @@ impl Tool for RenderChartTool {
                     args.title.as_deref(),
                     args.x_field.as_deref(),
                     args.y_fields.as_deref(),
+                    args.right_y_fields.as_deref(),
                     table,
                 );
                 let summary = format!("已生成{}图，共 {} 个数据点", chart_type_cn(&args.chart_type), row_count);

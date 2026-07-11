@@ -121,6 +121,7 @@ pub(super) fn emit_chart(
     title: Option<&str>,
     x_field: Option<&str>,
     y_fields: Option<&[String]>,
+    right_y_fields: Option<&[String]>,
     table: SqlResult,
 ) {
     emit_event(window, task_id, "chart", None, Some(Segment::Chart {
@@ -129,6 +130,7 @@ pub(super) fn emit_chart(
         title: title.map(|s| s.to_string()),
         x_field: x_field.map(|s| s.to_string()),
         y_fields: y_fields.map(|v| v.to_vec()),
+        right_y_fields: right_y_fields.map(|v| v.to_vec()),
         table,
     }));
 }

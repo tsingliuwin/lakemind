@@ -55,6 +55,8 @@ pub enum Segment {
         x_field: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         y_fields: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        right_y_fields: Option<Vec<String>>,
         table: SqlResult,
     },
     /// Terminal/agent execution error.

@@ -104,7 +104,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
   }
 
   /** Build ECharts option from SqlResult + chart config. */
-  function buildOption(type: ChartType, table: SqlResult, xField?: string, yFields?: string[], title?: string): echarts.EChartsOption {
+  function buildOption(type: ChartType, table: SqlResult, xField?: string, yFields?: string[], rightYFields?: string[], title?: string): echarts.EChartsOption {
     const cols = table.columns;
     // Determine column indices.
     const xIdx = xField ? cols.indexOf(xField) : findDimensionCol(table.columnTypes);
@@ -117,6 +117,8 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
       axisLabel: { color: styles.axisLabelColor, fontSize: 11, fontFamily: "var(--font-sans)" },
       splitLine: { lineStyle: { color: styles.splitLineColor, type: "dashed" as const } },
     };
+
+    const AXIS_NAME_STYLE = { color: styles.axisLabelColor, fontSize: 11, fontFamily: "var(--font-sans)" };
 
     const TOOLTIP_STYLE = {
       backgroundColor: styles.tooltipBg,
@@ -244,6 +246,18 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
     }
 
     // bar / line
+    // Dual Y-axis: `rightYFields` marks which y-fields belong to the right axis
+    // (used when series differ wildly in magnitude, e.g. revenue vs rate). When
+    // empty/absent, all series share a single left axis (default behavior).
+    const rightSet = new Set(rightYFields ?? []);
+    const hasRight = rightSet.size > 0 && yCols.some((yn) => rightSet.has(yn));
+    const leftCols = yCols.filter((yn) => !rightSet.has(yn));
+    const rightCols = yCols.filter((yn) => rightSet.has(yn));
+    // Name each axis only when it carries a single series — the legend covers
+    // the multi-series case and a long joined name would just clutter the axis.
+    const leftAxisName = leftCols.length === 1 ? leftCols[0] : undefined;
+    const rightAxisName = rightCols.length === 1 ? rightCols[0] : undefined;
+
     const categoryData = table.rows.map((r) => String(r[xIdx >= 0 ? xIdx : 0] ?? ""));
     const rotated = categoryData.length > 8;
     const series = yCols.map((yn, colorOffset) => {
@@ -252,6 +266,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
       return {
         name: yn,
         type,
+        yAxisIndex: rightSet.has(yn) ? 1 : 0,
         data: table.rows.map((r) => num(r[yi])),
         smooth: type === "line",
         ...(type === "bar"
@@ -287,22 +302,31 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
           : {}),
       };
     });
+    // Right axis keeps its tick/line styling but hides split lines so the two
+    // axes don't paint overlapping dashed grids.
+    const yAxis = hasRight
+      ? [
+          { type: "value" as const, position: "left" as const, name: leftAxisName, nameTextStyle: AXIS_NAME_STYLE, ...AXIS_STYLE },
+          { type: "value" as const, position: "right" as const, name: rightAxisName, nameTextStyle: AXIS_NAME_STYLE, ...AXIS_STYLE, splitLine: { show: false } },
+        ]
+      : { type: "value" as const, ...AXIS_STYLE };
     return {
       color: styles.palette,
       title: title ? TITLE_STYLE(title) : undefined,
       tooltip: { trigger: "axis", ...TOOLTIP_STYLE },
       legend: { bottom: 2, type: "scroll", textStyle: { color: styles.legendColor, fontSize: 11 }, itemWidth: 8, itemHeight: 8, itemGap: 12 },
       // bottom space: legend (~22px) + X axis label (~18px normal / ~40px rotated) + gaps
-      grid: { left: 60, right: 24, top: title ? 44 : 20, bottom: rotated ? 72 : 52, containLabel: true },
+      // right: extra room when a right axis is present so its labels/name fit.
+      grid: { left: 60, right: hasRight ? 56 : 24, top: title ? 44 : 20, bottom: rotated ? 72 : 52, containLabel: true },
       xAxis: { type: "category", data: categoryData, ...AXIS_STYLE, axisLabel: { ...AXIS_STYLE.axisLabel, rotate: rotated ? 30 : 0 } },
-      yAxis: { type: "value", ...AXIS_STYLE },
+      yAxis,
       series,
     };
   }
 
   function render() {
     if (!chart || !container) return;
-    const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.title);
+    const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.rightYFields, props.seg.title);
     chart.setOption(opt, true);
   }
 
@@ -311,7 +335,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
     currentTheme();
     render();
     if (fullscreenChart) {
-      const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.title);
+      const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.rightYFields, props.seg.title);
       fullscreenChart.setOption(opt, true);
     }
   });
@@ -345,7 +369,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
     render();
     // Also update the fullscreen chart if it's open
     if (fullscreenChart) {
-      const opt = buildOption(t, props.seg.table, props.seg.xField, props.seg.yFields, props.seg.title);
+      const opt = buildOption(t, props.seg.table, props.seg.xField, props.seg.yFields, props.seg.rightYFields, props.seg.title);
       fullscreenChart.setOption(opt, true);
     }
   }
@@ -442,7 +466,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
                     fullscreenContainer = el;
                     
                     fullscreenChart = echarts.init(el);
-                    const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.title);
+                    const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.rightYFields, props.seg.title);
                     fullscreenChart.setOption(opt);
                     
                     // Trigger initial resize in the next frame to ensure Portal layout calculations are complete

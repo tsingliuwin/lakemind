@@ -83,10 +83,11 @@ export function pushChart(
   segments: Segment[],
   chart: {
     id: string;
-    chartType: "bar" | "line" | "pie" | "scatter";
+    chartType: "bar" | "line" | "pie" | "scatter" | "funnel" | "gauge";
     title?: string;
     xField?: string;
     yFields?: string[];
+    rightYFields?: string[];
     table: SqlResult;
   },
 ): Segment[] {
@@ -104,6 +105,7 @@ export function pushChart(
       title: chart.title,
       xField: chart.xField,
       yFields: chart.yFields,
+      rightYFields: chart.rightYFields,
       table: chart.table,
     },
   ];

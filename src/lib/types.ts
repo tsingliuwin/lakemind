@@ -201,6 +201,8 @@ export type Segment =
       xField?: string;
       /** Y 轴 / 数值列名（多列 = 多系列）。 */
       yFields?: string[];
+      /** 双 Y 轴：放到右轴的列名子集（须为 yFields 子集）；缺省=全部在左轴。 */
+      rightYFields?: string[];
       /** 原始查询数据（用于渲染 + 切换类型时重算）。 */
       table: SqlResult;
     }
