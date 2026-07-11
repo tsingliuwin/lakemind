@@ -3962,7 +3962,16 @@ button.lm-select-trigger:hover:not(:disabled) {
 }
 
 .btn-prefix {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 12px;
+}
+
+.btn-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn-caret svg {
