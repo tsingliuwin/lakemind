@@ -911,7 +911,10 @@ select:hover:not(:disabled) {
 }
 .tree-leaf.selected {
   background: var(--bg-active);
-  color: #fff;
+  color: var(--text-primary);
+}
+.tree-leaf.selected .task-time {
+  color: var(--text-secondary) !important;
 }
 .tree-section-header {
   display: flex;
