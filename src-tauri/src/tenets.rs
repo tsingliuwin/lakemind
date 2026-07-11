@@ -25,9 +25,17 @@ use std::path::{Path, PathBuf};
 // human-editable as real .md files and version-controlled with the source.
 const SEED_INDEX: &str = include_str!("tenets_seed/index.md");
 const SEED_CORE_INDEX: &str = include_str!("tenets_seed/core/index.md");
+const SEED_GENERAL_PRINCIPLES: &str = include_str!("tenets_seed/core/general-principles.md");
 const SEED_DATA_DISCIPLINE: &str = include_str!("tenets_seed/core/data-discipline.md");
+const SEED_DATA_PROFILING: &str = include_str!("tenets_seed/core/data-profiling.md");
+const SEED_DATA_CLEANING: &str = include_str!("tenets_seed/core/data-cleaning.md");
+const SEED_DATA_ANALYSIS: &str = include_str!("tenets_seed/core/data-analysis.md");
+const SEED_DATA_PRESENTATION: &str = include_str!("tenets_seed/core/data-presentation.md");
+const SEED_META_GOVERNANCE: &str = include_str!("tenets_seed/core/meta-governance.md");
 const SEED_INDUSTRY_INDEX: &str = include_str!("tenets_seed/industry/index.md");
-const SEED_EDUCATION: &str = include_str!("tenets_seed/industry/education.md");
+const SEED_EDUCATION_INDEX: &str = include_str!("tenets_seed/industry/education/index.md");
+const SEED_EDUCATION_K12: &str = include_str!("tenets_seed/industry/education/k12.md");
+const SEED_EDUCATION_POSTGRAD: &str = include_str!("tenets_seed/industry/education/postgrad.md");
 const SEED_TOURISM: &str = include_str!("tenets_seed/industry/tourism.md");
 const SEED_REALESTATE: &str = include_str!("tenets_seed/industry/realestate.md");
 const SEED_TOPIC_INDEX: &str = include_str!("tenets_seed/topic/index.md");
@@ -38,9 +46,17 @@ const SEED_GROWTH: &str = include_str!("tenets_seed/topic/growth.md");
 const SEED_FILES: &[(&str, &str)] = &[
     ("index.md", SEED_INDEX),
     ("core/index.md", SEED_CORE_INDEX),
+    ("core/general-principles.md", SEED_GENERAL_PRINCIPLES),
     ("core/data-discipline.md", SEED_DATA_DISCIPLINE),
+    ("core/data-profiling.md", SEED_DATA_PROFILING),
+    ("core/data-cleaning.md", SEED_DATA_CLEANING),
+    ("core/data-analysis.md", SEED_DATA_ANALYSIS),
+    ("core/data-presentation.md", SEED_DATA_PRESENTATION),
+    ("core/meta-governance.md", SEED_META_GOVERNANCE),
     ("industry/index.md", SEED_INDUSTRY_INDEX),
-    ("industry/education.md", SEED_EDUCATION),
+    ("industry/education/index.md", SEED_EDUCATION_INDEX),
+    ("industry/education/k12.md", SEED_EDUCATION_K12),
+    ("industry/education/postgrad.md", SEED_EDUCATION_POSTGRAD),
     ("industry/tourism.md", SEED_TOURISM),
     ("industry/realestate.md", SEED_REALESTATE),
     ("topic/index.md", SEED_TOPIC_INDEX),
@@ -488,13 +504,13 @@ mod tests {
                 .tags
                 .iter()
                 .any(|t| t.to_lowercase().contains(q));
-        let matched_edu = SEED_EDUCATION.to_lowercase().contains(q);
+        let matched_edu = SEED_EDUCATION_K12.to_lowercase().contains(q);
         assert!(matched_core || matched_edu, "seed should mention 归因");
     }
 
     #[test]
     fn tag_filter_exact_match() {
-        let tags = parse_yaml_tags(SEED_EDUCATION);
+        let tags = parse_yaml_tags(SEED_EDUCATION_K12);
         assert!(tags.iter().any(|t| t.eq_ignore_ascii_case("industry:education")));
         // prefix-only must NOT match a namespaced tag
         assert!(!tags.iter().any(|t| t.eq_ignore_ascii_case("industry")));
