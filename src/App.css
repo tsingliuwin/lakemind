@@ -5578,14 +5578,13 @@ button.lm-select-trigger:hover:not(:disabled) {
   display: flex;
   align-items: stretch;
   box-sizing: border-box;
-  padding: 16px 24px 24px;
+  padding: 24px;
 }
 .chart-fullscreen-canvas {
   width: 100%;
   height: 100%;
-  background: var(--bg-surface);
-  border-radius: var(--radius-card);
-  border: 1px solid var(--border-faint);
+  background: transparent;
+  border: none;
   box-sizing: border-box;
 }
 .chart-seg__label {
