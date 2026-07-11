@@ -1,6 +1,7 @@
 name: CI Cache Warmer
 
 on:
+  workflow_dispatch:  # 手动触发预热
   push:
     branches:
       - main
