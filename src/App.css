@@ -83,35 +83,35 @@
 
 /* --- ZCode 3.0 Premium Light Theme Hues --- */
 :root.light {
-  --bg-base: #f3f4f6;        /* Light canvas backdrop */
+  --bg-base: #f8fafc;        /* Slate-50: clean, premium backdrop */
   --bg-surface: #ffffff;     /* Sidebar and light panel background */
-  --bg-elevated: #f9fafb;    /* Cards, dropdowns, editor box */
-  --bg-hover: #f3f4f6;       /* Row hover state */
-  --bg-active: #e5e7eb;      /* Selected list item / active tab state */
-  --border-faint: #e5e7eb;   /* Thin dividers */
-  --border-strong: #d1d5db;  /* Defined borders, headers, buttons */
+  --bg-elevated: #ffffff;    /* Cards, dropdowns, editor box */
+  --bg-hover: #f1f5f9;       /* Slate-100: subtle, soft hover state */
+  --bg-active: #e2e8f0;      /* Slate-200: clean active state */
+  --border-faint: #f1f5f9;   /* Slate-100: thin, elegant dividers */
+  --border-strong: #e2e8f0;  /* Slate-200: defined borders, headers, buttons */
 
-  --text-primary: #111827;   /* Main text, headings */
-  --text-secondary: #4b5563; /* Subtitles, shortcut labels, inactive states */
-  --text-dim: #9ca3af;       /* Placeholders, disabled markers */
+  --text-primary: #0f172a;   /* Slate-900: deep charcoal for main text */
+  --text-secondary: #475569; /* Slate-600: clean gray-blue for secondary text */
+  --text-dim: #94a3b8;       /* Slate-400: placeholders, disabled states */
   
-  --bg-pill-outer: #f1f2f5;
+  --bg-pill-outer: #f1f5f9;
   --bg-pill-inner: #ffffff;
   
-  --accent-blue: #2563eb;
-  --accent-blue-hover: #1d4ed8;
-  --accent-green: #059669;
-  --accent-green-bg: #ecfdf5;
-  --text-success: #059669;
-  --accent-amber: #d97706;
-  --accent-amber-bg: #fef3c7;
-  --accent-red: #dc2626;
-  --accent-red-bg: #fee2e2;
-  --text-danger: #dc2626;
+  --accent-blue: #4f46e5;    /* Indigo-600: premium brand color */
+  --accent-blue-hover: #4338ca; /* Indigo-700 */
+  --accent-green: #10b981;   /* Emerald-500: clean status green */
+  --accent-green-bg: #f0fdf4; /* Emerald-50 */
+  --text-success: #10b981;
+  --accent-amber: #d97706;   /* Amber-600 */
+  --accent-amber-bg: #fffbeb; /* Amber-50 */
+  --accent-red: #ef4444;     /* Red-500: crisp danger red */
+  --accent-red-bg: #fef2f2;  /* Red-50 */
+  --text-danger: #ef4444;
 
   /* --- CodeMirror selection highlight (readable on white) --- */
-  --cm-selection-bg: rgba(37, 99, 235, 0.16);
-  --cm-selection-bg-focused: rgba(37, 99, 235, 0.27);
+  --cm-selection-bg: rgba(79, 70, 229, 0.12);
+  --cm-selection-bg-focused: rgba(79, 70, 229, 0.22);
 }
 
 * {
