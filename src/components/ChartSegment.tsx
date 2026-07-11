@@ -35,14 +35,14 @@ function getThemeStyles(theme: Theme) {
     isLight,
     palette: isLight
       ? [
-          "#3b82f6", // blue
-          "#10b981", // green
-          "#f59e0b", // amber
-          "#8b5cf6", // purple
-          "#f97316", // orange
-          "#ef4444", // red
-          "#06b6d4", // cyan
-          "#d946ef", // pink
+          "#4f46e5", // indigo-600 (main brand tone)
+          "#0ea5e9", // sky-500 (clean sky accent)
+          "#10b981", // emerald-500 (fresh status green)
+          "#f59e0b", // amber-500 (warm amber)
+          "#f43f5e", // rose-500 (rose-red instead of pure red)
+          "#8b5cf6", // purple-500 (vibrant violet)
+          "#f97316", // orange-500 (crisp orange)
+          "#64748b", // slate-500 (sophisticated gray)
         ]
       : [
           "#5b8ff9", // blue
@@ -54,15 +54,15 @@ function getThemeStyles(theme: Theme) {
           "#6dc8ec", // cyan
           "#945fb9", // violet
         ],
-    axisLineColor: isLight ? "#d1d5db" : "#3a3a3e",
-    axisTickColor: isLight ? "#d1d5db" : "#3a3a3e",
-    axisLabelColor: isLight ? "#4b5563" : "#9aa0a6",
-    splitLineColor: isLight ? "#e5e7eb" : "#1f1f22",
+    axisLineColor: isLight ? "#e5e7eb" : "#3a3a3e",
+    axisTickColor: isLight ? "#e5e7eb" : "#3a3a3e",
+    axisLabelColor: isLight ? "#6b7280" : "#9aa0a6",
+    splitLineColor: isLight ? "#f3f4f6" : "#1f1f22",
     tooltipBg: isLight ? "#ffffff" : "#18181b",
     tooltipBorder: isLight ? "#e5e7eb" : "#3a3a3e",
-    tooltipText: isLight ? "#111827" : "#e6e7eb",
-    textColor: isLight ? "#111827" : "#e6e7eb",
-    legendColor: isLight ? "#4b5563" : "#9aa0a6",
+    tooltipText: isLight ? "#374151" : "#e6e7eb",
+    textColor: isLight ? "#1f2937" : "#e6e7eb",
+    legendColor: isLight ? "#6b7280" : "#9aa0a6",
     lineStyleColor: isLight ? "#e5e7eb" : "#5c6066",
     gaugeLineColor: isLight ? "#e5e7eb" : "#2a2a2e",
   };
@@ -123,9 +123,10 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
       borderColor: styles.tooltipBorder,
       borderWidth: 1,
       padding: [8, 12],
-      borderRadius: 6,
-      shadowColor: "rgba(0, 0, 0, 0.12)",
-      shadowBlur: 8,
+      borderRadius: 8,
+      shadowColor: styles.isLight ? "rgba(0, 0, 0, 0.05)" : "rgba(0, 0, 0, 0.3)",
+      shadowBlur: 10,
+      shadowOffsetY: 4,
       textStyle: { color: styles.tooltipText, fontSize: 12, fontFamily: "var(--font-sans)" },
     };
 
