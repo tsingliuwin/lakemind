@@ -88,6 +88,7 @@ export function pushChart(
     xField?: string;
     yFields?: string[];
     rightYFields?: string[];
+    yFieldLabels?: Record<string, string>;
     table: SqlResult;
   },
 ): Segment[] {
@@ -106,6 +107,7 @@ export function pushChart(
       xField: chart.xField,
       yFields: chart.yFields,
       rightYFields: chart.rightYFields,
+      yFieldLabels: chart.yFieldLabels,
       table: chart.table,
     },
   ];

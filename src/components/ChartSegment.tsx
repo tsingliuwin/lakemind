@@ -104,7 +104,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
   }
 
   /** Build ECharts option from SqlResult + chart config. */
-  function buildOption(type: ChartType, table: SqlResult, xField?: string, yFields?: string[], rightYFields?: string[], title?: string): echarts.EChartsOption {
+  function buildOption(type: ChartType, table: SqlResult, xField?: string, yFields?: string[], rightYFields?: string[], yFieldLabels?: Record<string, string>, title?: string): echarts.EChartsOption {
     const cols = table.columns;
     // Determine column indices.
     const xIdx = xField ? cols.indexOf(xField) : findDimensionCol(table.columnTypes);
@@ -119,6 +119,11 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
     };
 
     const AXIS_NAME_STYLE = { color: styles.axisLabelColor, fontSize: 11, fontFamily: "var(--font-sans)" };
+
+    // Human-readable label (with unit) for a y-field column; falls back to the
+    // raw column name when no label is provided. Used in legend + axis names so
+    // readers can see units (e.g. "销售额(万元)") directly on the chart.
+    const labelOf = (col: string) => (yFieldLabels && yFieldLabels[col]) ? yFieldLabels[col] : col;
 
     const TOOLTIP_STYLE = {
       backgroundColor: styles.tooltipBg,
@@ -255,8 +260,8 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
     const rightCols = yCols.filter((yn) => rightSet.has(yn));
     // Name each axis only when it carries a single series — the legend covers
     // the multi-series case and a long joined name would just clutter the axis.
-    const leftAxisName = leftCols.length === 1 ? leftCols[0] : undefined;
-    const rightAxisName = rightCols.length === 1 ? rightCols[0] : undefined;
+    const leftAxisName = leftCols.length === 1 ? labelOf(leftCols[0]) : undefined;
+    const rightAxisName = rightCols.length === 1 ? labelOf(rightCols[0]) : undefined;
 
     const categoryData = table.rows.map((r) => String(r[xIdx >= 0 ? xIdx : 0] ?? ""));
     const rotated = categoryData.length > 8;
@@ -264,7 +269,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
       const yi = cols.indexOf(yn);
       const baseColor = styles.palette[colorOffset % styles.palette.length];
       return {
-        name: yn,
+        name: labelOf(yn),
         type,
         yAxisIndex: rightSet.has(yn) ? 1 : 0,
         data: table.rows.map((r) => num(r[yi])),
@@ -309,7 +314,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
           { type: "value" as const, position: "left" as const, name: leftAxisName, nameTextStyle: AXIS_NAME_STYLE, ...AXIS_STYLE },
           { type: "value" as const, position: "right" as const, name: rightAxisName, nameTextStyle: AXIS_NAME_STYLE, ...AXIS_STYLE, splitLine: { show: false } },
         ]
-      : { type: "value" as const, ...AXIS_STYLE };
+      : { type: "value" as const, name: yCols.length === 1 ? labelOf(yCols[0]) : undefined, nameTextStyle: AXIS_NAME_STYLE, ...AXIS_STYLE };
     return {
       color: styles.palette,
       title: title ? TITLE_STYLE(title) : undefined,
@@ -326,7 +331,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
 
   function render() {
     if (!chart || !container) return;
-    const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.rightYFields, props.seg.title);
+    const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.rightYFields, props.seg.yFieldLabels, props.seg.title);
     chart.setOption(opt, true);
   }
 
@@ -335,7 +340,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
     currentTheme();
     render();
     if (fullscreenChart) {
-      const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.rightYFields, props.seg.title);
+      const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.rightYFields, props.seg.yFieldLabels, props.seg.title);
       fullscreenChart.setOption(opt, true);
     }
   });
@@ -369,7 +374,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
     render();
     // Also update the fullscreen chart if it's open
     if (fullscreenChart) {
-      const opt = buildOption(t, props.seg.table, props.seg.xField, props.seg.yFields, props.seg.rightYFields, props.seg.title);
+      const opt = buildOption(t, props.seg.table, props.seg.xField, props.seg.yFields, props.seg.rightYFields, props.seg.yFieldLabels, props.seg.title);
       fullscreenChart.setOption(opt, true);
     }
   }
@@ -466,7 +471,7 @@ export default function ChartSegment(props: { seg: Extract<Segment, { type: "cha
                     fullscreenContainer = el;
                     
                     fullscreenChart = echarts.init(el);
-                    const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.rightYFields, props.seg.title);
+                    const opt = buildOption(chartType(), props.seg.table, props.seg.xField, props.seg.yFields, props.seg.rightYFields, props.seg.yFieldLabels, props.seg.title);
                     fullscreenChart.setOption(opt);
                     
                     // Trigger initial resize in the next frame to ensure Portal layout calculations are complete

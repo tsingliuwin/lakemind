@@ -7,6 +7,7 @@ use tauri::Emitter;
 use super::wire::{AgentStreamEvent, Segment};
 use crate::model::SqlResult;
 use crate::usage::{self};
+use std::collections::HashMap;
 
 pub(super) fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -122,6 +123,7 @@ pub(super) fn emit_chart(
     x_field: Option<&str>,
     y_fields: Option<&[String]>,
     right_y_fields: Option<&[String]>,
+    y_field_labels: Option<&HashMap<String, String>>,
     table: SqlResult,
 ) {
     emit_event(window, task_id, "chart", None, Some(Segment::Chart {
@@ -131,6 +133,7 @@ pub(super) fn emit_chart(
         x_field: x_field.map(|s| s.to_string()),
         y_fields: y_fields.map(|v| v.to_vec()),
         right_y_fields: right_y_fields.map(|v| v.to_vec()),
+        y_field_labels: y_field_labels.cloned(),
         table,
     }));
 }

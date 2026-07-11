@@ -311,6 +311,7 @@ export default function App() {
               xField: s.xField,
               yFields: s.yFields,
               rightYFields: s.rightYFields,
+              yFieldLabels: s.yFieldLabels,
               table: s.table,
             });
             // A DDL tool just finished (created/dropped a table or view) —

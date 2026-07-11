@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use rig_core::{completion::ToolDefinition, tool::Tool};
+use std::collections::HashMap;
 
 use super::super::config::get_query_hard_timeout;
 use super::super::error::ToolError;
@@ -20,6 +21,8 @@ pub(crate) struct RenderChartArgs {
     y_fields: Option<Vec<String>>,
     #[serde(default)]
     right_y_fields: Option<Vec<String>>,
+    #[serde(default)]
+    y_field_labels: Option<HashMap<String, String>>,
     #[serde(default)]
     title: Option<String>,
 }
@@ -61,6 +64,7 @@ impl Tool for RenderChartTool {
                     "x_field": { "type": "string", "description": "X 轴/分类列名（饼图时为名称列）" },
                     "y_fields": { "type": "array", "items": { "type": "string" }, "description": "Y 轴/数值列名，支持多列（多系列）。饼图时取第一个" },
                     "right_y_fields": { "type": "array", "items": { "type": "string" }, "description": "双 Y 轴：放到右轴的列名（须为 y_fields 的子集）。仅当序列数量级差异大、单轴会把小量级序列压成直线时使用；同量级同语义序列不要分轴。默认全部在左轴" },
+                    "y_field_labels": { "type": "object", "additionalProperties": { "type": "string" }, "description": "列名→可读标签（含单位）的映射，键为列名、值为带单位的可读名（如 revenue→销售额(万元)，conv_rate→转化率(%)）。图例与轴名会用它显示单位；未指定的列沿用列名" },
                     "title": { "type": "string", "description": "图表标题（可选）" }
                 },
                 "required": ["sql", "chart_type"]
@@ -92,6 +96,7 @@ impl Tool for RenderChartTool {
             "x_field": args.x_field,
             "y_fields": args.y_fields,
             "right_y_fields": args.right_y_fields,
+            "y_field_labels": args.y_field_labels,
         }));
 
         let start = std::time::Instant::now();
@@ -129,6 +134,7 @@ impl Tool for RenderChartTool {
                     args.x_field.as_deref(),
                     args.y_fields.as_deref(),
                     args.right_y_fields.as_deref(),
+                    args.y_field_labels.as_ref(),
                     table,
                 );
                 let summary = format!("已生成{}图，共 {} 个数据点", chart_type_cn(&args.chart_type), row_count);

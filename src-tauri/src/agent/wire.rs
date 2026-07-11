@@ -6,6 +6,7 @@
 //! when the matching tool_result event arrives (updated in place by id).
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::model::SqlResult;
 
@@ -57,6 +58,8 @@ pub enum Segment {
         y_fields: Option<Vec<String>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         right_y_fields: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y_field_labels: Option<HashMap<String, String>>,
         table: SqlResult,
     },
     /// Terminal/agent execution error.

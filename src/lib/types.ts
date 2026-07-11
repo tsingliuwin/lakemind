@@ -203,6 +203,8 @@ export type Segment =
       yFields?: string[];
       /** 双 Y 轴：放到右轴的列名子集（须为 yFields 子集）；缺省=全部在左轴。 */
       rightYFields?: string[];
+      /** 列名→可读标签（含单位）映射；图例与轴名用它显示单位，未指定沿用列名。 */
+      yFieldLabels?: Record<string, string>;
       /** 原始查询数据（用于渲染 + 切换类型时重算）。 */
       table: SqlResult;
     }
