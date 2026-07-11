@@ -5503,6 +5503,9 @@ button.lm-select-trigger:hover:not(:disabled) {
   flex-direction: column;
   box-sizing: border-box;
 }
+:root.light .chart-fullscreen-overlay {
+  background: rgba(248, 250, 252, 0.85);
+}
 .chart-fullscreen-header {
   height: 52px;
   padding: 0 24px;
@@ -5513,6 +5516,9 @@ button.lm-select-trigger:hover:not(:disabled) {
   justify-content: space-between;
   box-sizing: border-box;
   flex-shrink: 0;
+}
+:root.light .chart-fullscreen-header {
+  background: rgba(255, 255, 255, 0.4);
 }
 .chart-fullscreen-header.mac-padding {
   padding-left: 80px;
@@ -5555,7 +5561,7 @@ button.lm-select-trigger:hover:not(:disabled) {
   transition: background 0.15s ease, color 0.15s ease;
 }
 .chart-fullscreen-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-hover);
   color: var(--text-primary);
 }
 .chart-fullscreen-body {
