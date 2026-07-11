@@ -785,7 +785,7 @@ export default function ChatView(props: {
                             class="token-usage-panel__bar-fill"
                             style={{
                               width: `${Math.max(0, Math.min(100, m().capacity.pct))}%`,
-                              background: m().capacity.pct >= 90 ? "#ef4444" : m().capacity.pct >= 70 ? "#f6bd16" : "#5b8ff9",
+                              background: m().capacity.pct >= 90 ? "var(--accent-red)" : m().capacity.pct >= 70 ? "var(--accent-amber)" : "var(--accent-blue)",
                             }}
                           />
                         </div>

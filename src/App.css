@@ -5252,11 +5252,14 @@ button.lm-select-trigger:hover:not(:disabled) {
   width: 280px;
   padding: 16px 20px;
   border-radius: 12px;
-  background: #18181c;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.1);
   z-index: 100;
   box-sizing: border-box;
+}
+:root.light .token-usage-panel {
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08), 0 4px 12px rgba(15, 23, 42, 0.04);
 }
 .token-usage-wrap:hover .token-usage-panel {
   display: block;
@@ -5270,31 +5273,31 @@ button.lm-select-trigger:hover:not(:disabled) {
 .token-usage-panel__title {
   font-size: 13px;
   font-weight: 500;
-  color: #eeeeef;
+  color: var(--text-primary);
 }
 .token-usage-panel__capacity {
   font-size: 12px;
   font-weight: 400;
-  color: #8e8e93;
+  color: var(--text-secondary);
 }
 .token-usage-panel__bar {
   height: 6px;
   border-radius: 3px;
   overflow: hidden;
-  background: #242428;
+  background: var(--bg-hover);
   margin-bottom: 16px;
 }
 .token-usage-panel__bar-fill {
   height: 100%;
-  background: #5b8ff9;
+  background: var(--accent-blue);
   border-radius: 3px;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s ease;
 }
 .token-usage-panel__bar-fill--warn {
-  background: #f6bd16;
+  background: var(--accent-amber);
 }
 .token-usage-panel__bar-fill--danger {
-  background: #ef4444;
+  background: var(--accent-red);
 }
 .token-usage-panel__list {
   display: flex;
@@ -5307,7 +5310,7 @@ button.lm-select-trigger:hover:not(:disabled) {
   align-items: center;
   gap: 12px;
   font-size: 12px;
-  color: #a1a1aa;
+  color: var(--text-secondary);
   line-height: 1.4;
 }
 .token-usage-panel__dot {
@@ -5316,23 +5319,24 @@ button.lm-select-trigger:hover:not(:disabled) {
   border-radius: 50%;
   justify-self: center;
 }
-.token-usage-panel__dot--msg { background: #5b8ff9; }
-.token-usage-panel__dot--tools { background: #f6bd16; }
+.token-usage-panel__dot--msg { background: var(--accent-blue); }
+.token-usage-panel__dot--tools { background: var(--accent-amber); }
 .token-usage-panel__dot--preamble { background: #7262fd; }
-.token-usage-panel__dot--hitrate { background: #61ddaa; }
+:root.light .token-usage-panel__dot--preamble { background: #8b5cf6; }
+.token-usage-panel__dot--hitrate { background: var(--accent-green); }
 
 .token-usage-panel__label {
-  color: #a1a1aa;
+  color: var(--text-secondary);
   font-size: 12px;
 }
 .token-usage-panel__value {
-  color: #eeeeef;
+  color: var(--text-primary);
   font-size: 12px;
   font-weight: 500;
   text-align: right;
 }
 .token-usage-panel__value--green {
-  color: #61ddaa;
+  color: var(--accent-green);
 }
 .token-usage-panel__spacer {
   height: 12px;
