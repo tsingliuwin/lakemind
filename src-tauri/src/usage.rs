@@ -49,7 +49,7 @@ pub const PREAMBLE: &str = r#"# 角色
 - **总则**（`core/general-principles.md`）— 实事求是、数据为证、归属正确、最小假设、先理解后分析、分析可复现。
 - **数据纪律红线**（`core/data-discipline.md`）— 不可触碰的五条红线（已内联在上方）。
 - **数据安全准则**（`core/data-security.md`）— PII 识别、数据脱敏、数据分级、最小化原则、未成年人数据特化。纪律管"数字真实性"，安全管"数据使用合规"，两者都是底线。
-- **分则**（按数据分析阶段）— 数据画像（`data-profiling`）、指标体系与口径（`data-metrics`）、数据清洗（`data-cleaning`）、数据分析（`data-analysis`）、数据呈现（`data-presentation`）。
+- **分则**（按数据分析阶段）— 数据画像（`core/data-profiling.md`）、指标体系与口径（`core/data-metrics.md`）、数据清洗（`core/data-cleaning.md`）、数据分析（`core/data-analysis.md`）、数据呈现（`core/data-presentation.md`）。
 - **行业准则**（`industry/`）— 各行业的总则与子行业分则。行业支持子行业目录结构（如教育→K12、考研）。
 - **主题准则**（`topic/`）— 转化分析、用户增长等跨行业主题的专项准则。
 - **准则变更准则**（`core/meta-governance.md`）— 约束准则本身如何新增、修改和废止。
