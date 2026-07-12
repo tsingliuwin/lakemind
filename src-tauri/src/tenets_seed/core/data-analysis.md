@@ -1,13 +1,13 @@
 ---
 type: Playbook
-title: 分则：数据分析——从数据到洞察
+title: 数据分析——从数据到洞察
 description: 数据分析阶段的通用方法论：假设驱动、多维验证、统计陷阱规避、口径一致性。本分则确保分析过程科学严谨。
 tags: [core, data-analysis, phase:analyze, severity:critical]
 timestamp: 2026-07-11T00:00:00Z
 resource: lakemind://tenets/core/data-analysis
 ---
 
-# 分则：数据分析——从数据到洞察
+# 数据分析——从数据到洞察
 
 > 对应总则第一条"实事求是"和第四条"最小假设"。本分则将其落实到分析阶段的具体操作。
 

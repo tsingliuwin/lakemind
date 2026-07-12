@@ -1,13 +1,13 @@
 ---
 type: Playbook
-title: 分则：数据清洗——从原始数据到高质量数据表
+title: 数据清洗——从原始数据到高质量数据表
 description: 数据清洗是把原始脏数据变成高质量、可直接分析的数据表的过程。本分则定义了识别脏数据、选择清洗策略、保证清洗可追溯的标准流程。
 tags: [core, data-cleaning, phase:clean, severity:critical]
 timestamp: 2026-07-11T00:00:00Z
 resource: lakemind://tenets/core/data-cleaning
 ---
 
-# 分则：数据清洗——从原始数据到高质量数据表
+# 数据清洗——从原始数据到高质量数据表
 
 > 对应总则第五条"先理解后分析"。数据画像（`core/data-profiling.md`）发现了脏数据，本分则定义如何清洗。
 

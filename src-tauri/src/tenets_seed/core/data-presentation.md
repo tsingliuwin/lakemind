@@ -1,13 +1,13 @@
 ---
 type: Playbook
-title: 分则：数据呈现——如何展示分析结果
+title: 数据呈现——如何展示分析结果
 description: 分析结果的呈现直接影响决策质量。本分则定义了图表选择、数字精度、结论表达的标准。
 tags: [core, data-presentation, phase:present, severity:important]
 timestamp: 2026-07-11T00:00:00Z
 resource: lakemind://tenets/core/data-presentation
 ---
 
-# 分则：数据呈现——如何展示分析结果
+# 数据呈现——如何展示分析结果
 
 > 对应总则第二条"数据为证"。分析得再好，呈现不清楚就等于白做。本分则确保分析结果以最有效的方式传达。
 

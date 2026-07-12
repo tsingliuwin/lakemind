@@ -1,13 +1,13 @@
 ---
 type: Playbook
-title: 分则：指标体系与口径管理——把指标定义清楚
+title: 指标体系与口径管理——把指标定义清楚
 description: 多数张冠李戴的根因是口径没管好。本分则定义指标定义五要素、口径文档化、同名不同义陷阱、口径变更管理。在动手分析前先把指标定义清楚，从根上预防归属错误。
 tags: [core, data-metrics, phase:define, error-type:attribution, severity:critical]
 timestamp: 2026-07-11T00:00:00Z
 resource: lakemind://tenets/core/data-metrics
 ---
 
-# 分则：指标体系与口径管理——把指标定义清楚
+# 指标体系与口径管理——把指标定义清楚
 
 > 对应总则第三条"归属正确"和第六条"分析可复现"。数据纪律红线第 2 条"禁止张冠李戴"是最危险的错误——而**多数张冠李戴的根因，是指标口径没管好**。本分则从源头预防：动手分析前，先把指标定义清楚。
 

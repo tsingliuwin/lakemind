@@ -1,13 +1,13 @@
 ---
 type: Playbook
-title: 总则：数据分析根本原则
+title: 数据分析根本原则
 description: 跨行业、跨主题普适的根本原则（实事求是、数据为证、归属正确、最小假设、先理解后分析、分析可复现）。所有分则、行业准则、主题准则都必须在总则框架下制定，不得与之冲突。总则是准则体系的"宪法第一章"。
 tags: [core, general-principles, severity:constitutional]
 timestamp: 2026-07-11T00:00:00Z
 resource: lakemind://tenets/core/general-principles
 ---
 
-# 总则：数据分析根本原则
+# 数据分析根本原则
 
 本章是 LakeMind 准则体系的最高级别准则——所有分则、行业准则、主题准则都在此框架下制定，不得与之冲突。违反总则中的任何一条，等同于分析结论无效。
 

@@ -1,13 +1,13 @@
 ---
 type: Playbook
-title: 分则：数据画像——如何了解你的数据
+title: 数据画像——如何了解你的数据
 description: 拿到数据后的第一步不是分析，而是画像：搞清楚数据的时间范围、获取方式、字段含义和数据质量。盲目分析等于在未知地基上建楼。
 tags: [core, data-profiling, phase:explore, severity:critical]
 timestamp: 2026-07-11T00:00:00Z
 resource: lakemind://tenets/core/data-profiling
 ---
 
-# 分则：数据画像——如何了解你的数据
+# 数据画像——如何了解你的数据
 
 > 对应总则第五条"先理解后分析"。本分则将其落实到具体的操作步骤。
 
