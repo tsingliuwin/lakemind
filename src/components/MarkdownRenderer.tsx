@@ -113,9 +113,11 @@ export default function MarkdownRenderer(props: { content: string }) {
       .replace(/<object\b[^>]*>.*?<\/object>/gi, "")
       .replace(/<embed\b[^>]*\/?>/gi, "")
       .replace(/on\w+\s*=/gi, "data-blocked=")
-      // Residual chart-reference markers (e.g. a malformed one the splitter
-      // didn't catch) become a neutral badge rather than leaking raw braces.
-      .replace(/\{\{\s*chart:\s*[^}]*\}\}/g, '<span class="chart-ref-badge">📊</span>');
+      // Residual chart-reference markers become a neutral badge rather than
+      // leaking raw braces. Also matches UNCLOSED markers (mid-stream, before
+      // the closing `}}` arrives) — `[^}<]*` stops at `<` so it won't eat
+      // surrounding HTML tags, and the closing braces are optional.
+      .replace(/\{\{\s*chart:[^}<]*\}?\}?/g, '<span class="chart-ref-badge">📊</span>');
   });
 
   return <div class="md-rendered" innerHTML={html()} />;
