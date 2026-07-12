@@ -58,7 +58,7 @@ export default function ChatView(props: {
     parseInt(localStorage.getItem("chat_width") || "800")
   );
 
-  const startDraggingChatWidth = (e: MouseEvent, side: "left" | "right") => {
+  const startDraggingChatWidth = (e: MouseEvent, _side: "left" | "right") => {
     e.preventDefault();
     document.body.classList.add("dragging-active");
     const stream = scrollEl;

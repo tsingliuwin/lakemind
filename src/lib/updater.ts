@@ -148,8 +148,6 @@ export async function openDownloadPage(): Promise<void> {
  *   - a modal that both entry points can open
  * ------------------------------------------------------------------ */
 
-import { t } from "./i18n";
-
 /** Coarse state of the update state machine. */
 export type UpdateStatus =
   | "idle" // nothing happened yet / reset
@@ -176,7 +174,7 @@ const store = createRoot(() => {
   const [info, setInfo] = createSignal<UpdateStateInfo>({ version: "", notes: "" });
   const [progress, setProgress] = createSignal<DownloadProgress>({ fraction: 0, human: "" });
   const [error, setError] = createSignal("");
-  const [modalOpen, setModalOpen] = createSignal(false);
+  const [modalOpen] = createSignal(false);
 
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let started = false; // idempotent guard: start() may be called from multiple TitleBars

@@ -171,12 +171,6 @@ export default function BottomConsole(props: {
                 const elapsedMs = numFromDetail(log.detail?.elapsedMs);
                 const expanded = () => expandedId() === log.id;
 
-                const detail = log.detail ?? {};
-                const hasSql = typeof detail.sql === "string";
-                const hasError = typeof detail.error === "string" && detail.error.length > 0;
-                const extraFields = Object.entries(detail).filter(([k]) => k !== "sql" && k !== "error");
-                const hasDetail = hasSql || hasError || extraFields.length > 0 || log.workspace || log.taskId;
-
                 return (
                   <div class="log-card" classList={{ expanded: expanded() }}>
                     <div
