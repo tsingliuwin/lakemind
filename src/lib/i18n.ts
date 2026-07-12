@@ -89,7 +89,6 @@ const translations: Record<Language, Record<string, string>> = {
     aboutKernel: "分析引擎",
     aboutEnv: "运行环境",
     aboutArch: "界面架构",
-    settingsM1Placeholder: "设置面板将在 M4 上线。M1 目前是纯算力客户端。",
     latestVersionMsg: "当前已是最新版本",
     // Auto-updater
     updateAvailable: "发现新版本",
@@ -296,7 +295,6 @@ const translations: Record<Language, Record<string, string>> = {
     aboutKernel: "Analytics Engine",
     aboutEnv: "Environment",
     aboutArch: "UI Framework",
-    settingsM1Placeholder: "Settings panel will release in M4. M1 is currently a pure-compute local client.",
     latestVersionMsg: "Already at the latest version",
     // Auto-updater
     updateAvailable: "Update available",
