@@ -1,6 +1,7 @@
-import { createSignal, Show, onMount, For } from "solid-js";
+import { createSignal, Show, onMount, For, createEffect, createMemo } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import Select from "./Select";
+import MarkdownRenderer from "./MarkdownRenderer";
 import { t, currentLanguage, setCurrentLanguage } from "../lib/i18n";
 import { currentTheme, setCurrentTheme, currentZoom, setCurrentZoom, logoSrc } from "../lib/theme";
 import {
@@ -25,7 +26,8 @@ export type SettingsTab =
   | "commands"
   | "indexDb"
   | "stats"
-  | "guide";
+  | "guide"
+  | "systemPrompt";
 
 /** 暂时隐藏的设置 tab：这些功能尚未实现，导航项先不展示。
  *  未来逐步补充内容后，从此集合移除对应项即可恢复显示。 */
@@ -214,6 +216,170 @@ export default function SettingsPage(props: {
   // Sentinel key for the "add new provider" form (which has no provider id yet).
   const NEW_PROVIDER_TEST_KEY = "__new__";
   const [linkedConns, setLinkedConns] = createSignal<Record<string, boolean>>({});
+
+  // ── System prompt & shared tenets (read-only viewer) ──────────────────────
+  // Mirrors the backend `tenets::TenetHit` struct. Loaded lazily only when the
+  // user first opens the "systemPrompt" tab, to avoid fetching on every
+  // settings open.
+  interface TenetHit {
+    concept_id: string;
+    title: string;
+    description: string;
+    tags: string[];
+    preview: string;
+  }
+  const [preambleText, setPreambleText] = createSignal("");
+  const [tenetsList, setTenetsList] = createSignal<TenetHit[]>([]);
+  const [selectedTenetId, setSelectedTenetId] = createSignal<string | null>(null);
+  const [tenetContent, setTenetContent] = createSignal<string>("");
+  const [spLoading, setSpLoading] = createSignal(false);
+  const [spError, setSpError] = createSignal<string | null>(null);
+  const [spLoaded, setSpLoaded] = createSignal(false);
+  const [tenetLoading, setTenetLoading] = createSignal(false);
+  // Sub-tab within the "systemPrompt" tab: 系统提示词 | 共享准则库.
+  const [promptSubTab, setPromptSubTab] = createSignal<"preamble" | "tenets">("preamble");
+
+  const loadSystemPromptData = async () => {
+    if (spLoaded()) return;
+    setSpLoading(true);
+    setSpError(null);
+    try {
+      const [preamble, list] = await Promise.all([
+        invoke<string>("get_system_preamble"),
+        invoke<TenetHit[]>("list_tenets"),
+      ]);
+      setPreambleText(preamble);
+      setTenetsList(list);
+      setSpLoaded(true);
+      // Auto-select the first tenet so the right pane shows content
+      // immediately (no empty placeholder) when the user opens the 准则 sub-tab.
+      if (list.length > 0) {
+        setSelectedTenetId(list[0].concept_id);
+        void loadTenetContent(list[0].concept_id);
+      }
+    } catch (err) {
+      logError("ui", "Failed to load system prompt / tenets", err);
+      setSpError(t("loadFailed"));
+    } finally {
+      setSpLoading(false);
+    }
+  };
+
+  // Lazily fetch the prompt + tenets catalog the first time the tab is opened.
+  createEffect(() => {
+    if (activeTab() === "systemPrompt") {
+      void loadSystemPromptData();
+    }
+  });
+
+  const loadTenetContent = async (conceptId: string) => {
+    setTenetLoading(true);
+    try {
+      const content = await invoke<string>("get_tenet_content", { conceptId });
+      setTenetContent(content);
+    } catch (err) {
+      logError("ui", "Failed to load tenet content", err);
+      setTenetContent(`**${t("loadFailed")}**: ${String(err)}`);
+    } finally {
+      setTenetLoading(false);
+    }
+  };
+
+  const selectTenet = (conceptId: string) => {
+    setSelectedTenetId(conceptId);
+    void loadTenetContent(conceptId);
+  };
+
+  // ── Tenets tree ────────────────────────────────────────────────────────────
+  // Build a nested tree that mirrors the on-disk directory structure of the
+  // bundle (e.g. industry/education/k12.md → industry ▸ education ▸ k12), so
+  // the user sees the real hierarchy, not a flat list. Folders are
+  // collapsible; leaves are selectable tenets.
+  interface TenetNode {
+    /** Bundle-relative path (folder or leaf, no `.md`). */
+    path: string;
+    /** Display label — raw segment for folders, frontmatter title for leaves. */
+    name: string;
+    isFolder: boolean;
+    hit?: TenetHit;
+    children?: TenetNode[];
+  }
+
+  // Collapsed-folder state keyed by folder path. Default empty = all expanded.
+  const [collapsedPaths, setCollapsedPaths] = createSignal<Set<string>>(new Set());
+
+  const toggleFolder = (path: string) => {
+    setCollapsedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  // Build the tree from the flat concept list. Folders sort before leaves;
+  // within a level, alphabetical by name.
+  const tenetTree = createMemo<TenetNode[]>(() => {
+    const root: TenetNode = { path: "", name: "", isFolder: true, children: [] };
+    for (const hit of tenetsList()) {
+      const parts = hit.concept_id.split("/");
+      let cur = root;
+      let acc = "";
+      for (let i = 0; i < parts.length; i++) {
+        const seg = parts[i];
+        acc = acc ? `${acc}/${seg}` : seg;
+        const isLeaf = i === parts.length - 1;
+        if (isLeaf) {
+          cur.children!.push({ path: acc, name: hit.title || seg, isFolder: false, hit });
+        } else {
+          let child = cur.children!.find((c) => c.isFolder && c.name === seg);
+          if (!child) {
+            child = { path: acc, name: seg, isFolder: true, children: [] };
+            cur.children!.push(child);
+          }
+          cur = child;
+        }
+      }
+    }
+    const sortNodes = (nodes: TenetNode[]) => {
+      nodes.sort((a, b) => {
+        if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      nodes.forEach((n) => { if (n.children) sortNodes(n.children); });
+    };
+    sortNodes(root.children!);
+    return root.children!;
+  });
+
+  // Flatten the tree into indented rows, respecting per-folder collapse state.
+  const tenetRows = createMemo(() => {
+    const rows: { depth: number; node: TenetNode }[] = [];
+    const walk = (nodes: TenetNode[], depth: number) => {
+      for (const n of nodes) {
+        rows.push({ depth, node: n });
+        if (n.isFolder && n.children && !collapsedPaths().has(n.path)) {
+          walk(n.children, depth + 1);
+        }
+      }
+    };
+    walk(tenetTree(), 0);
+    return rows;
+  });
+
+  // Top-level folders (core/industry/topic) get a localized label; nested
+  // folders show their raw directory segment, mirroring the on-disk name.
+  const folderLabel = (node: TenetNode) =>
+    node.path.includes("/") ? node.name : categoryLabel(node.path);
+
+  const categoryLabel = (key: string) => {
+    switch (key) {
+      case "core": return t("tenetsCategoryCore");
+      case "industry": return t("tenetsCategoryIndustry");
+      case "topic": return t("tenetsCategoryTopic");
+      default: return t("tenetsCategoryOther");
+    }
+  };
 
   const [formName, setFormName] = createSignal("");
   const [formType, setFormType] = createSignal<"postgres" | "mysql" | "sqlite">("postgres");
@@ -1041,6 +1207,21 @@ export default function SettingsPage(props: {
               </svg>
             </span>
             <span>{t("modelSettings")}</span>
+          </button>
+
+          <button
+            class="ss-nav-item"
+            classList={{ active: activeTab() === "systemPrompt" }}
+            onClick={() => setActiveTab("systemPrompt")}
+          >
+            <span class="ss-nav-icon">
+              <svg class="ss-nav-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 2.5h7l3 3v8a.5.5 0 0 1-.5.5H3.5a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z" />
+                <path d="M9.5 2.5V5.5h3.5" />
+                <path d="M5.5 8h5M5.5 10.5h5M5.5 5.5h2" />
+              </svg>
+            </span>
+            <span>{t("settingsSystemPrompt")}</span>
           </button>
 
           <button
@@ -2377,8 +2558,125 @@ export default function SettingsPage(props: {
           </div>
         </Show>
 
+        {/* 系统提示词与共享准则（只读展示） */}
+        <Show when={activeTab() === "systemPrompt"}>
+          <div class="settings-view-header wide-header">
+            <h2>{t("settingsSystemPrompt")}</h2>
+          </div>
+
+          <div class="settings-panel-box single-col sp-prompt-panel">
+            {/* 子 tab：系统提示词 / 共享准则库 */}
+            <div class="sp-subtabs">
+              <button
+                class="sp-subtab"
+                classList={{ active: promptSubTab() === "preamble" }}
+                onClick={() => setPromptSubTab("preamble")}
+              >
+                {t("systemPromptSection")}
+              </button>
+              <button
+                class="sp-subtab"
+                classList={{ active: promptSubTab() === "tenets" }}
+                onClick={() => setPromptSubTab("tenets")}
+              >
+                {t("tenetsSection")}
+              </button>
+            </div>
+
+            {/* 系统提示词 */}
+            <Show when={promptSubTab() === "preamble"}>
+              <div class="settings-section-card sp-prompt-card">
+                <div class="sp-section-head">
+                  <span class="sp-section-desc">{t("systemPromptDesc")}</span>
+                </div>
+                <Show
+                  when={!spLoading()}
+                  fallback={<div class="sp-inline-loading"><span class="mt-spin" />{t("loading")}</div>}
+                >
+                  <Show
+                    when={!spError()}
+                    fallback={<div class="sp-error-text">{spError()}</div>}
+                  >
+                    <div class="sp-preamble-scroll">
+                      <MarkdownRenderer content={preambleText()} />
+                    </div>
+                  </Show>
+                </Show>
+              </div>
+            </Show>
+
+            {/* 共享准则库 — 左目录 + 右内容，进入即展示首条准则全文 */}
+            <Show when={promptSubTab() === "tenets"}>
+              <div class="settings-section-card sp-prompt-card sp-tenets-card">
+                <div class="sp-section-head">
+                  <span class="sp-section-desc">{t("tenetsDesc")}</span>
+                </div>
+                <Show
+                  when={!spLoading()}
+                  fallback={<div class="sp-inline-loading"><span class="mt-spin" />{t("loading")}</div>}
+                >
+                  <Show
+                    when={!spError()}
+                    fallback={<div class="sp-error-text">{spError()}</div>}
+                  >
+                    <Show
+                      when={tenetsList().length > 0}
+                      fallback={<div class="sp-empty-state">{t("tenetsEmpty")}</div>}
+                    >
+                      <div class="sp-tenets-layout">
+                        {/* 左列：目录树（镜像 bundle 真实目录结构，可展开/折叠） */}
+                        <div class="sp-tenets-tree">
+                          <For each={tenetRows()}>
+                            {(row) => (
+                              <div
+                                class="sp-tenet-row"
+                                classList={{
+                                  folder: row.node.isFolder,
+                                  leaf: !row.node.isFolder,
+                                  active: !row.node.isFolder && selectedTenetId() === row.node.hit!.concept_id,
+                                }}
+                                style={{ "padding-left": `${6 + row.depth * 14}px` }}
+                                onClick={() =>
+                                  row.node.isFolder
+                                    ? toggleFolder(row.node.path)
+                                    : selectTenet(row.node.hit!.concept_id)
+                                }
+                              >
+                                <Show
+                                  when={row.node.isFolder}
+                                  fallback={<span class="sp-tenet-leaf-dot" />}
+                                >
+                                  <span class="sp-tenet-twisty">
+                                    {collapsedPaths().has(row.node.path) ? "▸" : "▾"}
+                                  </span>
+                                </Show>
+                                <span class="sp-tenet-name">
+                                  {row.node.isFolder ? folderLabel(row.node) : row.node.hit!.title}
+                                </span>
+                              </div>
+                            )}
+                          </For>
+                        </div>
+                        {/* 右列：准则全文 */}
+                        <div class="sp-tenets-detail">
+                          <Show
+                            when={!tenetLoading()}
+                            fallback={<div class="sp-inline-loading"><span class="mt-spin" />{t("loading")}</div>}
+                          >
+                            <MarkdownRenderer content={tenetContent()} />
+                          </Show>
+                        </div>
+                      </div>
+                    </Show>
+                  </Show>
+                </Show>
+              </div>
+            </Show>
+          </div>
+        </Show>
+
         {/* Placeholders for other tabs */}
-        <Show when={activeTab() !== "general" && activeTab() !== "modelSettings" && activeTab() !== "commands" && activeTab() !== "codePreview" && activeTab() !== "databases"}>
+        <Show when={activeTab() !== "general" && activeTab() !== "modelSettings" && activeTab() !== "commands" && activeTab() !== "codePreview" && activeTab() !== "databases" && activeTab() !== "systemPrompt"}>
           <div class="settings-view-header">
             <h2>{t("settings")}</h2>
             <p class="settings-view-subtitle">{t("moduleDeveloping")}...</p>

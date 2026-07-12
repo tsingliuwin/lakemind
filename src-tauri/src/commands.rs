@@ -1164,6 +1164,32 @@ pub async fn save_settings_json(json: String) -> Result<(), String> {
 }
 
 // ===========================================================================
+// System prompt & shared tenets (read-only viewer for the Settings page)
+// ===========================================================================
+
+/// Return the fixed system prompt (PREAMBLE) sent to the model on every call.
+/// Read-only — the PREAMBLE is a compile-time constant; this just exposes it
+/// to the UI so users can inspect what the agent is told.
+#[tauri::command]
+pub async fn get_system_preamble() -> Result<String, String> {
+    Ok(crate::usage::PREAMBLE.to_string())
+}
+
+/// List every concept in the shared tenets bundle as a catalog (concept_id,
+/// title, description, tags, preview), sorted by concept_id. Read-only.
+#[tauri::command]
+pub async fn list_tenets() -> Result<Vec<crate::tenets::TenetHit>, String> {
+    Ok(crate::tenets::list_all_tenets())
+}
+
+/// Load the full Markdown content (frontmatter + body) of one tenet by its
+/// concept_id (e.g. `core/data-discipline`). Read-only.
+#[tauri::command]
+pub async fn get_tenet_content(concept_id: String) -> Result<String, String> {
+    crate::tenets::load_tenet(&concept_id)
+}
+
+// ===========================================================================
 // Filesystem commands
 // ===========================================================================
 

@@ -6455,3 +6455,201 @@ button.lm-select-trigger:hover:not(:disabled) {
   text-align: right;
 }
 
+/* ===========================================================================
+   System prompt & shared tenets (read-only viewer) — "systemPrompt" tab
+   =========================================================================== */
+
+/* Widen the single-col panel so the preamble markdown and the master-detail
+   tenets layout have room to breathe (default is 680px). */
+.settings-panel-box.single-col.sp-prompt-panel {
+  max-width: 960px;
+  gap: 0;
+}
+
+/* Each section card fills the wider panel. */
+.sp-prompt-card {
+  max-width: 100% !important;
+  padding: 18px 22px;
+}
+
+/* Sub-tab switcher within the systemPrompt tab (系统提示词 / 共享准则库). */
+.sp-subtabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  margin-bottom: 16px;
+  background: var(--bg-elevated, rgba(0, 0, 0, 0.03));
+  border: 1px solid var(--border-faint);
+  border-radius: 9px;
+  width: fit-content;
+}
+.sp-subtab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.sp-subtab:hover {
+  color: var(--text-primary);
+}
+.sp-subtab.active {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* The tenets master-detail card should grow tall so the left/right panes
+   have a comfortable scroll area. */
+.sp-tenets-card {
+  min-height: 520px;
+}
+.sp-tenets-card .sp-tenets-layout {
+  min-height: 440px;
+}
+
+.sp-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+.sp-section-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sp-section-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+/* Scrollable preamble — keeps the page from growing unbounded. */
+.sp-preamble-scroll {
+  max-height: 420px;
+  overflow: auto;
+  padding: 4px 4px 4px 0;
+  border-top: 1px solid var(--border-faint);
+}
+.sp-preamble-scroll .md-rendered {
+  font-size: 13px;
+  line-height: 1.65;
+}
+.sp-preamble-scroll .md-rendered h1,
+.sp-preamble-scroll .md-rendered h2,
+.sp-preamble-scroll .md-rendered h3 {
+  font-size: 14px;
+}
+
+/* Inline loading / error affordances inside a section card. */
+.sp-inline-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.sp-error-text {
+  padding: 10px 4px;
+  font-size: 13px;
+  color: var(--danger, #e5484d);
+}
+
+/* Master-detail tenets layout: left list, right detail. */
+.sp-tenets-layout {
+  display: flex;
+  gap: 16px;
+  border-top: 1px solid var(--border-faint);
+  padding-top: 14px;
+  min-height: 360px;
+}
+
+/* Left tree pane — mirrors the bundle's real directory structure. */
+.sp-tenets-tree {
+  width: 280px;
+  flex-shrink: 0;
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 6px;
+}
+
+/* A single indented row in the tree (folder or leaf). Indentation is applied
+   inline via padding-left based on depth. */
+.sp-tenet-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 6px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  padding-right: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s ease;
+}
+.sp-tenet-row:hover {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+}
+/* Leaf rows are clickable tenets; the active one is highlighted. */
+.sp-tenet-row.leaf.active {
+  background: var(--bg-active, rgba(0, 0, 0, 0.07));
+  font-weight: 500;
+}
+/* Folder rows are bolder to read as section headers in the hierarchy. */
+.sp-tenet-row.folder {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sp-tenet-row.leaf {
+  color: var(--text-secondary, var(--text-primary));
+}
+
+/* Expand/collapse triangle for folders; a small dot for leaves. */
+.sp-tenet-twisty {
+  display: inline-block;
+  width: 11px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.sp-tenet-leaf-dot {
+  display: inline-block;
+  width: 11px;
+  flex-shrink: 0;
+}
+.sp-tenet-leaf-dot::before {
+  content: "·";
+  color: var(--text-dim);
+}
+
+.sp-tenet-name {
+  font-size: 13px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-tenets-detail {
+  flex: 1;
+  min-width: 0;
+  max-height: 520px;
+  overflow: auto;
+  padding: 4px 8px 4px 12px;
+  border-left: 1px solid var(--border-faint);
+}
+.sp-tenets-detail .md-rendered {
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+

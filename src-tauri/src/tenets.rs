@@ -93,8 +93,8 @@ pub struct TenetMeta {
 }
 
 /// A hit returned by search / tag-filter — enough to decide whether to load
-/// the full concept body.
-#[derive(Debug, Clone)]
+/// the full concept body. Serialized to the frontend as the catalog DTO.
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct TenetHit {
     /// Bundle-relative concept ID (e.g. `industry/education`), no `.md`.
     pub concept_id: String,
@@ -283,6 +283,20 @@ fn enumerate_concepts(okf_root: &Path) -> Vec<(PathBuf, String)> {
         }
     }
     out
+}
+
+/// Enumerate every concept in the bundle as a `TenetHit`, sorted by
+/// `concept_id` for a stable catalog listing. Used by the settings UI to render
+/// the full shared-tenets library (read-only). Returns an empty vector if the
+/// bundle has not been seeded.
+pub fn list_all_tenets() -> Vec<TenetHit> {
+    let root = get_tenets_dir();
+    let mut hits: Vec<TenetHit> = enumerate_concepts(&root)
+        .into_iter()
+        .map(|(path, content)| hit_from_file(&root, &path, &content))
+        .collect();
+    hits.sort_by(|a, b| a.concept_id.cmp(&b.concept_id));
+    hits
 }
 
 /// Search the bundle by keyword: matches against title, description, tags, and
