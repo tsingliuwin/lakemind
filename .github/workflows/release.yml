@@ -113,6 +113,7 @@ jobs:
           # shared-key 必须和 ci.yml 中完全一致，才能命中 CI 预热的缓存
           shared-key: "tauri-${{ matrix.settings.os }}-${{ matrix.settings.target }}"
           save-if: "true"
+          cache-on-failure: "true"
 
       - name: Setup Node
         uses: actions/setup-node@v4

@@ -16,7 +16,10 @@ jobs:
     name: Warm Build Cache (${{ matrix.os }} ${{ matrix.target }})
     # 发版 commit（chore: bump version）会同时触发 Release workflow 来完整构建，
     # 此时跳过 Cache Warmer 避免重复占用 CI 资源。
-    if: "!startsWith(github.event.head_commit.message, 'chore: bump version')"
+    # 注意：workflow_dispatch 触发时 head_commit 为 null，需要额外判断。
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      !startsWith(github.event.head_commit.message, 'chore: bump version')
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -47,6 +50,7 @@ jobs:
           # 直接命中 CI 预热的缓存，跳过依赖编译。
           shared-key: "tauri-${{ matrix.os }}-${{ matrix.target }}"
           save-if: "true"
+          cache-on-failure: "true"
 
       - name: Setup Node
         uses: actions/setup-node@v4
