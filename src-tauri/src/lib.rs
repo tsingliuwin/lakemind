@@ -28,10 +28,12 @@ pub fn run() {
         eprintln!("Failed to initialize central SQLite database: {e}");
     }
 
-    // Seed the global analysis-tenets bundle (~/.lakemind/tenets/) on first
-    // launch. Non-fatal — a failure only means the agent's tenets tools will
+    // Seed / upgrade the global analysis-tenets bundle (~/.lakemind/tenets/).
+    // Re-seeds whenever the shipped seed content changes (content-hash check
+    // against the metadata DB), so upgraders receive the latest shared
+    // tenets. Non-fatal — a failure only means the agent's tenets tools will
     // report "library not initialized" until a successful seed.
-    if let Err(e) = tenets::seed_tenets_if_empty() {
+    if let Err(e) = tenets::ensure_tenets_seeded() {
         eprintln!("Failed to seed tenets bundle: {e}");
     }
 

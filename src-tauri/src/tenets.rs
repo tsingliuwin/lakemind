@@ -386,24 +386,125 @@ pub fn load_tenets_index() -> Result<String, String> {
     fs::read_to_string(&index).map_err(|e| format!("读取目录失败: {e}"))
 }
 
-/// Seed the global tenets bundle on first launch. Writes each seed file only
-/// if it does not already exist — **never overwrites** user edits. Missing
-/// parent directories are created. Safe to call on every startup.
+const TENETS_SEED_HASH_KEY: &str = "tenets_seed_hash";
+
+/// Stable 64-bit FNV-1a hash of the seed bundle contents (rel + content of
+/// every `SEED_FILES` entry). Used for change detection: when it differs from
+/// the value stored in the metadata DB, the bundle is re-seeded so upgraders
+/// receive the latest shared tenets. FNV-1a (rather than `DefaultHasher`) is
+/// used because the hash is persisted across builds — a toolchain drift that
+/// changed `DefaultHasher` would otherwise force a pointless re-seed on every
+/// user.
+fn seed_content_hash() -> String {
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+    let mut h: u64 = FNV_OFFSET;
+    for (rel, content) in SEED_FILES {
+        for &b in rel.as_bytes() {
+            h ^= b as u64;
+            h = h.wrapping_mul(FNV_PRIME);
+        }
+        // Separator byte so ("ab","cd") != ("a","bcd").
+        h ^= 0xFF;
+        h = h.wrapping_mul(FNV_PRIME);
+        for &b in content.as_bytes() {
+            h ^= b as u64;
+            h = h.wrapping_mul(FNV_PRIME);
+        }
+        // Separator between entries.
+        h ^= 0xFE;
+        h = h.wrapping_mul(FNV_PRIME);
+    }
+    format!("{:016x}", h)
+}
+
+/// True if `path` (recursively) contains at least one file.
+fn dir_has_files(path: &Path) -> bool {
+    fn has_files(p: &Path) -> bool {
+        let rd = match fs::read_dir(p) {
+            Ok(rd) => rd,
+            Err(_) => return false,
+        };
+        for entry in rd.flatten() {
+            let ep = entry.path();
+            if ep.is_file() {
+                return true;
+            }
+            if ep.is_dir() && has_files(&ep) {
+                return true;
+            }
+        }
+        false
+    }
+    has_files(path)
+}
+
+/// Recursively copy a directory tree `src` → `dst` (`dst` is created).
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|e| format!("创建备份目录失败: {e}"))?;
+    let rd = fs::read_dir(src).map_err(|e| format!("读取准则目录失败: {e}"))?;
+    for entry in rd {
+        let entry = entry.map_err(|e| format!("遍历准则目录失败: {e}"))?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else {
+            fs::copy(&from, &to).map_err(|e| format!("备份文件失败: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Ensure the global tenets bundle matches the shipped seed.
 ///
-/// Returns `Ok(())` on success; errors are non-fatal at the call site (logged,
-/// not crashing the app) but are surfaced here for testability.
-pub fn seed_tenets_if_empty() -> Result<(), String> {
+/// On first launch (no stored hash) the seed is written fresh. When the
+/// shipped seed changes (`seed_content_hash()` differs from the value stored
+/// in the metadata DB), the existing bundle is backed up to
+/// `<lakemind_dir>/tenets.bak/` (single rolling backup) and every
+/// seed-managed file is overwritten with the latest content. Files the user
+/// added outside the seed list are left in place; local edits to seed files
+/// are recoverable from `tenets.bak/`. The stored hash is updated only after
+/// a successful (re)seed. Safe to call on every startup.
+///
+/// Returns `Ok(())` on success; errors are non-fatal at the call site
+/// (logged, not crashing the app) but are surfaced here for testability.
+pub fn ensure_tenets_seeded() -> Result<(), String> {
     let root = get_tenets_dir();
+    let current = seed_content_hash();
+
+    // Read the stored hash from the metadata DB. If the DB isn't reachable,
+    // fall back to None so a degraded launch still attempts a seed.
+    let installed = crate::db::get_db_conn()
+        .ok()
+        .and_then(|conn| crate::db::get_config(&conn, TENETS_SEED_HASH_KEY).ok().flatten());
+
+    if installed.as_deref() == Some(current.as_str()) {
+        return Ok(()); // up to date
+    }
+
+    // (Re)seed needed. Back up an existing non-empty bundle first (rolling).
+    if root.exists() && dir_has_files(&root) {
+        let bak = root
+            .parent()
+            .ok_or_else(|| "tenets dir has no parent".to_string())?
+            .join("tenets.bak");
+        let _ = fs::remove_dir_all(&bak);
+        copy_dir_recursive(&root, &bak)?;
+    }
+
     fs::create_dir_all(&root).map_err(|e| format!("创建准则目录失败: {e}"))?;
     for (rel, content) in SEED_FILES {
         let dest = root.join(rel);
-        if dest.exists() {
-            continue;
-        }
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("创建子目录失败: {e}"))?;
         }
         fs::write(&dest, content).map_err(|e| format!("写入准则失败 {rel}: {e}"))?;
+    }
+
+    // Persist the new hash so we don't repeat this next launch.
+    if let Ok(conn) = crate::db::get_db_conn() {
+        let _ = crate::db::set_config(&conn, TENETS_SEED_HASH_KEY, &current);
     }
     Ok(())
 }
@@ -481,6 +582,18 @@ mod tests {
         for (rel, content) in SEED_FILES {
             assert!(!content.is_empty(), "seed {rel} is empty");
         }
+    }
+
+    #[test]
+    fn seed_hash_is_stable_and_well_formed() {
+        // Deterministic 16-hex-char FNV-1a digest of the bundle. A change to
+        // any seed file changes this hash, which is what triggers a re-seed
+        // for upgraders via `ensure_tenets_seeded`.
+        let h1 = seed_content_hash();
+        let h2 = seed_content_hash();
+        assert_eq!(h1, h2, "seed hash must be deterministic");
+        assert_eq!(h1.len(), 16, "seed hash must be 16 hex chars");
+        assert!(h1.chars().all(|c| c.is_ascii_hexdigit()), "seed hash must be hex");
     }
 
     #[test]

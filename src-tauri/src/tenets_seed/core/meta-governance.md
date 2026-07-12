@@ -87,5 +87,5 @@ resource: lakemind://tenets/core/meta-governance
 
 # Citations
 
-- 来源：LakeMind 准则体系自身的设计决策。种子不覆盖机制（`seed_tenets_if_empty`）和 OKF git 版本控制已在 `tenets.rs` 中实现。
+- 来源：LakeMind 准则体系自身的设计决策。内容哈希驱动的重播种机制（`ensure_tenets_seeded`：seed 内容变更即重播种并滚动备份）与 OKF git 版本控制已在 `tenets.rs` 中实现。
 - 相关准则：总则（`core/general-principles.md`）。
