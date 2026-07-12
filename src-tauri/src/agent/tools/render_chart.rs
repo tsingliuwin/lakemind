@@ -137,12 +137,23 @@ impl Tool for RenderChartTool {
                     args.y_field_labels.as_ref(),
                     table,
                 );
-                let summary = format!("已生成{}图，共 {} 个数据点", chart_type_cn(&args.chart_type), row_count);
+                let user_summary = format!("已生成{}图，共 {} 个数据点", chart_type_cn(&args.chart_type), row_count);
+                // The tool card in the UI shows this clean summary verbatim.
                 emit_tool_result(
                     &self.window, &self.task_id, &call_id, "ok",
-                    summary.clone(), None, None, Some(elapsed), None,
+                    user_summary.clone(), None, None, Some(elapsed), None,
                 );
-                Ok(summary)
+                // rig injects the returned String into the conversation as the
+                // tool result, so the model sees this. The `{{chart:<id>}}`
+                // marker lets the model reference this chart in its final text
+                // summary; the frontend matches `id` (== call_id, the chart
+                // segment's id) and renders the chart inline at that position.
+                // String concatenation avoids format!'s brace-escaping pitfalls.
+                let marker = "{{chart:".to_string() + &call_id + "}}";
+                Ok(format!(
+                    "{}。在结论中引用此图，请将以下标记原样粘贴到结论对应位置：{}",
+                    user_summary, marker
+                ))
             }
             Err(err) => {
                 let msg = format!("查询失败: {}", err.0);

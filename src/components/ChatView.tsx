@@ -4,7 +4,7 @@ import { modelKeyOf, modelIdOfKey } from "../lib/types";
 import { derivePanelMetrics, fmtCap, fmtPct } from "../lib/metrics";
 import ToolSegment from "./ToolSegment";
 import ChartSegment from "./ChartSegment";
-import MarkdownRenderer from "./MarkdownRenderer";
+import MessageText from "./MessageText";
 
 type ReasoningSeg = Extract<Segment, { type: "reasoning" }>;
 type TextSeg = Extract<Segment, { type: "text" }>;
@@ -622,7 +622,7 @@ export default function ChatView(props: {
                                 when={msg().role === "assistant"}
                                 fallback={ts()!.text}
                               >
-                                <MarkdownRenderer content={ts()!.text} />
+                                <MessageText text={ts()!.text} segments={msg().segments} />
                               </Show>
                             </div>
                           </Match>

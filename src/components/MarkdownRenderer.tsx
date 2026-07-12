@@ -112,7 +112,10 @@ export default function MarkdownRenderer(props: { content: string }) {
       .replace(/<iframe\b[^>]*>.*?<\/iframe>/gi, "")
       .replace(/<object\b[^>]*>.*?<\/object>/gi, "")
       .replace(/<embed\b[^>]*\/?>/gi, "")
-      .replace(/on\w+\s*=/gi, "data-blocked=");
+      .replace(/on\w+\s*=/gi, "data-blocked=")
+      // Residual chart-reference markers (e.g. a malformed one the splitter
+      // didn't catch) become a neutral badge rather than leaking raw braces.
+      .replace(/\{\{\s*chart:\s*[^}]*\}\}/g, '<span class="chart-ref-badge">📊</span>');
   });
 
   return <div class="md-rendered" innerHTML={html()} />;

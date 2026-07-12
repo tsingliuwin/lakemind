@@ -4679,6 +4679,26 @@ button.lm-select-trigger:hover:not(:disabled) {
   margin-bottom: 0;
 }
 
+/* Inline chart-reference markers that couldn't be resolved (shown by
+   MessageText / MarkdownRenderer fallback) — render as a muted badge instead
+   of leaking raw {{chart:...}} braces into the summary. */
+.chart-ref-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-dim, #9aa0a6);
+  background: var(--bg-elevated, rgba(125, 125, 125, 0.12));
+  border: 1px solid var(--border-faint, rgba(125, 125, 125, 0.18));
+  vertical-align: middle;
+}
+.chart-ref-badge {
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
 /* 标题 */
 .md-rendered h1,
 .md-rendered h2 {
