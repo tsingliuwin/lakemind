@@ -1,15 +1,15 @@
 {
-  "version": "0.5.4",
+  "version": "0.5.5",
   "notes": "- 总结内联图表：LLM 在文字结论中用 {{chart:...}} 标记引用本轮已生成的图表，该处原样渲染出可交互图表（可切换类型/全屏/导出），不再显示成裸文本\n- 流式渲染修复：消除流式输出总结时内联图表每 token 反复重建 echarts 的卡顿，图表在标记闭合后挂载一次即稳定",
-  "pubdate": "2026-07-12T02:36:29.055Z",
+  "pubdate": "2026-07-12T04:37:20.561Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK2Y3bHBhSWNaV2Q2eThmdEZwampQM2o0Umd4bUxLZFptaUVBckVEdVRRNG40M1B2MXpkV21yZGt2d3k5OVhwSEUwQk1EaU5WQWlDYWJiNCtRaGl2ZGdvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzODIzNzU0CWZpbGU6bGFrZW1pbmQuYXBwLnRhci5negpyZnR5anY4ai9hcERGYjViNU5LdE9ESkpBdjNINTVNOGx6VEZzNFlZRHdpZEhqdTNpZmxMWTNnVFJDOFhHY1Y1cmpydWtXbDI5dk5uM1V5Nm5zUWNEdz09Cg==",
-      "url": "https://upload.xi-n.com/lakemind-v0.5.4-arm64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK1VXTDBjSmdnQ0wyejFDMzF6V2p6dGxCMVBWaXFUcjQrQzFMQzVCSkUxayt2RG42UzZmN1YzUm9RRG9hcXlJRkZYNXZoWG9GZmh1TUI2VW1waVRmTXdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzODMxMDAzCWZpbGU6bGFrZW1pbmQuYXBwLnRhci5negpqRTBWcmk4RXJNYWdiNURXVXZpVFd0TC82VGJGYkpMZGdRNGFMTDdQV0tyK05TWG9UcWthV2xrV3ZXekhFOGgvQnloY0pYT2dYYm0rbkoxeVVhRmpBQT09Cg==",
+      "url": "https://upload.xi-n.com/lakemind-v0.5.5-arm64.app.tar.gz"
     },
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK1dnVWtoNFpKZ0NMY0I3M3o1Y2hENlhJeFVVeEtiaUpFbFJFQUROSlNvTUZaVnJhemFNSlZpdlpzaUQyaDJUOFZIU1pTbDcrOWhEYkhOSXBjRVU1Y2c4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzODIzNDAxCWZpbGU6bGFrZW1pbmRfMC41LjRfeDY0LXNldHVwLmV4ZQpmbjZHQ2ZZblhHWCtDK1NyRVJMSm84VVN2d2UxZ3FDZ1Z2UDlCVGxRUVdFQlpFVDRWMHhlbjlGSzdTNFg4NDJOY21OT3NuYnBCalIrcTZUOVBMY01EZz09Cg==",
-      "url": "https://upload.xi-n.com/lakemind-v0.5.4.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK2U0QThMV0hoWUlOT2hValMrNFU0Kys3LzB6T3RZbVE1V3NvMFNmSC9KNmJOVE1IdU9CK2F0WnFQY3g4dlh4SFdna3JHNzAwbnpaVlVydlZDaWIyOFFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzODMwNzExCWZpbGU6bGFrZW1pbmRfMC41LjVfeDY0LXNldHVwLmV4ZQpwRWZBRmZBVWpYbFRSelRBNVh0dDZCUExNeUE0TTZjUTZhRUF3Z0hEV1VDTHU0ZFVMTUlGUHd3enRmdWY0bWJ3YW0wdFpnT09aUm55akQrcmNBdStDdz09Cg==",
+      "url": "https://upload.xi-n.com/lakemind-v0.5.5.exe"
     }
   }
 }
