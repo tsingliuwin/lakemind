@@ -63,6 +63,60 @@ function SunIcon() {
     </svg>
   );
 }
+function CaretRightIcon(props: { class?: string; style?: any; classList?: Record<string, boolean> }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      class={props.class}
+      classList={props.classList}
+      style={props.style}
+    >
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  );
+}
+
+function FolderIcon(props: { class?: string; style?: any }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      class={props.class}
+      style={props.style}
+    >
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+    </svg>
+  );
+}
+
+function FileTextIcon(props: { class?: string; style?: any }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      class={props.class}
+      style={props.style}
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+      <polyline points="14 2 14 8 20 8"></polyline>
+      <line x1="16" y1="13" x2="8" y2="13"></line>
+      <line x1="16" y1="17" x2="8" y2="17"></line>
+    </svg>
+  );
+}
 
 export interface ModelItem {
   id: string;
@@ -1368,7 +1422,7 @@ export default function SettingsPage(props: {
       <div class="settings-right-container">
         {props.titleBar}
         {/* Settings Main Content Area */}
-        <main class="settings-content">
+        <main class="settings-content" classList={{ "no-scroll": activeTab() === "systemPrompt" }}>
         
         {/* Tab: Databases Settings (数据库) */}
         <Show when={activeTab() === "databases"}>
@@ -2562,6 +2616,9 @@ export default function SettingsPage(props: {
         <Show when={activeTab() === "systemPrompt"}>
           <div class="settings-view-header wide-header">
             <h2>{t("settingsSystemPrompt")}</h2>
+            <p class="settings-view-subtitle" style="margin-top: 4px;">
+              {promptSubTab() === "preamble" ? t("systemPromptDesc") : t("tenetsDesc")}
+            </p>
           </div>
 
           <div class="settings-panel-box single-col sp-prompt-panel">
@@ -2586,9 +2643,6 @@ export default function SettingsPage(props: {
             {/* 系统提示词 */}
             <Show when={promptSubTab() === "preamble"}>
               <div class="settings-section-card sp-prompt-card">
-                <div class="sp-section-head">
-                  <span class="sp-section-desc">{t("systemPromptDesc")}</span>
-                </div>
                 <Show
                   when={!spLoading()}
                   fallback={<div class="sp-inline-loading"><span class="mt-spin" />{t("loading")}</div>}
@@ -2608,9 +2662,6 @@ export default function SettingsPage(props: {
             {/* 共享准则库 — 左目录 + 右内容，进入即展示首条准则全文 */}
             <Show when={promptSubTab() === "tenets"}>
               <div class="settings-section-card sp-prompt-card sp-tenets-card">
-                <div class="sp-section-head">
-                  <span class="sp-section-desc">{t("tenetsDesc")}</span>
-                </div>
                 <Show
                   when={!spLoading()}
                   fallback={<div class="sp-inline-loading"><span class="mt-spin" />{t("loading")}</div>}
@@ -2642,14 +2693,18 @@ export default function SettingsPage(props: {
                                     : selectTenet(row.node.hit!.concept_id)
                                 }
                               >
-                                <Show
-                                  when={row.node.isFolder}
-                                  fallback={<span class="sp-tenet-leaf-dot" />}
-                                >
-                                  <span class="sp-tenet-twisty">
-                                    {collapsedPaths().has(row.node.path) ? "▸" : "▾"}
-                                  </span>
-                                </Show>
+                                <span class="sp-tenet-icon-wrap">
+                                  <Show
+                                    when={row.node.isFolder}
+                                    fallback={<FileTextIcon class="sp-tenet-icon file" />}
+                                  >
+                                    <CaretRightIcon
+                                      class="sp-tenet-caret"
+                                      classList={{ expanded: !collapsedPaths().has(row.node.path) }}
+                                    />
+                                    <FolderIcon class="sp-tenet-icon folder" />
+                                  </Show>
+                                </span>
                                 <span class="sp-tenet-name">
                                   {row.node.isFolder ? folderLabel(row.node) : row.node.hit!.title}
                                 </span>

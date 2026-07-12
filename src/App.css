@@ -6461,15 +6461,26 @@ button.lm-select-trigger:hover:not(:disabled) {
 
 /* Widen the single-col panel so the preamble markdown and the master-detail
    tenets layout have room to breathe (default is 680px). */
+/* Add no-scroll helper to lock the height of settings-content when showing prompt view */
+.settings-content.no-scroll {
+  overflow-y: hidden;
+}
+
 .settings-panel-box.single-col.sp-prompt-panel {
   max-width: 960px;
   gap: 0;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Each section card fills the wider panel. */
 .sp-prompt-card {
   max-width: 100% !important;
-  padding: 18px 22px;
+  padding: 20px 24px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Sub-tab switcher within the systemPrompt tab (系统提示词 / 共享准则库). */
@@ -6477,47 +6488,51 @@ button.lm-select-trigger:hover:not(:disabled) {
   display: flex;
   gap: 4px;
   padding: 3px;
-  margin-bottom: 16px;
-  background: var(--bg-elevated, rgba(0, 0, 0, 0.03));
-  border: 1px solid var(--border-faint);
+  margin-bottom: 20px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
   border-radius: 9px;
   width: fit-content;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
 }
 .sp-subtab {
   appearance: none;
   border: none;
   background: transparent;
-  color: var(--text-dim);
+  color: var(--text-secondary);
   font-size: 12.5px;
   font-weight: 500;
-  padding: 6px 16px;
+  padding: 6px 18px;
   border-radius: 6px;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .sp-subtab:hover {
   color: var(--text-primary);
+  background: var(--bg-hover);
 }
 .sp-subtab.active {
-  background: var(--bg-surface);
+  background: var(--bg-elevated);
   color: var(--text-primary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+.sp-subtab:active {
+  transform: scale(0.97);
 }
 
-/* The tenets master-detail card should grow tall so the left/right panes
-   have a comfortable scroll area. */
+/* The tenets master-detail card fills the height */
 .sp-tenets-card {
-  min-height: 520px;
-}
-.sp-tenets-card .sp-tenets-layout {
-  min-height: 440px;
+  min-height: 0;
 }
 
 .sp-section-head {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
+  flex-shrink: 0;
 }
 .sp-section-head h3 {
   margin: 0;
@@ -6527,25 +6542,16 @@ button.lm-select-trigger:hover:not(:disabled) {
 }
 .sp-section-desc {
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 
 /* Scrollable preamble — keeps the page from growing unbounded. */
 .sp-preamble-scroll {
-  max-height: 420px;
-  overflow: auto;
-  padding: 4px 4px 4px 0;
-  border-top: 1px solid var(--border-faint);
-}
-.sp-preamble-scroll .md-rendered {
-  font-size: 13px;
-  line-height: 1.65;
-}
-.sp-preamble-scroll .md-rendered h1,
-.sp-preamble-scroll .md-rendered h2,
-.sp-preamble-scroll .md-rendered h3 {
-  font-size: 14px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 8px 8px 0;
 }
 
 /* Inline loading / error affordances inside a section card. */
@@ -6553,32 +6559,32 @@ button.lm-select-trigger:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 4px;
-  font-size: 12px;
-  color: var(--text-dim);
+  padding: 16px 4px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
 }
 .sp-error-text {
-  padding: 10px 4px;
+  padding: 12px 4px;
   font-size: 13px;
-  color: var(--danger, #e5484d);
+  color: var(--accent-red);
 }
 
 /* Master-detail tenets layout: left list, right detail. */
 .sp-tenets-layout {
   display: flex;
-  gap: 16px;
-  border-top: 1px solid var(--border-faint);
-  padding-top: 14px;
-  min-height: 360px;
+  gap: 20px;
+  padding-top: 16px;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Left tree pane — mirrors the bundle's real directory structure. */
 .sp-tenets-tree {
   width: 280px;
   flex-shrink: 0;
-  max-height: 520px;
-  overflow: auto;
-  padding-right: 6px;
+  height: 100%;
+  overflow-y: auto;
+  padding-right: 8px;
 }
 
 /* A single indented row in the tree (folder or leaf). Indentation is applied
@@ -6586,49 +6592,70 @@ button.lm-select-trigger:hover:not(:disabled) {
 .sp-tenet-row {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
   border-radius: 6px;
-  padding-top: 5px;
-  padding-bottom: 5px;
-  padding-right: 8px;
+  padding: 6px 10px;
+  margin-bottom: 2px;
   cursor: pointer;
   user-select: none;
-  transition: background 0.12s ease;
+  transition: all 0.15s ease;
+  color: var(--text-secondary);
 }
 .sp-tenet-row:hover {
-  background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 /* Leaf rows are clickable tenets; the active one is highlighted. */
 .sp-tenet-row.leaf.active {
-  background: var(--bg-active, rgba(0, 0, 0, 0.07));
+  background: var(--bg-active);
+  color: var(--text-primary);
   font-weight: 500;
 }
+.sp-tenet-row.leaf.active .sp-tenet-icon.file {
+  color: var(--text-primary);
+  opacity: 0.9;
+}
+
 /* Folder rows are bolder to read as section headers in the hierarchy. */
 .sp-tenet-row.folder {
   font-weight: 600;
   color: var(--text-primary);
 }
-.sp-tenet-row.leaf {
-  color: var(--text-secondary, var(--text-primary));
+
+/* SVG Icon alignments in the tree row */
+.sp-tenet-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 2px;
+  color: var(--text-dim);
 }
 
-/* Expand/collapse triangle for folders; a small dot for leaves. */
-.sp-tenet-twisty {
-  display: inline-block;
-  width: 11px;
-  text-align: center;
-  font-size: 10px;
+.sp-tenet-caret {
+  width: 12px;
+  height: 12px;
   color: var(--text-dim);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: rotate(0deg);
   flex-shrink: 0;
 }
-.sp-tenet-leaf-dot {
-  display: inline-block;
-  width: 11px;
+.sp-tenet-caret.expanded {
+  transform: rotate(90deg);
+  color: var(--text-secondary);
+}
+
+.sp-tenet-icon {
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
 }
-.sp-tenet-leaf-dot::before {
-  content: "·";
-  color: var(--text-dim);
+.sp-tenet-icon.folder {
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+.sp-tenet-icon.file {
+  color: var(--text-secondary);
+  opacity: 0.7;
 }
 
 .sp-tenet-name {
@@ -6639,17 +6666,123 @@ button.lm-select-trigger:hover:not(:disabled) {
   white-space: nowrap;
 }
 
+/* Right column: tenet details pane */
 .sp-tenets-detail {
   flex: 1;
   min-width: 0;
-  max-height: 520px;
-  overflow: auto;
-  padding: 4px 8px 4px 12px;
-  border-left: 1px solid var(--border-faint);
+  height: 100%;
+  overflow-y: auto;
+  padding: 4px 16px 20px 24px;
 }
-.sp-tenets-detail .md-rendered {
-  font-size: 13px;
+
+/* Fine-tune markdown rendering in the scroll areas for superior readability */
+.sp-tenets-detail .md-rendered,
+.sp-preamble-scroll .md-rendered {
+  font-size: 13.5px;
   line-height: 1.65;
+  color: var(--text-primary);
 }
+
+.sp-tenets-detail .md-rendered p,
+.sp-preamble-scroll .md-rendered p {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+.sp-tenets-detail .md-rendered h1,
+.sp-preamble-scroll .md-rendered h1 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-top: 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border-faint);
+  padding-bottom: 8px;
+}
+
+.sp-tenets-detail .md-rendered h2,
+.sp-preamble-scroll .md-rendered h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 20px;
+  margin-bottom: 10px;
+}
+
+.sp-tenets-detail .md-rendered h3,
+.sp-preamble-scroll .md-rendered h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+
+.sp-tenets-detail .md-rendered ul,
+.sp-tenets-detail .md-rendered ol,
+.sp-preamble-scroll .md-rendered ul,
+.sp-preamble-scroll .md-rendered ol {
+  margin-top: 0;
+  margin-bottom: 12px;
+  padding-left: 20px;
+}
+
+.sp-tenets-detail .md-rendered li,
+.sp-preamble-scroll .md-rendered li {
+  margin-bottom: 4px;
+}
+
+.sp-tenets-detail .md-rendered code,
+.sp-preamble-scroll .md-rendered code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-hover);
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+}
+
+.sp-tenets-detail .md-rendered pre,
+.sp-preamble-scroll .md-rendered pre {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+  margin-bottom: 14px;
+}
+
+.sp-tenets-detail .md-rendered pre code,
+.sp-preamble-scroll .md-rendered pre code {
+  background: transparent;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+}
+
+/* Custom Scrollbars */
+.sp-preamble-scroll::-webkit-scrollbar,
+.sp-tenets-tree::-webkit-scrollbar,
+.sp-tenets-detail::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.sp-preamble-scroll::-webkit-scrollbar-thumb,
+.sp-tenets-tree::-webkit-scrollbar-thumb,
+.sp-tenets-detail::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 99px;
+}
+
+.sp-preamble-scroll::-webkit-scrollbar-thumb:hover,
+.sp-tenets-tree::-webkit-scrollbar-thumb:hover,
+.sp-tenets-detail::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+.sp-preamble-scroll::-webkit-scrollbar-track,
+.sp-tenets-tree::-webkit-scrollbar-track,
+.sp-tenets-detail::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 
 
