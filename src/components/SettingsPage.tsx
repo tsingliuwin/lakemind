@@ -436,7 +436,7 @@ export default function SettingsPage(props: {
   };
 
   const [formName, setFormName] = createSignal("");
-  const [formType, setFormType] = createSignal<"postgres" | "mysql" | "sqlite">("postgres");
+  const [formType, setFormType] = createSignal<"postgres" | "mysql" | "sqlite" | "maxcompute">("postgres");
   const [formHost, setFormHost] = createSignal("");
   const [formPort, setFormPort] = createSignal(5432);
   const [formDatabase, setFormDatabase] = createSignal("");
@@ -446,6 +446,18 @@ export default function SettingsPage(props: {
   const [showPassword, setShowPassword] = createSignal(false);
   const [formUri, setFormUri] = createSignal("");
   const [uriStatus, setUriStatus] = createSignal<{ status: "idle" | "success" | "error"; errorMsg?: string }>({ status: "idle" });
+
+  // ── MaxCompute-specific form fields ──────────────────────────────────────
+  // Stored in `options` JSON (camelCase, matching MaxcomputeOpts serde). The
+  // generic username/password slots hold AK_ID/AK_SECRET. The default driver
+  // coordinate matches the backend fallback (`com.aliyun.odps:odps-jdbc:3.9.3`).
+  const [mcEndpoint, setMcEndpoint] = createSignal("");
+  const [mcProject, setMcProject] = createSignal("");
+  const [mcRegion, setMcRegion] = createSignal("");
+  const [mcTunnel, setMcTunnel] = createSignal("");
+  const [mcDriverCoord, setMcDriverCoord] = createSignal("com.aliyun.odps:odps-jdbc:3.9.3");
+  // Java runtime probe result: idle / ok(version string) / missing / error(msg).
+  const [javaStatus, setJavaStatus] = createSignal<{ status: "idle" | "ok" | "missing" | "error"; msg?: string }>({ status: "idle" });
 
   const loadConnections = async () => {
     try {
@@ -522,6 +534,37 @@ export default function SettingsPage(props: {
       return;
     }
 
+    // MaxCompute: sidecar type. Credentials reuse username/password slots
+    // (AK_ID / AK_SECRET); the rest lives in `options` JSON. No host/port/db.
+    const isMaxcompute = formType() === "maxcompute";
+    if (isMaxcompute) {
+      const endpoint = mcEndpoint().trim();
+      const project = mcProject().trim();
+      if (!endpoint) { alert("请填写 MaxCompute Endpoint"); return; }
+      if (!project) { alert("请填写 MaxCompute 项目名"); return; }
+      const connData: DbConnection = {
+        id: editingConn()?.id || "conn_" + Date.now(),
+        name,
+        dbType: "maxcompute",
+        host: "",
+        port: 0,
+        databaseName: project,
+        username: formUsername().trim(),
+        password: formPassword(),
+        sslMode: "disable",
+        createdAt: editingConn()?.createdAt || Date.now(),
+        options: buildMaxcomputeOptions(),
+      };
+      try {
+        await invoke("upsert_db_connection", { config: connData });
+        setEditingConn(null);
+        loadConnections();
+      } catch (err) {
+        alert("保存失败: " + err);
+      }
+      return;
+    }
+
     const host = formHost().trim();
     if (!host) {
       alert("请输入主机地址");
@@ -581,6 +624,39 @@ export default function SettingsPage(props: {
         password: "",
         sslMode: "disable",
         createdAt: Date.now(),
+      };
+      setTestStatus({ status: "testing" });
+      try {
+        await invoke("test_db_connection", { config: connData });
+        setTestStatus({ status: "success", msg: "连接成功！" });
+      } catch (err) {
+        setTestStatus({ status: "error", msg: "测试失败: " + err });
+      }
+      return;
+    }
+
+    // MaxCompute test — routes to the Java sidecar (no DuckDB ATTACH).
+    const isMaxcompute = formType() === "maxcompute";
+    if (isMaxcompute) {
+      const endpoint = mcEndpoint().trim();
+      const project = mcProject().trim();
+      const akId = formUsername().trim();
+      if (!name || !endpoint || !project || !akId) {
+        alert("请填写连接名称、Endpoint、Project、AccessKey ID 以测试");
+        return;
+      }
+      const connData: DbConnection = {
+        id: editingConn()?.id || "test_temp",
+        name,
+        dbType: "maxcompute",
+        host: "",
+        port: 0,
+        databaseName: project,
+        username: akId,
+        password: formPassword(),
+        sslMode: "disable",
+        createdAt: Date.now(),
+        options: buildMaxcomputeOptions(),
       };
       setTestStatus({ status: "testing" });
       try {
@@ -745,6 +821,8 @@ export default function SettingsPage(props: {
     setFormUri("");
     setUriStatus({ status: "idle" });
     setTestStatus({ status: "idle" });
+    loadMaxcomputeOptions(c.options);
+    setJavaStatus({ status: "idle" });
   };
 
   const startAddConnection = () => {
@@ -769,6 +847,8 @@ export default function SettingsPage(props: {
     setFormUri("");
     setUriStatus({ status: "idle" });
     setTestStatus({ status: "idle" });
+    loadMaxcomputeOptions(undefined);
+    setJavaStatus({ status: "idle" });
   };
 
   const parseConnectionString = (str: string): { success: true; data: any } | { success: false; error: string } => {
@@ -825,6 +905,43 @@ export default function SettingsPage(props: {
       };
     } catch (err: any) {
       return { success: false, error: err.message || "未知解析错误" };
+    }
+  };
+
+  // Build the `options` JSON for a MaxCompute record (camelCase keys match the
+  // backend MaxcomputeOpts serde rename). Empty/optional fields are omitted so
+  // the stored JSON stays clean; the backend defaults driver_coord anyway.
+  const buildMaxcomputeOptions = (): string => {
+    const o: Record<string, any> = {
+      endpoint: mcEndpoint().trim(),
+      project: mcProject().trim(),
+    };
+    if (mcRegion().trim()) o.region = mcRegion().trim();
+    if (mcTunnel().trim()) o.tunnelEndpoint = mcTunnel().trim();
+    if (mcDriverCoord().trim()) o.driverCoord = mcDriverCoord().trim();
+    return JSON.stringify(o);
+  };
+
+  // Parse a saved `options` JSON back into the MaxCompute form signals.
+  const loadMaxcomputeOptions = (opts?: string) => {
+    let o: any = {};
+    try { o = opts ? JSON.parse(opts) : {}; } catch { /* leave empty */ }
+    setMcEndpoint(o.endpoint || "");
+    setMcProject(o.project || "");
+    setMcRegion(o.region || "");
+    setMcTunnel(o.tunnelEndpoint || "");
+    setMcDriverCoord(o.driverCoord || "com.aliyun.odps:odps-jdbc:3.9.3");
+  };
+
+  // Probe the host for a JRE 17+ (required by the MaxCompute sidecar). The
+  // backend `check_java_runtime` returns the first `java -version` line.
+  const handleCheckJava = async () => {
+    setJavaStatus({ status: "idle" });
+    try {
+      const ver = await invoke<string>("check_java_runtime");
+      setJavaStatus({ status: "ok", msg: ver });
+    } catch (err) {
+      setJavaStatus({ status: "missing", msg: String(err) });
     }
   };
 
@@ -1455,8 +1572,8 @@ export default function SettingsPage(props: {
                 </button>
               </div>
 
-              {/* Connection URI Import — not applicable to file-based SQLite */}
-              <Show when={formType() !== "sqlite"}>
+              {/* Connection URI Import — only for postgres/mysql (not SQLite or MaxCompute) */}
+              <Show when={formType() !== "sqlite" && formType() !== "maxcompute"}>
               <div style="display: flex; flex-direction: column; gap: 6px;">
                 <label style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">连接串 (Connection URI)</label>
                 <div style="position: relative; display: flex; align-items: center; width: 100%;">
@@ -1512,7 +1629,7 @@ export default function SettingsPage(props: {
               {/* Database Type Card Selector */}
               <div style="display: flex; flex-direction: column; gap: 8px;">
                 <label style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">{t("dbType")}</label>
-                <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 14px;">
+                <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px;">
                   {/* PostgreSQL Card */}
                   <div 
                     onClick={() => {
@@ -1603,9 +1720,44 @@ export default function SettingsPage(props: {
                       <div style="font-weight: 600; font-size: 13.5px; color: var(--text-primary);">SQLite</div>
                       <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{t("dbTypeSqliteDesc")}</div>
                     </div>
-                    <span 
+                    <span
                       style={`color: #10b981; font-size: 15px; font-weight: bold; margin-left: auto; transition: opacity 0.15s ease-in-out; ${
                         formType() === "sqlite" ? "opacity: 1;" : "opacity: 0; pointer-events: none;"
+                      }`}
+                    >
+                      ✓
+                    </span>
+                  </div>
+
+                  {/* MaxCompute Card */}
+                  <div
+                    onClick={() => {
+                      setFormType("maxcompute");
+                      setFormPort(0);
+                      setFormHost("");
+                      setFormSslMode("disable");
+                      if (formName() === "local_postgres" || formName() === "local_mysql" || formName() === "local_sqlite" || formName() === "") setFormName("mc_connection");
+                      if (formUsername() === "postgres" || formUsername() === "root" || formUsername() === "") setFormUsername("");
+                      if (formDatabase() === "postgres" || formDatabase() === "mysql") setFormDatabase("");
+                      setMcDriverCoord("com.aliyun.odps:odps-jdbc:3.9.3");
+                    }}
+                    style={`display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-radius: 10px; border: 2px solid transparent; background: ${formType() === "maxcompute" ? "rgba(124, 58, 237, 0.06)" : "rgba(255, 255, 255, 0.015)"}; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: ${formType() === "maxcompute" ? "0 4px 12px rgba(124, 58, 237, 0.1)" : "none"}`}
+                    class="db-type-card"
+                  >
+                    <div style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; background: rgba(124, 58, 237, 0.12); color: #7c3aed; border-radius: 8px; flex-shrink: 0;">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                        <path d="M2 17l10 5 10-5"></path>
+                        <path d="M2 12l10 5 10-5"></path>
+                      </svg>
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                      <div style="font-weight: 600; font-size: 13.5px; color: var(--text-primary);">MaxCompute</div>
+                      <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{t("dbTypeMaxcomputeDesc")}</div>
+                    </div>
+                    <span
+                      style={`color: #7c3aed; font-size: 15px; font-weight: bold; margin-left: auto; transition: opacity 0.15s ease-in-out; ${
+                        formType() === "maxcompute" ? "opacity: 1;" : "opacity: 0; pointer-events: none;"
                       }`}
                     >
                       ✓
@@ -1614,7 +1766,7 @@ export default function SettingsPage(props: {
                 </div>
               </div>
 
-              <Show when={formType() !== "sqlite"}>
+              <Show when={formType() !== "sqlite" && formType() !== "maxcompute"}>
               {/* Group 1: Connection & Network */}
               <div style="display: flex; flex-direction: column; gap: 14px;">
                 <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 4px;">{t("connNetworkConfig")}</div>
@@ -1735,6 +1887,152 @@ export default function SettingsPage(props: {
                   </Show>
                 </div>
               </div>
+              </Show>
+
+              {/* MaxCompute: sidecar connection form (endpoint/project/AK/tunnel/driver) */}
+              <Show when={formType() === "maxcompute"}>
+                <div style="display: flex; flex-direction: column; gap: 14px; min-height: 166px; border-top: 1px solid var(--border-faint); padding-top: 20px; margin-top: 6px;">
+                  <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid #7c3aed; padding-left: 8px; margin-bottom: 4px;">{t("connNetworkConfig")}</div>
+
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 11.5px; color: var(--text-dim);">{t("connNameLabel")}</label>
+                    <input
+                      type="text"
+                      class="sp-input"
+                      value={formName()}
+                      placeholder="mc_connection"
+                      onInput={(e) => setFormName(e.currentTarget.value)}
+                    />
+                  </div>
+
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <label style="font-size: 11.5px; color: var(--text-dim);">{t("mcEndpointLabel")}</label>
+                      <input
+                        type="text"
+                        class="sp-input"
+                        value={mcEndpoint()}
+                        placeholder="https://service.odps.aliyun.com/api"
+                        onInput={(e) => setMcEndpoint(e.currentTarget.value)}
+                      />
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <label style="font-size: 11.5px; color: var(--text-dim);">{t("mcProjectLabel")}</label>
+                      <input
+                        type="text"
+                        class="sp-input"
+                        value={mcProject()}
+                        placeholder="my_project"
+                        onInput={(e) => setMcProject(e.currentTarget.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <label style="font-size: 11.5px; color: var(--text-dim);">{t("mcRegionLabel")}</label>
+                      <input
+                        type="text"
+                        class="sp-input"
+                        value={mcRegion()}
+                        placeholder={t("mcRegionPlaceholder")}
+                        onInput={(e) => setMcRegion(e.currentTarget.value)}
+                      />
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <label style="font-size: 11.5px; color: var(--text-dim);">{t("mcTunnelEndpointLabel")}</label>
+                      <input
+                        type="text"
+                        class="sp-input"
+                        value={mcTunnel()}
+                        placeholder="https://dt.odps.aliyun.com"
+                        onInput={(e) => setMcTunnel(e.currentTarget.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Auth: AK_ID / AK_SECRET (reuse generic credential slots) */}
+                <div style="display: flex; flex-direction: column; gap: 14px; min-height: 100px; border-top: 1px solid var(--border-faint); padding-top: 20px; margin-top: 6px;">
+                  <div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); border-left: 3px solid #7c3aed; padding-left: 8px; margin-bottom: 4px;">{t("authPermissions")}</div>
+
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <label style="font-size: 11.5px; color: var(--text-dim);">{t("mcAkIdLabel")}</label>
+                      <input
+                        type="text"
+                        class="sp-input"
+                        value={formUsername()}
+                        placeholder="LTAI..."
+                        onInput={(e) => setFormUsername(e.currentTarget.value)}
+                      />
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <label style="font-size: 11.5px; color: var(--text-dim);">{t("mcAkSecretLabel")}</label>
+                      <div style="position: relative; display: flex; align-items: center; width: 100%;">
+                        <input
+                          type={showPassword() ? "text" : "password"}
+                          class="sp-input"
+                          style="padding-right: 40px; width: 100%;"
+                          value={formPassword()}
+                          placeholder="••••••••"
+                          onInput={(e) => setFormPassword(e.currentTarget.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword())}
+                          style="position: absolute; right: 8px; background: transparent; border: none; cursor: pointer; color: var(--text-dim); display: flex; align-items: center; justify-content: center; padding: 6px;"
+                        >
+                          <Show when={showPassword()} fallback={
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px; opacity: 0.6;">
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                              <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                          }>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 15px; height: 15px; opacity: 0.6;">
+                              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                              <line x1="1" y1="1" x2="23" y2="23"/>
+                            </svg>
+                          </Show>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 11.5px; color: var(--text-dim);">{t("mcDriverCoordLabel")}</label>
+                    <input
+                      type="text"
+                      class="sp-input"
+                      value={mcDriverCoord()}
+                      placeholder={t("mcDriverCoordPlaceholder")}
+                      onInput={(e) => setMcDriverCoord(e.currentTarget.value)}
+                    />
+                  </div>
+
+                  {/* Java runtime probe — MaxCompute sidecar needs JRE 17+. */}
+                  <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <span style="font-size: 11.5px; color: var(--text-dim);">{t("mcJavaRuntimeLabel")}:</span>
+                    <button
+                      type="button"
+                      class="ss-btn ss-btn-secondary btn-sec-no-highlight"
+                      style="padding: 3px 12px; font-size: 12px; border-radius: 6px;"
+                      onClick={handleCheckJava}
+                    >
+                      {t("mcJavaCheckBtn")}
+                    </button>
+                    <Show when={javaStatus().status === "ok"}>
+                      <span style="font-size: 12px; color: var(--text-success);">✓ {t("mcJavaOk")} ({javaStatus().msg})</span>
+                    </Show>
+                    <Show when={javaStatus().status === "missing" || javaStatus().status === "error"}>
+                      <span style="font-size: 12px; color: var(--text-danger);">✕ {t("mcJavaMissing")}</span>
+                    </Show>
+                  </div>
+
+                  <p style="font-size: 11px; color: var(--text-dim); margin: 0; line-height: 1.5;">
+                    {t("mcPermissionTip")}
+                  </p>
+                </div>
               </Show>
 
               {/* SQLite: file path picker (shown only for sqlite) */}
@@ -1875,20 +2173,28 @@ export default function SettingsPage(props: {
                         class="db-connection-item-row"
                       >
                         <div style="display: flex; align-items: center; gap: 14px;">
-                          <span style={`display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : c.dbType === 'sqlite' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : c.dbType === 'sqlite' ? 'var(--accent-green)' : 'var(--accent-amber)'}; border-radius: 8px; flex-shrink: 0;`}>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
-                              <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
-                              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
-                              <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path>
-                            </svg>
+                          <span style={`display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : c.dbType === 'sqlite' ? 'rgba(16, 185, 129, 0.12)' : c.dbType === 'maxcompute' ? 'rgba(124, 58, 237, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : c.dbType === 'sqlite' ? 'var(--accent-green)' : c.dbType === 'maxcompute' ? '#7c3aed' : 'var(--accent-amber)'}; border-radius: 8px; flex-shrink: 0;`}>
+                            <Show when={c.dbType === 'maxcompute'} fallback={
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                                <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                                <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path>
+                              </svg>
+                            }>
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                                <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                                <path d="M2 17l10 5 10-5"></path>
+                                <path d="M2 12l10 5 10-5"></path>
+                              </svg>
+                            </Show>
                           </span>
                           <div>
                             <div style="display: flex; align-items: center; gap: 8px;">
                               <span style="font-weight: 600; font-size: 14px; color: var(--text-primary);">{c.name}</span>
-                              <span style={`font-size: 10px; font-weight: bold; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : c.dbType === 'sqlite' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : c.dbType === 'sqlite' ? 'var(--accent-green)' : 'var(--accent-amber)'}`}>{c.dbType}</span>
+                              <span style={`font-size: 10px; font-weight: bold; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: ${c.dbType === 'postgres' ? 'rgba(80, 160, 255, 0.12)' : c.dbType === 'sqlite' ? 'rgba(16, 185, 129, 0.12)' : c.dbType === 'maxcompute' ? 'rgba(124, 58, 237, 0.12)' : 'rgba(255, 140, 0, 0.12)'}; color: ${c.dbType === 'postgres' ? 'var(--brand)' : c.dbType === 'sqlite' ? 'var(--accent-green)' : c.dbType === 'maxcompute' ? '#7c3aed' : 'var(--accent-amber)'}`}>{c.dbType}</span>
                             </div>
                             <div style="font-size: 12px; color: var(--text-dim); margin-top: 4px; font-family: var(--font-mono, monospace); word-break: break-all;">
-                              {c.dbType === 'sqlite' ? c.databaseName : `${c.username}@${c.host}:${c.port}/${c.databaseName}`}
+                              {c.dbType === 'sqlite' ? c.databaseName : c.dbType === 'maxcompute' ? `${c.username} @ ${c.databaseName}` : `${c.username}@${c.host}:${c.port}/${c.databaseName}`}
                             </div>
                           </div>
                         </div>

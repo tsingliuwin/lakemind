@@ -19,6 +19,7 @@ pub enum SourceKind {
     Postgres,
     Mysql,
     Sqlite,
+    Maxcompute,
 }
 
 /// How a SOURCE is stored in the DuckLake. Drives the import strategy and the

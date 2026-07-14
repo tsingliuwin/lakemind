@@ -1921,6 +1921,7 @@ fn kind_to_str(k: &SourceKind) -> &'static str {
         SourceKind::Postgres => "postgres",
         SourceKind::Mysql => "mysql",
         SourceKind::Sqlite => "sqlite",
+        SourceKind::Maxcompute => "maxcompute",
     }
 }
 
@@ -1935,6 +1936,7 @@ fn str_to_kind(s: &str) -> SourceKind {
         "postgres" => SourceKind::Postgres,
         "mysql" => SourceKind::Mysql,
         "sqlite" => SourceKind::Sqlite,
+        "maxcompute" => SourceKind::Maxcompute,
         _ => SourceKind::Table,
     }
 }
@@ -2076,7 +2078,22 @@ fn path_total_size(p: &Path) -> u64 {
 // Database connection commands
 // ===========================================================================
 
-fn test_connection_impl(r: &db::DbConnectionRecord) -> Result<(), String> {
+fn test_connection_impl(
+    r: &db::DbConnectionRecord,
+    paths: &crate::external::paths::SidecarPaths,
+) -> Result<(), String> {
+    // Sidecar DB types (MaxCompute, future generic JDBC) — route to the Java
+    // sidecar instead of DuckDB ATTACH (no DuckDB extension exists for these).
+    if db::is_sidecar_db_type(&r.db_type) {
+        let opts = r.maxcompute_opts();
+        let jars = paths.driver_jars(&opts.driver_coord)?;
+        let launcher = paths.dbx_launcher()?;
+        let mut sc = crate::external::jdbc_sidecar::JdbcSidecar::spawn(&launcher)?;
+        let conn_obj = crate::external::jdbc_sidecar::build_maxcompute_connection(r, &jars)?;
+        let res = sc.test_connection(&conn_obj);
+        sc.close();
+        return res;
+    }
     let conn = duckdb::Connection::open_in_memory().map_err(|e| e.to_string())?;
     let load_sql = format!("LOAD {};", r.db_type);
     if conn.execute(&load_sql, []).is_err() {
@@ -2164,8 +2181,22 @@ pub async fn delete_db_connection(id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn test_db_connection(config: db::DbConnectionRecord) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || test_connection_impl(&config))
+pub async fn test_db_connection(
+    app: tauri::AppHandle,
+    config: db::DbConnectionRecord,
+) -> Result<(), String> {
+    let paths = crate::external::paths::SidecarPaths::resolve(&app)?;
+    tokio::task::spawn_blocking(move || test_connection_impl(&config, &paths))
+        .await
+        .map_err(|e| format!("Task execution error: {e}"))?
+}
+
+/// Check whether a Java runtime (JRE 17+) is available for the MaxCompute
+/// sidecar. Returns the first `java -version` line on success (e.g.
+/// `openjdk version "17.0.19"`) so the frontend can show it.
+#[tauri::command]
+pub async fn check_java_runtime() -> Result<String, String> {
+    tokio::task::spawn_blocking(crate::external::jdbc_sidecar::check_java_runtime)
         .await
         .map_err(|e| format!("Task execution error: {e}"))?
 }
@@ -2253,18 +2284,23 @@ pub async fn unlink_connection_from_workspace(
 
     // Immediately DETACH from the live session so "disabled" is truthful.
     if let Some(r) = record {
-        let conn_arc = state.conn.clone();
-        let name_for_log = r.name.clone();
-        let res = tauri::async_runtime::spawn_blocking(move || {
-            let guard = conn_arc.blocking_lock();
-            db::detach_one(&guard, &r.name)
-        })
-        .await
-        .map_err(|e| format!("task join error: {e}"))?;
-        // DETACH may fail if the database was never attached — that's fine.
-        match res {
-            Ok(()) => tracing::info!(category = "link", "{} detached from session", name_for_log),
-            Err(e) => tracing::warn!(category = "link", "detach warning for {}: {e}", name_for_log),
+        if db::is_sidecar_db_type(&r.db_type) {
+            // Sidecar connections were never ATTACHed — nothing to DETACH.
+            tracing::info!(category = "link", "{} (sidecar) — skipped DETACH", r.name);
+        } else {
+            let conn_arc = state.conn.clone();
+            let name_for_log = r.name.clone();
+            let res = tauri::async_runtime::spawn_blocking(move || {
+                let guard = conn_arc.blocking_lock();
+                db::detach_one(&guard, &r.name)
+            })
+            .await
+            .map_err(|e| format!("task join error: {e}"))?;
+            // DETACH may fail if the database was never attached — that's fine.
+            match res {
+                Ok(()) => tracing::info!(category = "link", "{} detached from session", name_for_log),
+                Err(e) => tracing::warn!(category = "link", "detach warning for {}: {e}", name_for_log),
+            }
         }
     }
     Ok(())
@@ -2283,8 +2319,29 @@ pub struct DbTableItem {
     pub kind: String, // "table" | "view"
 }
 
+/// Sidecar path: list a MaxCompute project's tables via the dbx JDBC sidecar
+/// (no DuckDB ATTACH). Returns flat table names (schema empty).
+fn list_maxcompute_tables(
+    r: &db::DbConnectionRecord,
+    paths: &crate::external::paths::SidecarPaths,
+) -> Result<Vec<DbTableItem>, String> {
+    let opts = r.maxcompute_opts();
+    let jars = paths.driver_jars(&opts.driver_coord)?;
+    let launcher = paths.dbx_launcher()?;
+    let mut sc = crate::external::jdbc_sidecar::JdbcSidecar::spawn(&launcher)?;
+    let conn_obj = crate::external::jdbc_sidecar::build_maxcompute_connection(r, &jars)?;
+    let names = sc.list_tables(&conn_obj, &opts.project, 5000);
+    sc.close();
+    let names = names?;
+    Ok(names
+        .into_iter()
+        .map(|n| DbTableItem { schema: String::new(), name: n, kind: "table".to_string() })
+        .collect())
+}
+
 #[tauri::command]
 pub async fn list_db_connection_tables(
+    app: tauri::AppHandle,
     config: db::DbConnectionRecord,
     force_refresh: Option<bool>,
     state: State<'_, AppState>,
@@ -2316,49 +2373,58 @@ pub async fn list_db_connection_tables(
         }
     }
 
-    // ── Cache miss / forced refresh: query the live database. Try the shared
-    //    session connection first (workspace connections are already ATTACHed
-    //    there as `db_{alias}`); on failure fall back to a throwaway connection.
-    let alias = db::workspace_attach_alias(&conn_name);
-    let conn_arc = state.conn.clone();
-    let alias_clone = alias.clone();
-    let name_clone = conn_name.clone();
-    let start = std::time::Instant::now();
-    // Use try_lock instead of blocking_lock to avoid a deadlock: if another
-    // async task (e.g. an agent stream) is holding the session connection,
-    // blocking_lock would stall the spawn_blocking thread forever, causing the
-    // frontend spinner to never stop. When the lock is unavailable, we fall
-    // through to the fallback path that opens a fresh throwaway connection.
-    let tables: Vec<DbTableItem> = match tauri::async_runtime::spawn_blocking(move || {
-        match conn_arc.try_lock() {
-            Ok(guard) => query_attached_tables(&guard, &alias_clone),
-            Err(_) => Err("session connection busy, will use fresh connection".to_string()),
-        }
-    })
-    .await
-    .map_err(|e| format!("task join error: {e}"))?
-    {
-        Ok(t) => {
-            tracing::info!(
-                category = "link",
-                "db_tables live query (attached) {} -> {} tables in {}ms",
-                name_clone,
-                t.len(),
-                start.elapsed().as_millis()
-            );
-            t
-        }
-        Err(e) => {
-            tracing::warn!(
-                category = "link",
-                "db_tables attached query failed for {} ({}), falling back to fresh connection",
-                conn_name, e
-            );
-            let config2 = config.clone();
-            tokio::task::spawn_blocking(move || list_connection_tables_impl(&config2))
-                .await
-                .map_err(|e| format!("Task execution error: {e}"))?
-                .map_err(|e| e)?
+    // ── Cache miss / forced refresh: query the live database. Sidecar DB types
+    //    (MaxCompute) route through the Java sidecar; ATTACH-based types try the
+    //    shared session first, then fall back to a throwaway ATTACH connection.
+    let tables: Vec<DbTableItem> = if db::is_sidecar_db_type(&config.db_type) {
+        let paths = crate::external::paths::SidecarPaths::resolve(&app)?;
+        let cfg = config.clone();
+        tauri::async_runtime::spawn_blocking(move || list_maxcompute_tables(&cfg, &paths))
+            .await
+            .map_err(|e| format!("task join error: {e}"))?
+            .map_err(|e| e)?
+    } else {
+        let alias = db::workspace_attach_alias(&conn_name);
+        let conn_arc = state.conn.clone();
+        let alias_clone = alias.clone();
+        let name_clone = conn_name.clone();
+        let start = std::time::Instant::now();
+        // Use try_lock instead of blocking_lock to avoid a deadlock: if another
+        // async task (e.g. an agent stream) is holding the session connection,
+        // blocking_lock would stall the spawn_blocking thread forever, causing the
+        // frontend spinner to never stop. When the lock is unavailable, we fall
+        // through to the fallback path that opens a fresh throwaway connection.
+        match tauri::async_runtime::spawn_blocking(move || {
+            match conn_arc.try_lock() {
+                Ok(guard) => query_attached_tables(&guard, &alias_clone),
+                Err(_) => Err("session connection busy, will use fresh connection".to_string()),
+            }
+        })
+        .await
+        .map_err(|e| format!("task join error: {e}"))?
+        {
+            Ok(t) => {
+                tracing::info!(
+                    category = "link",
+                    "db_tables live query (attached) {} -> {} tables in {}ms",
+                    name_clone,
+                    t.len(),
+                    start.elapsed().as_millis()
+                );
+                t
+            }
+            Err(e) => {
+                tracing::warn!(
+                    category = "link",
+                    "db_tables attached query failed for {} ({}), falling back to fresh connection",
+                    conn_name, e
+                );
+                let config2 = config.clone();
+                tokio::task::spawn_blocking(move || list_connection_tables_impl(&config2))
+                    .await
+                    .map_err(|e| format!("Task execution error: {e}"))?
+                    .map_err(|e| e)?
+            }
         }
     };
 
@@ -2382,15 +2448,131 @@ pub async fn list_db_connection_tables(
     Ok(tables)
 }
 
-#[tauri::command]
-pub async fn register_database_table(
+/// MaxCompute registration path: count via the dbx JDBC sidecar, bulk-materialize
+/// the table into the lake via the Arrow sidecar, then register a local source.
+/// (No DuckDB ATTACH — there's no MaxCompute extension.)
+async fn register_maxcompute_table(
     workspace: String,
     connection_id: String,
     schema_name: String,
     table_name: String,
-    db_type: String, // "postgres" | "mysql"
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<Vec<SourceTable>, String> {
+    let paths = crate::external::paths::SidecarPaths::resolve(&app)?;
+    let ws_dir = resolve_workspace_dir(&workspace)?;
+    let ws_dir_str = ws_dir.to_string_lossy().to_string();
+    let conn_arc = state.conn.clone();
+    let sources_clone = state.sources.clone();
+    let ws_path_clone = workspace.clone();
+
+    let res = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<SourceTable>> {
+        let sqlite = db::get_db_conn()?;
+        let conn_record = db::get_db_connection(&sqlite, &connection_id)?
+            .ok_or_else(|| format!("未找到数据库连接: {connection_id}"))?;
+        let opts = conn_record.maxcompute_opts();
+        let table_ref = conn_record.maxcompute_table_ref(&table_name);
+
+        let safe_conn_name = conn_record.name.chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+            .collect::<String>();
+        let local_table_name = format!("s_{}_{}", safe_conn_name, table_name)
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+            .collect::<String>();
+
+        // 1) row count via the JDBC sidecar (1-row result; instance-tunnel cap N/A)
+        let launcher = paths.dbx_launcher()?;
+        let jars = paths.driver_jars(&opts.driver_coord)?;
+        let mut sc = crate::external::jdbc_sidecar::JdbcSidecar::spawn(&launcher)?;
+        let conn_obj = crate::external::jdbc_sidecar::build_maxcompute_connection(&conn_record, &jars)?;
+        let count_sql = format!("SELECT count(*) AS c FROM {table_ref}");
+        let (_, count_rows) = sc.execute_query(&conn_obj, &count_sql, 1)?;
+        sc.close();
+        let full_rows = count_rows.get(0)
+            .and_then(|r| r.get(0))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+
+        // 2) bulk-materialize via the Arrow sidecar into the lake
+        let arrow_jar = paths.arrow_jar()?;
+        let guard = conn_arc.blocking_lock();
+        let _ = guard.execute(&format!("DROP TABLE IF EXISTS \"{local_table_name}\";"), []);
+        let _ = guard.execute(&format!("DROP VIEW IF EXISTS \"{local_table_name}\";"), []);
+        let stats = crate::external::arrow_sidecar::pull_table(
+            &guard, &conn_record, &opts, &table_ref, &local_table_name,
+            &arrow_jar, &jars, 0, 0,
+        )?;
+        let columns = schema::describe_view(&guard, &local_table_name)?;
+        drop(guard);
+
+        // 3) register the local materialized table as a source
+        let now = now_ms();
+        let record = db::SourceRecord {
+            table_name: local_table_name.clone(),
+            label: format!("{}.{}.{}", conn_record.name, schema_name, table_name),
+            kind: "maxcompute".to_string(),
+            storage: "table".to_string(),
+            file_path: format!("maxcompute://{}/{}/{}", connection_id, opts.project, table_name),
+            scan_path: local_table_name.clone(),
+            partition_keys: Vec::new(),
+            created_at: now,
+            name_source: "llm".to_string(),
+            file_mtime: now,
+            file_size: full_rows,
+            columns: columns.clone(),
+            row_count: Some(stats.rows as i64),
+            is_sampled: false,
+            full_row_count: Some(full_rows),
+            materialize_status: Some(db::mat_status::FULL.to_string()),
+            sheet: None,
+        };
+        db::upsert_source(&sqlite, &ws_path_clone, &record)?;
+        let _ = crate::okf::write_source_okf(
+            &ws_dir_str, &local_table_name, &record.label, &record.file_path,
+            full_rows, now, &columns, Some(full_rows));
+        let _ = crate::okf::write_pipeline_okf(
+            &ws_dir_str, &local_table_name, &record.label, &record.file_path, "table");
+
+        let records = db::list_sources(&sqlite, &ws_path_clone)?;
+        let mut result: Vec<SourceTable> = records.iter().map(build_source_table_from_record).collect();
+        let defs = db::list_object_defs(&sqlite, &ws_path_clone)?;
+        for d in &defs {
+            result.push(SourceTable {
+                name: d.table_name.clone(), label: d.table_name.clone(),
+                kind: SourceKind::View, storage: StorageKind::Custom,
+                path: String::new(), scan_path: String::new(), partition_keys: Vec::new(),
+                row_count_estimate: d.row_count, columns: d.columns.clone(),
+                is_sampled: false, full_row_count: None, sheet: None,
+            });
+        }
+        let mut cache = sources_clone.blocking_lock();
+        cache.clear();
+        cache.extend(result.iter().cloned()
+            .filter(|r| r.kind != SourceKind::View || r.storage != StorageKind::Custom));
+        Ok(result)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
+    .map_err(|e| e.to_string())?;
+    Ok(res)
+}
+
+#[tauri::command]
+pub async fn register_database_table(
+    app: tauri::AppHandle,
+    workspace: String,
+    connection_id: String,
+    schema_name: String,
+    table_name: String,
+    db_type: String, // "postgres" | "mysql" | "maxcompute"
     state: State<'_, AppState>,
 ) -> Result<Vec<SourceTable>, String> {
+    // MaxCompute (and future sidecar types) don't ATTACH via DuckDB — route to
+    // the sidecar-based registration (count via JDBC, bulk pull via Arrow tunnel).
+    if db::is_sidecar_db_type(&db_type) {
+        return register_maxcompute_table(workspace, connection_id, schema_name, table_name, state, app).await;
+    }
     let sqlite = db::get_db_conn()?;
     let conn_record = db::get_db_connection(&sqlite, &connection_id)?
         .ok_or_else(|| format!("未找到数据库连接: {}", connection_id))?;
@@ -2773,6 +2955,7 @@ mod tests {
 
     #[test]
     fn test_list_connection() {
+        let _ = db::init_global_db(); // ensure the global schema (incl. options column) is migrated
         let sqlite = db::get_db_conn().unwrap();
         let list = db::list_db_connections(&sqlite).unwrap();
         println!("Connections found: {:?}", list);
@@ -2793,6 +2976,7 @@ mod tests {
     /// (save → list → clear), without hitting any remote database.
     #[test]
     fn test_db_tables_cache() {
+        let _ = db::init_global_db(); // ensure the global schema (incl. options column) is migrated
         let mut sqlite = db::get_db_conn().unwrap();
         let list = db::list_db_connections(&sqlite).unwrap();
         let conn_id = match list.first() {

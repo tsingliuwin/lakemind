@@ -9,3 +9,16 @@ dist
 # Tauri updater signing keys (never commit)
 *.key
 *.pem
+
+# Spike / cloud credentials (MaxCompute AK/SK etc.) — never commit
+*.env
+.env*
+.env.local
+spike/secrets/
+
+# Spike build artifacts + experiment outputs (source code IS tracked)
+spike/host/target/
+spike/arrow-sidecar/*.class
+spike/arrow-sidecar/*.stderr
+spike/dbx-jdbc-plugin.zip
+spike/tables.txt

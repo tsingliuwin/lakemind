@@ -8,6 +8,7 @@
 
 mod commands;
 mod db;
+mod external;
 mod duckdb;
 mod error;
 mod logging;
@@ -66,6 +67,12 @@ pub fn run() {
             // Hand the AppHandle to the logging layer so it can emit to the
             // frontend `app-log` channel.
             logging::set_handle(_app.handle().clone());
+            // Cache the sidecar binary paths once so agent tools (which have no
+            // AppHandle) can reach them via `SidecarPaths::get()`. Non-fatal —
+            // the app still starts; MaxCompute sources just won't work until fixed.
+            if let Err(e) = external::paths::SidecarPaths::init(_app.handle()) {
+                tracing::warn!(category = "system", "sidecar paths init failed: {e}");
+            }
 
             #[cfg(not(target_os = "macos"))]
             {
@@ -117,6 +124,7 @@ pub fn run() {
             commands::upsert_db_connection,
             commands::delete_db_connection,
             commands::test_db_connection,
+            commands::check_java_runtime,
             commands::test_llm_connection,
             commands::link_connection_to_workspace,
             commands::unlink_connection_from_workspace,

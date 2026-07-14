@@ -1,0 +1,21 @@
+[package]
+name = "spike-host"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+serde_json = "1"
+arrow = "58"
+duckdb = { version = "1.5.4", features = ["bundled", "appender-arrow"] }
+
+[[bin]]
+name = "spike-host"
+path = "src/main.rs"
+
+[[bin]]
+name = "arrow-host"
+path = "src/bin/arrow_host.rs"
+
+[profile.release]
+debug = 0

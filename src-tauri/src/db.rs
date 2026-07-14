@@ -561,11 +561,17 @@ pub fn init_global_db() -> Result<(), String> {
             username      TEXT NOT NULL,
             password      TEXT NOT NULL,
             ssl_mode      TEXT NOT NULL DEFAULT 'disable',
-            created_at    INTEGER NOT NULL
+            created_at    INTEGER NOT NULL,
+            options       TEXT
         )",
         [],
     )
     .map_err(|e| format!("Failed to create db_connections table: {e}"))?;
+
+    // Sidecar DB types (MaxCompute, future generic JDBC) store type-specific
+    // params (endpoint/project/region/driver-coord/...) as JSON in `options`.
+    // Idempotent ALTER for databases created before this column existed.
+    let _ = conn.execute("ALTER TABLE db_connections ADD COLUMN options TEXT;", []);
 
     // workspace_connections: many-to-many relationship
     conn.execute(
@@ -658,7 +664,7 @@ pub fn init_global_db() -> Result<(), String> {
 pub struct DbConnectionRecord {
     pub id: String,
     pub name: String,
-    pub db_type: String, // "postgres" | "mysql" | "sqlite"
+    pub db_type: String, // "postgres" | "mysql" | "sqlite" | "maxcompute"
     pub host: String,
     pub port: i32,
     pub database_name: String, // for sqlite: the local file path; host/port/user/password unused
@@ -666,13 +672,76 @@ pub struct DbConnectionRecord {
     pub password: String,
     pub ssl_mode: String,
     pub created_at: i64,
+    /// JSON of type-specific params for sidecar DB types (MaxCompute: endpoint,
+    /// project, region, tunnel_endpoint, driver_coord, concurrency). None for
+    /// ATTACH-based types (postgres/mysql/sqlite). AK/SK reuse username/password.
+    pub options: Option<String>,
+}
+
+/// `db_type` values whose external connectivity is provided by a Java sidecar
+/// (not via DuckDB ATTACH). They store params in `DbConnectionRecord.options`
+/// and skip the ATTACH/DETACH path entirely.
+pub fn is_sidecar_db_type(db_type: &str) -> bool {
+    db_type == "maxcompute"
+}
+
+/// Parsed MaxCompute-specific options stored in `DbConnectionRecord.options`.
+/// AK/SK are read from the record's `username`/`password` (the generic credential
+/// slots); the rest lives in this JSON.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MaxcomputeOpts {
+    pub endpoint: String,
+    pub project: String,
+    pub region: Option<String>,
+    pub tunnel_endpoint: Option<String>,
+    /// Maven coordinate, e.g. "com.aliyun.odps:odps-jdbc:3.9.3". `#[serde(default)]`
+    /// so a record that omits it still parses; `maxcompute_opts` fills the standard.
+    #[serde(default)]
+    pub driver_coord: String,
+    /// Parallel download sessions for bulk materialize (spike-validated optimum ~5–6).
+    pub concurrency: Option<u32>,
+}
+
+impl DbConnectionRecord {
+    /// Parse `options` JSON as MaxcomputeOpts, defaulting driver_coord if empty.
+    /// `username`/`password` hold AK_ID/AK_SECRET (not part of opts).
+    pub fn maxcompute_opts(&self) -> MaxcomputeOpts {
+        let mut o: MaxcomputeOpts = self
+            .options
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+        if o.driver_coord.is_empty() {
+            o.driver_coord = "com.aliyun.odps:odps-jdbc:3.9.3".to_string();
+        }
+        o
+    }
+
+    /// Fully-qualified MaxCompute table reference (`project.table`); passes
+    /// through if `table` already contains a dot.
+    pub fn maxcompute_table_ref(&self, table: &str) -> String {
+        let p = self.maxcompute_opts().project;
+        if table.contains('.') {
+            table.to_string()
+        } else {
+            format!("{p}.{table}")
+        }
+    }
+
+    pub fn maxcompute_ak_id(&self) -> &str {
+        &self.username
+    }
+    pub fn maxcompute_ak_secret(&self) -> &str {
+        &self.password
+    }
 }
 
 pub fn create_db_connection(conn: &Connection, r: &DbConnectionRecord) -> Result<(), String> {
     conn.execute(
-        "INSERT INTO db_connections (id, name, db_type, host, port, database_name, username, password, ssl_mode, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        rusqlite::params![r.id, r.name, r.db_type, r.host, r.port, r.database_name, r.username, r.password, r.ssl_mode, r.created_at],
+        "INSERT INTO db_connections (id, name, db_type, host, port, database_name, username, password, ssl_mode, created_at, options)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rusqlite::params![r.id, r.name, r.db_type, r.host, r.port, r.database_name, r.username, r.password, r.ssl_mode, r.created_at, r.options],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -680,9 +749,9 @@ pub fn create_db_connection(conn: &Connection, r: &DbConnectionRecord) -> Result
 
 pub fn update_db_connection(conn: &Connection, r: &DbConnectionRecord) -> Result<(), String> {
     conn.execute(
-        "UPDATE db_connections SET name=?, db_type=?, host=?, port=?, database_name=?, username=?, password=?, ssl_mode=?
+        "UPDATE db_connections SET name=?, db_type=?, host=?, port=?, database_name=?, username=?, password=?, ssl_mode=?, options=?
          WHERE id=?",
-        rusqlite::params![r.name, r.db_type, r.host, r.port, r.database_name, r.username, r.password, r.ssl_mode, r.id],
+        rusqlite::params![r.name, r.db_type, r.host, r.port, r.database_name, r.username, r.password, r.ssl_mode, r.options, r.id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -696,7 +765,7 @@ pub fn delete_db_connection(conn: &Connection, id: &str) -> Result<(), String> {
 
 pub fn list_db_connections(conn: &Connection) -> Result<Vec<DbConnectionRecord>, String> {
     let mut stmt = conn
-        .prepare("SELECT id, name, db_type, host, port, database_name, username, password, ssl_mode, created_at FROM db_connections ORDER BY created_at ASC")
+        .prepare("SELECT id, name, db_type, host, port, database_name, username, password, ssl_mode, created_at, options FROM db_connections ORDER BY created_at ASC")
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
@@ -711,6 +780,7 @@ pub fn list_db_connections(conn: &Connection) -> Result<Vec<DbConnectionRecord>,
                 password: row.get(7)?,
                 ssl_mode: row.get(8)?,
                 created_at: row.get(9)?,
+                options: row.get(10)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -723,7 +793,7 @@ pub fn list_db_connections(conn: &Connection) -> Result<Vec<DbConnectionRecord>,
 
 pub fn get_db_connection(conn: &Connection, id: &str) -> Result<Option<DbConnectionRecord>, String> {
     let mut stmt = conn
-        .prepare("SELECT id, name, db_type, host, port, database_name, username, password, ssl_mode, created_at FROM db_connections WHERE id = ?")
+        .prepare("SELECT id, name, db_type, host, port, database_name, username, password, ssl_mode, created_at, options FROM db_connections WHERE id = ?")
         .map_err(|e| e.to_string())?;
     let mut rows = stmt
         .query_map([id], |row| {
@@ -738,6 +808,7 @@ pub fn get_db_connection(conn: &Connection, id: &str) -> Result<Option<DbConnect
                 password: row.get(7)?,
                 ssl_mode: row.get(8)?,
                 created_at: row.get(9)?,
+                options: row.get(10)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -768,7 +839,7 @@ pub fn unlink_connection_from_workspace(conn: &Connection, ws_path: &str, conn_i
 
 pub fn list_workspace_connections(conn: &Connection, ws_path: &str) -> Result<Vec<DbConnectionRecord>, String> {
     let mut stmt = conn
-        .prepare("SELECT c.id, c.name, c.db_type, c.host, c.port, c.database_name, c.username, c.password, c.ssl_mode, c.created_at
+        .prepare("SELECT c.id, c.name, c.db_type, c.host, c.port, c.database_name, c.username, c.password, c.ssl_mode, c.created_at, c.options
                   FROM db_connections c
                   JOIN workspace_connections wc ON c.id = wc.connection_id
                   WHERE wc.workspace_path = ?
@@ -787,6 +858,7 @@ pub fn list_workspace_connections(conn: &Connection, ws_path: &str) -> Result<Ve
                 password: row.get(7)?,
                 ssl_mode: row.get(8)?,
                 created_at: row.get(9)?,
+                options: row.get(10)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -916,6 +988,14 @@ pub fn build_attach_sql(r: &DbConnectionRecord, conn_name: &str) -> String {
 /// ATTACH a single external database connection to a DuckDB session under the
 /// alias `db_{safe_name}`. Loads (INSTALL/LOAD) the driver first.
 pub fn attach_one(conn: &duckdb::Connection, r: &DbConnectionRecord) -> Result<(), String> {
+    // Sidecar DB types (MaxCompute, future generic JDBC) don't ATTACH via
+    // DuckDB — connectivity is on-demand through the Java sidecar. Skip ATTACH
+    // entirely so workspace link / startup / switch don't try (and fail) to
+    // `LOAD maxcompute` / ATTACH a non-DuckDB-extension source.
+    if is_sidecar_db_type(&r.db_type) {
+        tracing::info!(category = "link", "skipped ATTACH for sidecar connection: {}", r.name);
+        return Ok(());
+    }
     let load_sql = format!("LOAD {};", r.db_type);
     if conn.execute(&load_sql, []).is_err() {
         let install_sql = format!("INSTALL {};", r.db_type);

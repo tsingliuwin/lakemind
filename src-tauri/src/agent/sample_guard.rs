@@ -65,6 +65,14 @@ fn build_intercept_message(rec: &crate::db::SourceRecord) -> String {
     } else {
         "2) 或调用 `materialize_remote_table` 工具，将该表全量物化到本地后再做本地聚合分析。"
     };
+    // MaxCompute has no DuckDB `{kind}_query` pushdown function (no extension) —
+    // route the agent to the sidecar-based pushdown tool instead.
+    if kind == "maxcompute" {
+        return format!(
+            "[已拦截] {intro}\n\n请改用全量路径之一：\n1) 原生下推（推荐，最快）：调用 `maxcompute_pushdown_query` 工具，传入 table_name=\"{table}\" 和你要执行的聚合 SQL（FROM 用该表在 MaxCompute 远程的 project.table，如 yantubi.dim_users_sc_track），只拉回结果行。\n{mat_hint}",
+            intro = intro, table = rec.table_name, mat_hint = mat_hint,
+        );
+    }
     format!(
         "[已拦截] {intro}\n\n请改用全量路径之一：\n1) 原生下推（推荐，最快）：将聚合下推到远程库执行，只拉回结果，形如：\n   SELECT * FROM {kind}_query('{alias}', '<你的聚合 SQL；FROM 用该表在远程库的 schema.table>')\n{mat_hint}",
         intro = intro, kind = kind, alias = db_alias, mat_hint = mat_hint,

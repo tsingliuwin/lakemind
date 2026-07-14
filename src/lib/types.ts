@@ -1,12 +1,12 @@
 // 通信类型定义 —— 与 src-tauri/src/model.rs 一一对应。
 // 修改 M1 通信格式时请同步两侧。
 
-export type SourceKind = "parquet" | "csv" | "json" | "delta" | "excel" | "table" | "view" | "postgres" | "mysql" | "sqlite";
+export type SourceKind = "parquet" | "csv" | "json" | "delta" | "excel" | "table" | "view" | "postgres" | "mysql" | "sqlite" | "maxcompute";
 
 export interface DbConnection {
   id: string;
   name: string;
-  dbType: "postgres" | "mysql" | "sqlite";
+  dbType: "postgres" | "mysql" | "sqlite" | "maxcompute";
   host: string;
   port: number;
   /** For sqlite: the local file path. host/port/username/password are unused. */
@@ -15,6 +15,9 @@ export interface DbConnection {
   password?: string;
   sslMode?: string;
   createdAt?: number;
+  /** JSON string of type-specific params for sidecar DB types (MaxCompute).
+   *  Null for ATTACH-based types (postgres/mysql/sqlite). */
+  options?: string;
 }
 
 /** 文件导入进度事件（后端 emit "import-progress"）。 */
