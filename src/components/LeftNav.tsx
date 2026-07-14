@@ -213,6 +213,7 @@ export default function LeftNav(props: {
   const [dbTables, setDbTables] = createSignal<Record<string, DbTableItem[]>>({});
   const [expandedDbConns, setExpandedDbConns] = createSignal<Record<string, boolean>>({});
   const [loadingDbConns, setLoadingDbConns] = createSignal<Record<string, boolean>>({});
+  const [registeringTable, setRegisteringTable] = createSignal<string | null>(null);
   const [dbSectionExpanded, setDbSectionExpanded] = createSignal(true);
 
   const loadWorkspaceConnections = async () => {
@@ -275,6 +276,8 @@ export default function LeftNav(props: {
 
   const handleRegisterDbTable = async (c: DbConnection, table: DbTableItem) => {
     if (!props.workspacePath) return;
+    const regKey = `${c.id}/${table.schema}/${table.name}`;
+    setRegisteringTable(regKey);
     try {
       const updatedSources = await invoke<SourceTable[]>("register_database_table", {
         workspace: props.workspacePath,
@@ -288,6 +291,8 @@ export default function LeftNav(props: {
       // The backend already returns a complete, self-contained Chinese message
       // (e.g. privilege failure with GRANT hint), so surface it verbatim.
       alert(err);
+    } finally {
+      setRegisteringTable(null);
     }
   };
 
@@ -959,6 +964,7 @@ export default function LeftNav(props: {
                                     <For each={tables()}>
                                       {(tbl) => {
                                         const registered = () => props.sources.some(s => s.path === `db://${connId}/${tbl.schema}/${tbl.name}`);
+                                        const isRegistering = () => registeringTable() === `${connId}/${tbl.schema}/${tbl.name}`;
                                         return (
                                           <div style="display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 2px 8px; border-radius: 4px;" class="tree-leaf">
                                             <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -970,13 +976,17 @@ export default function LeftNav(props: {
                                                 class="ws-action-icon-btn"
                                                 title={t("addBtn")}
                                                 onClick={(e) => { e.stopPropagation(); handleRegisterDbTable(conn, tbl); }}
-                                                disabled={props.busy}
+                                                disabled={props.busy || isRegistering()}
                                                 style="width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim);"
                                               >
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
-                                                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                                                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                                                </svg>
+                                                <Show when={isRegistering()} fallback={
+                                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
+                                                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                                                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                                                  </svg>
+                                                }>
+                                                  <div class="mt-spin" style="width: 10px; height: 10px;" />
+                                                </Show>
                                               </button>
                                             }>
                                               <span style="color: var(--text-success); display: inline-flex; padding-right: 4px;" title={t("addedLabel")}>
@@ -1013,6 +1023,7 @@ export default function LeftNav(props: {
                                                 <For each={schemaTables}>
                                                   {(tbl) => {
                                                     const registered = () => props.sources.some(s => s.path === `db://${connId}/${tbl.schema}/${tbl.name}`);
+                                                    const isRegistering = () => registeringTable() === `${connId}/${tbl.schema}/${tbl.name}`;
                                                     return (
                                                       <div style="display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 2px 8px; border-radius: 4px;" class="tree-leaf">
                                                         <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -1024,13 +1035,17 @@ export default function LeftNav(props: {
                                                             class="ws-action-icon-btn"
                                                             title={t("addBtn")}
                                                             onClick={(e) => { e.stopPropagation(); handleRegisterDbTable(conn, tbl); }}
-                                                            disabled={props.busy}
+                                                            disabled={props.busy || isRegistering()}
                                                             style="width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim);"
                                                           >
-                                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
-                                                              <line x1="12" y1="5" x2="12" y2="19"></line>
-                                                              <line x1="5" y1="12" x2="19" y2="12"></line>
-                                                            </svg>
+                                                            <Show when={isRegistering()} fallback={
+                                                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px; display: block;">
+                                                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                                                              </svg>
+                                                            }>
+                                                              <div class="mt-spin" style="width: 10px; height: 10px;" />
+                                                            </Show>
                                                           </button>
                                                         }>
                                                           <span style="color: var(--text-success); display: inline-flex; padding-right: 4px;" title={t("addedLabel")}>
