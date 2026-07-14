@@ -728,13 +728,6 @@ impl DbConnectionRecord {
             format!("{p}.{table}")
         }
     }
-
-    pub fn maxcompute_ak_id(&self) -> &str {
-        &self.username
-    }
-    pub fn maxcompute_ak_secret(&self) -> &str {
-        &self.password
-    }
 }
 
 pub fn create_db_connection(conn: &Connection, r: &DbConnectionRecord) -> Result<(), String> {
