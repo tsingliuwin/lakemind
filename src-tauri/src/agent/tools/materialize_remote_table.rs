@@ -226,6 +226,18 @@ impl Tool for MaterializeRemoteTableTool {
         let actual_table_name = source_record.table_name.clone();
         let full_path = source_record.scan_path.clone();
 
+        // ── MaxCompute fast lane ────────────────────────────────────────────
+        // MaxCompute has no DuckDB ATTACH, so the INSERT-INTO-SELECT pattern
+        // below can't reach it. Instead we drive the Arrow sidecar directly,
+        // pulling per-partition (for partitioned tables) or in row-windows
+        // (for non-partitioned tables). Resume + partial-status reuse the
+        // same `materialized_partitions` watermark mechanism.
+        if source_record.kind == "maxcompute" {
+            return materialize_maxcompute(
+                self, source_record, &partitions, &call_id, hard_secs, start,
+            ).await;
+        }
+
         // 2. Decide the partition strategy.
         //    - incremental / on-demand: reuse the stored partition key (or infer
         //      from the partitions' shape for on-demand).
@@ -713,6 +725,268 @@ impl Tool for MaterializeRemoteTableTool {
         );
         Ok(summary)
     }
+}
+
+// ───────────── MaxCompute materialization (no ATTACH) ─────────────
+
+/// Row-window chunk size for non-partitioned MaxCompute tables. Each chunk is
+/// one Arrow sidecar session (~direct-memory bounded by MaxDirectMemorySize).
+const MC_WINDOW: u64 = 500_000;
+
+/// Drive the MaxCompute Arrow sidecar to materialize a table into the local
+/// DuckDB lake. Unlike the ATTACH path, this runs entirely through the sidecar
+/// (JDBC for partition discovery + Arrow tunnel for bulk rows).
+///
+/// - Partitioned table: discover partitions via `SHOW PARTITIONS`, pull each
+///   one with `pull_table(..., partition_spec)`. Resume skips already-materialized
+///   partitions (tracked in `materialized_partitions`).
+/// - Non-partitioned table: pull in row-windows of `MC_WINDOW`, resuming from
+///   the local row count.
+///
+/// On timeout/failure the partial data is kept and `materialize_status` is set
+/// to `partial` so a later call resumes. A successful full pull sets `full`.
+async fn materialize_maxcompute(
+    tool: &MaterializeRemoteTableTool,
+    mut rec: crate::db::SourceRecord,
+    partitions: &[PartitionRange],
+    call_id: &str,
+    hard_secs: u64,
+    start: std::time::Instant,
+) -> Result<String, ToolError> {
+    let local_name = rec.table_name.clone();
+    let conn = tool.app_state.conn.clone();
+    let ws_path = tool.app_state.workspace_path.lock().await.clone();
+
+    // Resolve the connection record + opts from file_path = "maxcompute://{conn_id}/{project}/{table}".
+    let file_path = rec.file_path.clone();
+    let segs: Vec<&str> = file_path.split('/').collect();
+    if segs.len() < 4 {
+        return Err(ToolError(format!("无法从 file_path 解析连接: {file_path}")));
+    }
+    let conn_id = segs[2].to_string();
+    let remote_table = segs[segs.len() - 1].to_string();
+    // Resolve sidecar paths + driver jars once (idempotent).
+    let paths = crate::external::paths::SidecarPaths::get()
+        .map_err(|e| ToolError(format!("sidecar 路径解析失败: {e}")))?;
+    let sqlite_conn = crate::db::get_db_conn()
+        .map_err(|e| ToolError(format!("打开元数据库失败: {e}")))?;
+    let conn_record = crate::db::get_db_connection(&sqlite_conn, &conn_id)
+        .map_err(|e| ToolError(format!("查询连接失败: {e}")))?
+        .ok_or_else(|| ToolError(format!("未找到连接 {conn_id}")))?;
+    let opts = conn_record.maxcompute_opts();
+    let table_ref = conn_record.maxcompute_table_ref(&remote_table);
+    let jars = paths.driver_jars(&opts.driver_coord)
+        .map_err(|e| ToolError(format!("解析驱动 jar 失败: {e}")))?;
+    let arrow_jar = paths.arrow_jar()
+        .map_err(|e| ToolError(format!("解析 arrow jar 路径失败: {e}")))?;
+    let launcher = paths.dbx_launcher()
+        .map_err(|e| ToolError(format!("解析 launcher 路径失败: {e}")))?;
+
+    // Discover whether the table is partitioned (and list partitions).
+    // Non-partitioned tables error on SHOW PARTITIONS → empty vec.
+    let remote_partitions: Vec<String> = {
+        let conn_obj = crate::external::jdbc_sidecar::build_maxcompute_connection(&conn_record, &jars)
+            .map_err(|e| ToolError(e))?;
+        let mut sc = crate::external::jdbc_sidecar::JdbcSidecar::spawn(&launcher)
+            .map_err(|e| ToolError(e))?;
+        let res = sc.list_partitions(&conn_obj, &table_ref).unwrap_or_default();
+        sc.close();
+        res
+    };
+    let is_partitioned = !remote_partitions.is_empty();
+
+    // Determine resume watermark + what to pull.
+    let already_done: Vec<String> = rec
+        .materialized_partitions
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+        .unwrap_or_default();
+    let is_resume = rec.materialize_status.as_deref() == Some(crate::db::mat_status::PARTIAL)
+        && !already_done.is_empty();
+
+    // On a fresh (non-resume, non-on-demand) full pull, drop any prior local table.
+    let rebuild = !is_resume && partitions.is_empty();
+    if rebuild {
+        let conn_drop = conn.clone();
+        let drop_name = local_name.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let guard = conn_drop.blocking_lock();
+            let _ = guard.execute(&format!("DROP TABLE IF EXISTS \"{drop_name}\";"), []);
+        }).await;
+    }
+
+    // Emit a "running" notice.
+    let mode_label = if is_partitioned { "分区表逐分区" } else { "非分区表行窗口" };
+    emit_tool_result(
+        &tool.window, &tool.task_id, call_id, "running",
+        format!("正在通过 Arrow sidecar 物化「{}」（{}{}）…",
+            local_name, mode_label,
+            if is_resume { "，断点续传" } else { "" }),
+        None, None, None, None,
+    );
+
+    // Clone what the blocking closure needs.
+    let conn_record_c = conn_record.clone();
+    let opts_c = opts.clone();
+    let table_ref_c = table_ref.clone();
+    let local_name_c = local_name.clone();
+    let arrow_jar_c = arrow_jar.clone();
+    let jars_c = jars.clone();
+    let remote_partitions_c = remote_partitions.clone();
+    let already_done_c = already_done.clone();
+    let window_c = tool.window.clone();
+    let task_c = tool.task_id.clone();
+    let call_c = call_id.to_string();
+    let full_row_count_c = rec.full_row_count.unwrap_or(0).max(0) as u64;
+    let is_resume_c = is_resume;
+    let conn_for_refresh = conn.clone();
+
+    let blocking_fut = tokio::task::spawn_blocking(move || -> Result<(u64, Vec<String>), String> {
+        let guard = conn.blocking_lock();
+        let mut _written: u64 = 0; // diagnostic; final count uses local row count
+        let mut done_set: Vec<String> = already_done_c.clone();
+
+        if is_partitioned {
+            // Pull each remote partition (skipping already-materialized ones).
+            let total = remote_partitions_c.len();
+            for (i, pspec) in remote_partitions_c.iter().enumerate() {
+                if done_set.iter().any(|d| d == pspec) {
+                    continue; // already materialized in a prior partial run
+                }
+                let stats = crate::external::arrow_sidecar::pull_table(
+                    &guard, &conn_record_c, &opts_c, &table_ref_c, &local_name_c,
+                    &arrow_jar_c, &jars_c, 0, 0, Some(pspec),
+                )?;
+                _written += stats.rows;
+                done_set.push(pspec.clone());
+                emit_tool_result(&window_c, &task_c, &call_c, "running",
+                    format!("分区物化中：{done}/{total} 完成（{pspec}，{rows} 行），累计 {w} 行",
+                        done = i + 1, total = total, pspec = pspec, rows = stats.rows, w = _written),
+                    None, None, None, None);
+            }
+        } else {
+            // Non-partitioned: row-window pull. Resume from the local row count.
+            let mut start_row: u64 = if is_resume_c {
+                guard.query_row(
+                    &format!("SELECT count(*) FROM \"{}\"", local_name_c.replace('"', "\"\"")),
+                    [], |r| r.get::<_, i64>(0),
+                ).unwrap_or(0) as u64
+            } else { 0 };
+            let full = full_row_count_c;
+            loop {
+                let remaining = if full > 0 { full.saturating_sub(start_row) } else { 0 };
+                let count = if remaining > 0 { remaining.min(MC_WINDOW) } else { MC_WINDOW };
+                let stats = crate::external::arrow_sidecar::pull_table(
+                    &guard, &conn_record_c, &opts_c, &table_ref_c, &local_name_c,
+                    &arrow_jar_c, &jars_c, start_row, count, None,
+                )?;
+                _written += stats.rows;
+                start_row += stats.rows;
+                emit_tool_result(&window_c, &task_c, &call_c, "running",
+                    format!("行窗口物化中：已写入 {w} 行（本批 {b} 行）",
+                        w = start_row, b = stats.rows),
+                    None, None, None, None);
+                // If the sidecar returned fewer rows than requested, it hit EOF.
+                if stats.rows < count || count == 0 {
+                    break;
+                }
+                // Guard against an empty / unknown-size table looping forever.
+                if stats.rows == 0 { break; }
+            }
+        }
+        Ok((_written, done_set))
+    });
+
+    // Apply the hard timeout.
+    let exec_res = if hard_secs > 0 {
+        match tokio::time::timeout(std::time::Duration::from_secs(hard_secs), blocking_fut).await {
+            Ok(r) => r
+                .map_err(|e| ToolError(format!("线程执行失败: {e}")))
+                .and_then(|res| res.map_err(ToolError)),
+            Err(_) => Err(ToolError(format!(
+                "物化已达到最大等待时间（{hard_secs} 秒）被强制终止。已物化部分已保留，可再次调用续传。"
+            ))),
+        }
+    } else {
+        blocking_fut.await
+            .map_err(|e| ToolError(format!("线程执行失败: {e}")))
+            .and_then(|res| res.map_err(ToolError))
+    };
+
+    let elapsed = start.elapsed().as_millis() as u64;
+
+    // On failure: keep the partial local table + persist PARTIAL status + the
+    // materialized-partitions watermark so the next call resumes.
+    if let Err(ref err) = exec_res {
+        let mut partial_rec = rec.clone();
+        partial_rec.materialize_status = Some(crate::db::mat_status::PARTIAL.to_string());
+        partial_rec.is_sampled = false;
+        partial_rec.storage = "table".to_string();
+        let ws_p = ws_path.clone();
+        let _ = tokio::task::spawn_blocking(move || -> Result<(), String> {
+            let sqlite = crate::db::get_db_conn()?;
+            let _ = crate::db::upsert_source(&sqlite, &ws_p, &partial_rec);
+            Ok(())
+        }).await;
+        emit_tool_result(
+            &tool.window, &tool.task_id, call_id, "error",
+            format!("{} 已保留已物化部分（断点续传），下次调用将自动从断点继续。", err.0),
+            None, None, Some(elapsed), None,
+        );
+        return Err(err.clone());
+    }
+
+    let (_written, done_set) = exec_res.unwrap();
+    let final_status = if partitions.is_empty() {
+        crate::db::mat_status::FULL
+    } else {
+        crate::db::mat_status::PARTIAL // on-demand: deliberately partial
+    };
+
+    // Refresh metadata: columns + row count + status + watermark.
+    let conn_c2 = conn_for_refresh.clone();
+    let local_name2 = local_name.clone();
+    let (new_cols, local_rows): (Vec<crate::model::ColumnInfo>, i64) = tokio::task::spawn_blocking(
+        move || -> Result<(Vec<crate::model::ColumnInfo>, i64), String> {
+            let guard = conn_c2.blocking_lock();
+            let cols = crate::duckdb::schema::describe_view(&guard, &local_name2).unwrap_or_default();
+            let n: i64 = guard.query_row(
+                &format!("SELECT count(*) FROM \"{}\"", local_name2.replace('"', "\"\"")),
+                [], |r| r.get(0),
+            ).unwrap_or(0);
+            Ok((cols, n))
+        })
+    .await
+    .map_err(|e| ToolError(format!("线程执行失败: {e}")))?
+    .map_err(ToolError)?;
+
+    rec.storage = "table".to_string();
+    rec.is_sampled = false;
+    rec.materialize_status = Some(final_status.to_string());
+    rec.row_count = Some(local_rows);
+    rec.columns = new_cols.clone();
+    if is_partitioned {
+        rec.materialized_partitions = Some(serde_json::to_string(&done_set).unwrap_or_default());
+    }
+
+    let rec_clone = rec.clone();
+    let ws_p = ws_path.clone();
+    let _ = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let sqlite = crate::db::get_db_conn()?;
+        crate::db::upsert_source(&sqlite, &ws_p, &rec_clone)?;
+        Ok(())
+    }).await;
+
+    let summary = format!(
+        "成功将 MaxCompute 表 {} (本地: {}) 物化到本地，共 {} 行（{}{}）。",
+        table_ref, local_name, local_rows, mode_label,
+        if is_resume { "，断点续传完成" } else { "" },
+    );
+    emit_tool_result(
+        &tool.window, &tool.task_id, call_id, "ok",
+        summary.clone(), None, None, Some(elapsed), None,
+    );
+    Ok(summary)
 }
 
 /// `SELECT MIN(col), MAX(col)` for an integer partition column as i64 bounds.

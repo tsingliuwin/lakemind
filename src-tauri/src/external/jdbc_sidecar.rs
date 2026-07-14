@@ -147,6 +147,19 @@ impl JdbcSidecar {
             .collect())
     }
 
+    /// List the partition specs of a MaxCompute table via `SHOW PARTITIONS`.
+    /// Returns bare specs like `["ds=20250701", "ds=20250702", ...]` (multi-level
+    /// as `ds=20250701/region=cn`). Empty vec for non-partitioned tables.
+    pub fn list_partitions(&mut self, conn: &Value, table_ref: &str) -> Result<Vec<String>, String> {
+        let sql = format!("SHOW PARTITIONS {table_ref}");
+        let (_, rows) = self.execute_query(conn, &sql, 10_000)?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| r.into_iter().next())
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect())
+    }
+
     /// One-shot SQL: paginate `executeQueryPage`/`fetchQueryPage` until the
     /// session is exhausted (or `max_rows` reached). Returns (columns, rows).
     /// The ODPS instance-tunnel caps each SELECT at 10000 rows, which is fine

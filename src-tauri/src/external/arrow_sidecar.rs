@@ -64,14 +64,18 @@ fn arrow_to_duckdb_type(t: &DataType) -> &'static str {
     }
 }
 
-/// Pull a MaxCompute table (or a `[start, start+count)` row window of it) through
-/// the Arrow sidecar and ingest it into DuckDB as `local_table`.
+/// Pull a MaxCompute table (or a `[start, start+count)` row window of it, or a
+/// single partition of a partitioned table) through the Arrow sidecar and
+/// ingest it into DuckDB as `local_table`.
 ///
 /// - `table_ref`: fully-qualified `project.table` (the sidecar resolves the
 ///   session's default project from `ODPS_PROJECT`; a bare name also works).
 /// - `sidecar_jar`: path to `arrow-maxcompute-sidecar.jar` (a bundled resource).
 /// - `driver_jars`: resolved vendor JARs (odps-sdk-core etc.) — runtime classpath.
-/// - `start` / `count`: row window; `count == 0` means "to end of table".
+/// - `start` / `count`: row window; `count == 0` means "to end of table/partition".
+/// - `partition_spec`: when `Some`, download only that partition (e.g.
+///   `ds=20250701` or multi-level `ds=20250701/region=cn`). Required for
+///   partitioned tables; ignored for non-partitioned tables.
 ///
 /// AK/SK are passed via the child env (`ODPS_ACCESS_KEY_ID/SECRET`), never logged.
 pub fn pull_table(
@@ -84,6 +88,7 @@ pub fn pull_table(
     driver_jars: &[String],
     start: u64,
     count: u64,
+    partition_spec: Option<&str>,
 ) -> Result<PullStats, String> {
     let java = crate::external::jdbc_sidecar::find_java_bin()
         .ok_or_else(|| "未找到 Java 运行时（MaxCompute 物化需要 JRE 17+）".to_string())?;
@@ -96,14 +101,21 @@ pub fn pull_table(
     cp.push_str(sidecar_jar);
 
     let t0 = Instant::now();
-    let mut child = Command::new(&java)
-        .args(ADD_OPENS)
+    let mut cmd = Command::new(&java);
+    cmd.args(ADD_OPENS)
         .arg("-cp")
         .arg(&cp)
         .arg("ArrowSidecar")
         .arg(table_ref)
         .arg(start.to_string())
-        .arg(count.to_string())
+        .arg(count.to_string());
+    // Optional 4th arg: partition spec for partitioned tables.
+    if let Some(ps) = partition_spec {
+        if !ps.is_empty() {
+            cmd.arg(ps);
+        }
+    }
+    let mut child = cmd
         .env("ODPS_ENDPOINT", &opts.endpoint)
         .env("ODPS_ACCESS_KEY_ID", rec.username.as_str())
         .env("ODPS_ACCESS_KEY_SECRET", rec.password.as_str())
@@ -119,14 +131,18 @@ pub fn pull_table(
         .map_err(|e| format!("打开 Arrow IPC 流失败: {e}"))?;
     let schema = stream.schema().clone();
 
-    // CREATE TABLE from the Arrow schema (DuckDB infers nothing here).
+    // CREATE TABLE IF NOT EXISTS from the Arrow schema. For a fresh pull this
+    // creates the table; for subsequent partition/window pulls into the same
+    // local table, the IF NOT EXISTS makes it a no-op (the appender below
+    // appends to the existing table). This lets the caller drive multiple
+    // pull_table() calls into one local table without managing DDL itself.
     let cols: Vec<String> = schema
         .fields()
         .iter()
         .enumerate()
         .map(|(i, f)| format!("c{} {}", i + 1, arrow_to_duckdb_type(f.data_type())))
         .collect();
-    let create_sql = format!("CREATE TABLE \"{local_table}\" ({});", cols.join(", "));
+    let create_sql = format!("CREATE TABLE IF NOT EXISTS \"{local_table}\" ({});", cols.join(", "));
     duck_conn
         .execute(&create_sql, [])
         .map_err(|e| format!("建本地表失败: {e}"))?;
@@ -136,12 +152,23 @@ pub fn pull_table(
         .map_err(|e| format!("打开 appender 失败: {e}"))?;
     let mut rows: u64 = 0;
     let mut batches: u64 = 0;
+    let mut last_log = Instant::now();
     while let Some(batch) = stream.next() {
         let batch = batch.map_err(|e| format!("读取 Arrow batch 失败: {e}"))?;
         rows += batch.num_rows() as u64;
         batches += 1;
         app.append_record_batch(batch)
             .map_err(|e| format!("写入 DuckDB 失败: {e}"))?;
+        // Log progress every 5s so the operator can see the pull is alive.
+        if last_log.elapsed().as_secs() >= 5 {
+            let elapsed = t0.elapsed().as_secs_f64();
+            let rps = if elapsed > 0.0 { rows as f64 / elapsed } else { 0.0 };
+            tracing::info!(
+                category = "link",
+                "maxcompute: pulling {table_ref} -> {local_table}: {rows} rows, {batches} batches, {elapsed:.1}s ({rps:.0} rows/s)"
+            );
+            last_log = Instant::now();
+        }
     }
     drop(app);
     let _ = child.wait();

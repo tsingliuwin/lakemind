@@ -1,4 +1,5 @@
 import com.aliyun.odps.Odps;
+import com.aliyun.odps.PartitionSpec;
 import com.aliyun.odps.account.AliyunAccount;
 import com.aliyun.odps.tunnel.TableTunnel;
 import com.aliyun.odps.tunnel.TableTunnel.DownloadSession;
@@ -12,19 +13,25 @@ import java.io.BufferedOutputStream;
 import java.io.OutputStream;
 
 /**
- * MaxCompute Arrow sidecar: bulk-download a table via the ODPS SDK's
- * `TableTunnel` + `ArrowTunnelRecordReader` (no instance-tunnel 10000-row cap),
- * re-serializing each batch as an Arrow IPC STREAM to stdout (consumed by the
- * Rust host's `arrow::ipc::reader::StreamReader` → DuckDB `appender-arrow`).
- * All logs go to stderr.
+ * MaxCompute Arrow sidecar: bulk-download a table (or a single partition of it)
+ * via the ODPS SDK's `TableTunnel` + `ArrowTunnelRecordReader` (no
+ * instance-tunnel 10000-row cap), re-serializing each batch as an Arrow IPC
+ * STREAM to stdout (consumed by the Rust host's `arrow::ipc::reader::StreamReader`
+ * → DuckDB `appender-arrow`). All logs go to stderr.
  *
- *   usage: ArrowSidecar <project.table> [start] [count]
+ *   usage: ArrowSidecar <project.table> [start] [count] [partitionSpec]
  *   env  : ODPS_ENDPOINT, ODPS_ACCESS_KEY_ID, ODPS_ACCESS_KEY_SECRET,
  *          [ODPS_TUNNEL_ENDPOINT], [ODPS_REGION], [ODPS_PROJECT]
  *
- * `count == 0` (or beyond EOF) means "to end of table". The Rust host launches
- * this with `--add-opens=java.base/java.nio=ALL-UNNAMED ...` and
- * `-XX:MaxDirectMemorySize=8G` (see `external/arrow_sidecar.rs` ADD_OPENS).
+ * `count == 0` (or beyond EOF) means "to end of table (or partition)".
+ * `partitionSpec` (optional, 4th arg) selects a single partition of a
+ * partitioned table, e.g. `ds=20250701` or multi-level `ds=20250701/region=cn`.
+ * When omitted, the whole table is downloaded (works for non-partitioned
+ * tables only — a partitioned table requires a partitionSpec).
+ *
+ * The Rust host launches this with `--add-opens=java.base/java.nio=ALL-UNNAMED
+ * ...` and `-XX:MaxDirectMemorySize=8G` (see `external/arrow_sidecar.rs`
+ * ADD_OPENS).
  *
  * Memory note: a single session can accumulate ~250 bytes/row of Arrow direct
  * memory; `-XX:MaxDirectMemorySize=8G` covers ~30M rows. Larger tables need
@@ -39,7 +46,7 @@ public class ArrowSidecar {
         String tunnel = System.getenv("ODPS_TUNNEL_ENDPOINT");
         String region = System.getenv("ODPS_REGION");
         if (endpoint == null || akId == null || akSecret == null || args.length < 1) {
-            System.err.println("usage: ArrowSidecar <project.table> [start] [count]  "
+            System.err.println("usage: ArrowSidecar <project.table> [start] [count] [partitionSpec]  "
                 + "(env: ODPS_ENDPOINT, ODPS_ACCESS_KEY_ID/SECRET, [ODPS_TUNNEL_ENDPOINT], [ODPS_REGION])");
             System.exit(2);
         }
@@ -48,6 +55,14 @@ public class ArrowSidecar {
         int dot = full.indexOf('.');
         if (dot < 0) { project = System.getenv("ODPS_PROJECT"); table = full; }
         else { project = full.substring(0, dot); table = full.substring(dot + 1); }
+
+        // Optional partitionSpec (4th arg). When present, only that partition's
+        // rows are downloaded; required for partitioned tables.
+        PartitionSpec partSpec = null;
+        if (args.length >= 4 && args[3] != null && !args[3].isEmpty()) {
+            partSpec = new PartitionSpec(args[3]);
+            System.err.println("[arrow] partitionSpec=" + args[3]);
+        }
 
         AliyunAccount acct = new AliyunAccount(akId, akSecret);
         if (region != null && !region.isEmpty()) acct.setRegion(region);
@@ -59,11 +74,18 @@ public class ArrowSidecar {
 
         TableTunnel t = new TableTunnel(odps);
         long tCreate = System.currentTimeMillis();
-        DownloadSession session = t.createDownloadSession(project, table);
+        DownloadSession session;
+        if (partSpec != null) {
+            // 4-arg form: download a single partition of a partitioned table.
+            session = t.createDownloadSession(project, table, partSpec);
+        } else {
+            // 2-arg form: whole table (non-partitioned tables only).
+            session = t.createDownloadSession(project, table);
+        }
         long total = session.getRecordCount();
         long start = 0;
         long count = total;
-        if (args.length >= 3) {            // <table> <start> <count>
+        if (args.length >= 3) {            // <table> <start> <count> [partitionSpec]
             start = Long.parseLong(args[1]);
             count = Long.parseLong(args[2]);
         } else if (args.length >= 2) {     // <table> <count>  (from 0, backward-compat)

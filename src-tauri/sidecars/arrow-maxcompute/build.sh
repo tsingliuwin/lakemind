@@ -18,8 +18,17 @@ if [ -z "$SDK" ]; then
   exit 1
 fi
 
-echo "[build] SDK classpath: $SDK"
-javac -cp "$SDK" ArrowSidecar.java
+# PartitionSpec lives in odps-sdk-commons (a transitive dep of odps-jdbc).
+COMMONS=$(find ~/.dbx/maven -name 'odps-sdk-commons-*-public.jar' 2>/dev/null | head -1)
+CP="$SDK"
+if [ -n "$COMMONS" ]; then
+  CP="$SDK:$COMMONS"
+  echo "[build] SDK classpath: $CP"
+else
+  echo "[build] SDK classpath: $CP (commons jar not found — partition support disabled)"
+fi
+
+javac -cp "$CP" ArrowSidecar.java
 jar cf arrow-maxcompute-sidecar.jar ArrowSidecar.class
 rm -f ArrowSidecar.class
 echo "[build] built: $(pwd)/arrow-maxcompute-sidecar.jar"

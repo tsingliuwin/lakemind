@@ -1034,7 +1034,7 @@ async fn sync_entries(
         // and pruning would delete every other table in the workspace.
         if prune_orphans {
             for rec in &existing {
-                if rec.kind == "postgres" || rec.kind == "mysql" || rec.kind == "sqlite" {
+                if rec.kind == "postgres" || rec.kind == "mysql" || rec.kind == "sqlite" || rec.kind == "maxcompute" {
                     continue;
                 }
                 if !entry_identities.contains(&(rec.scan_path.clone(), rec.sheet.clone())) {
@@ -1050,7 +1050,7 @@ async fn sync_entries(
             // (either via filesystem files or external database tables).
             let mut active_s_names: HashSet<String> = final_names.iter().cloned().collect();
             for rec in &existing {
-                if rec.kind == "postgres" || rec.kind == "mysql" || rec.kind == "sqlite" {
+                if rec.kind == "postgres" || rec.kind == "mysql" || rec.kind == "sqlite" || rec.kind == "maxcompute" {
                     active_s_names.insert(rec.table_name.clone());
                 }
             }
@@ -1094,7 +1094,7 @@ async fn sync_entries(
         }
 
         let db_sources: Vec<SourceTable> = existing.iter()
-            .filter(|rec| rec.kind == "postgres" || rec.kind == "mysql")
+            .filter(|rec| rec.kind == "postgres" || rec.kind == "mysql" || rec.kind == "maxcompute")
             .map(build_source_table_from_record)
             .collect();
         result.extend(db_sources);
@@ -1905,6 +1905,7 @@ fn source_record_from(t: &SourceTable, e: &scan::ScanEntry, created_at: i64, nam
         } else {
             Some(db::mat_status::FULL.to_string())
         },
+        materialized_partitions: None,
         sheet: e.sheet.clone(),
     }
 }
@@ -2459,12 +2460,18 @@ async fn register_maxcompute_table(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Vec<SourceTable>, String> {
+    tracing::info!(
+        category = "link",
+        "maxcompute: register table {}.{} (conn={})",
+        schema_name, table_name, connection_id
+    );
     let paths = crate::external::paths::SidecarPaths::resolve(&app)?;
     let ws_dir = resolve_workspace_dir(&workspace)?;
     let ws_dir_str = ws_dir.to_string_lossy().to_string();
     let conn_arc = state.conn.clone();
     let sources_clone = state.sources.clone();
     let ws_path_clone = workspace.clone();
+    let table_name_for_log = table_name.clone();
 
     let res = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<SourceTable>> {
         let sqlite = db::get_db_conn()?;
@@ -2472,6 +2479,7 @@ async fn register_maxcompute_table(
             .ok_or_else(|| format!("未找到数据库连接: {connection_id}"))?;
         let opts = conn_record.maxcompute_opts();
         let table_ref = conn_record.maxcompute_table_ref(&table_name);
+        tracing::info!(category = "link", "maxcompute: table_ref={table_ref}, project={}", opts.project);
 
         let safe_conn_name = conn_record.name.chars()
             .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
@@ -2482,6 +2490,7 @@ async fn register_maxcompute_table(
             .collect::<String>();
 
         // 1) row count via the JDBC sidecar (1-row result; instance-tunnel cap N/A)
+        tracing::info!(category = "link", "maxcompute: starting JDBC sidecar for row count");
         let launcher = paths.dbx_launcher()?;
         let jars = paths.driver_jars(&opts.driver_coord)?;
         let mut sc = crate::external::jdbc_sidecar::JdbcSidecar::spawn(&launcher)?;
@@ -2493,16 +2502,44 @@ async fn register_maxcompute_table(
             .and_then(|r| r.get(0))
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
+        tracing::info!(category = "link", "maxcompute: row count = {full_rows}");
 
-        // 2) bulk-materialize via the Arrow sidecar into the lake
+        // Sampling decision — mirrors the ATTACH path for postgres/mysql: if the
+        // table is larger than `explore.materialized_sample_limit` and sampling
+        // is enabled, only pull the first N rows so registration returns in
+        // seconds. The agent can later `materialize_remote_table` to pull the
+        // rest. Aggregations on the sample are intercepted by `sample_guard`.
+        let sample_enabled = db::get_config(&sqlite, "explore.materialized_sample_enabled")
+            .unwrap_or(None)
+            .map(|v| v == "true")
+            .unwrap_or(true);
+        let sample_limit = db::get_config(&sqlite, "explore.materialized_sample_limit")
+            .unwrap_or(None)
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(10000);
+        let do_sample = sample_enabled && (full_rows as u64) > sample_limit;
+        let (pull_count, is_sampled, mat_status_str) = if do_sample {
+            tracing::info!(category = "link", "maxcompute: sampling {sample_limit} rows (full={full_rows})");
+            (sample_limit, true, db::mat_status::SAMPLED)
+        } else {
+            tracing::info!(category = "link", "maxcompute: full materialize ({full_rows} rows)");
+            (0u64, false, db::mat_status::FULL)
+        };
+
+        // 2) pull via the Arrow sidecar into the lake (sample window or full)
         let arrow_jar = paths.arrow_jar()?;
         let guard = conn_arc.blocking_lock();
         let _ = guard.execute(&format!("DROP TABLE IF EXISTS \"{local_table_name}\";"), []);
         let _ = guard.execute(&format!("DROP VIEW IF EXISTS \"{local_table_name}\";"), []);
         let stats = crate::external::arrow_sidecar::pull_table(
             &guard, &conn_record, &opts, &table_ref, &local_table_name,
-            &arrow_jar, &jars, 0, 0,
+            &arrow_jar, &jars, 0, pull_count, None,
         )?;
+        tracing::info!(
+            category = "link",
+            "maxcompute: pull done - {} rows, {} batches, {:.1}s ({:.0} rows/s)",
+            stats.rows, stats.batches, stats.elapsed_secs, stats.rows_per_sec
+        );
         let columns = schema::describe_view(&guard, &local_table_name)?;
         drop(guard);
 
@@ -2522,12 +2559,14 @@ async fn register_maxcompute_table(
             file_size: full_rows,
             columns: columns.clone(),
             row_count: Some(stats.rows as i64),
-            is_sampled: false,
+            is_sampled,
             full_row_count: Some(full_rows),
-            materialize_status: Some(db::mat_status::FULL.to_string()),
+            materialize_status: Some(mat_status_str.to_string()),
+            materialized_partitions: None,
             sheet: None,
         };
         db::upsert_source(&sqlite, &ws_path_clone, &record)?;
+        tracing::info!(category = "link", "maxcompute: registered source {local_table_name} ({} rows sampled/pulled, {full_rows} full, {} cols, status={mat_status_str})", stats.rows, columns.len());
         let _ = crate::okf::write_source_okf(
             &ws_dir_str, &local_table_name, &record.label, &record.file_path,
             full_rows, now, &columns, Some(full_rows));
@@ -2554,7 +2593,10 @@ async fn register_maxcompute_table(
     })
     .await
     .map_err(|e| format!("Task join error: {e}"))?
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| {
+        tracing::warn!(category = "link", "maxcompute: register {table_name_for_log} failed: {e}");
+        e.to_string()
+    })?;
     Ok(res)
 }
 
@@ -2787,6 +2829,7 @@ pub async fn register_database_table(
             } else {
                 Some(db::mat_status::FULL.to_string())
             },
+            materialized_partitions: None,
             sheet: None,
         };
         

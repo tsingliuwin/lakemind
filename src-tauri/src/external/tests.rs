@@ -156,7 +156,7 @@ fn maxcompute_e2e() {
     let _ = duck.execute("DROP TABLE IF EXISTS e2e_pull;", []);
     let stats = arrow_sidecar::pull_table(
         &duck, &rec, &opts, &table_ref, "e2e_pull",
-        &arrow_jar(), &jars, 0, window,
+        &arrow_jar(), &jars, 0, window, None,
     )
     .expect("arrow pull");
     println!(
