@@ -59,7 +59,7 @@ impl Tool for MaxcomputePushdownQueryTool {
 
         let table_for_resolve = table_name.clone();
         let sql_for_run = sql.clone();
-        let result: Result<String, String> = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let result: Result<(String, crate::model::SqlResult, usize), String> = tokio::task::spawn_blocking(move || -> Result<(String, crate::model::SqlResult, usize), String> {
             let sqlite = crate::db::get_db_conn()?;
             // 1. resolve the source record (to find the connection) by table_name
             let rec = if let Ok(Some(r)) = crate::db::get_source_by_table(&sqlite, &ws_path, &table_for_resolve) {
@@ -91,7 +91,17 @@ impl Tool for MaxcomputePushdownQueryTool {
             let (columns, rows) = sc.execute_query(&conn_obj, &sql_for_run, 10_000)?;
             sc.close();
 
-            // 3. format as a markdown-ish table for the agent
+            // Build the structured SqlResult for the frontend UI + a markdown
+            // table string for the LLM context.
+            let n = rows.len();
+            let res = crate::model::SqlResult {
+                columns: columns.clone(),
+                column_types: vec![String::new(); columns.len()],
+                rows: rows.clone(),
+                row_count: n,
+                truncated: false,
+                elapsed_ms: 0,
+            };
             let mut out = String::new();
             out.push_str(&columns.join(" | "));
             out.push('\n');
@@ -106,16 +116,17 @@ impl Tool for MaxcomputePushdownQueryTool {
                 out.push_str(&cells.join(" | "));
                 out.push('\n');
             }
-            Ok(out)
+            Ok((out, res, n))
         })
         .await
         .map_err(|e| ToolError(format!("线程执行失败: {e}")))?;
 
         let elapsed = start.elapsed().as_millis() as u64;
         match result {
-            Ok(out) => {
+            Ok((out, res, n)) => {
+                let summary = format!("下推查询成功，返回 {} 行（{} 列）", n, res.columns.len());
                 emit_tool_result(&self.window, &self.task_id, &call_id, "ok",
-                    out.clone(), None, None, Some(elapsed), None);
+                    summary, Some(sql.clone()), Some(res), Some(elapsed), None);
                 Ok(out)
             }
             Err(e) => {

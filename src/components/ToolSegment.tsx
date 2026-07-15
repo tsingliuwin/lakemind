@@ -15,6 +15,12 @@ const TOOL_LABELS: Record<string, string> = {
   write_okf_block: "更新业务知识",
   search_okf_recipes: "检索清洗经验",
   check_source_fingerprint: "校验数据指纹",
+  maxcompute_pushdown_query: "MaxCompute 下推查询",
+  materialize_remote_table: "物化远程表",
+  search_tenets: "检索准则库",
+  load_tenets: "加载准则",
+  get_current_time: "获取当前时间",
+  tidy_okf_knowledge: "整理知识库",
 };
 
 const ARG_KEY_LABELS: Record<string, string> = {
@@ -233,10 +239,10 @@ export default function ToolSegment(props: {
           </Show>
 
           {/* Args / SQL preview */}
-          <Show when={sqlFromArgs() && (t()?.tool === "execute_query" || t()?.tool === "render_chart")}>
+          <Show when={sqlFromArgs() && (t()?.tool === "execute_query" || t()?.tool === "render_chart" || t()?.tool === "maxcompute_pushdown_query")}>
             <SqlBlock sql={sqlFromArgs()!} onCopy onOpenInSqlPanel={props.onOpenInSqlPanel} />
           </Show>
-          <Show when={tableFromArgs() && t()?.tool !== "execute_query"}>
+          <Show when={tableFromArgs() && t()?.tool !== "execute_query" && t()?.tool !== "maxcompute_pushdown_query"}>
             <div class="tool-seg__arg">表: <code>{tableFromArgs()}</code></div>
           </Show>
           {/* SQL from the result (execute_query success carries it). awaiting DDL is shown in the confirm block above. */}
