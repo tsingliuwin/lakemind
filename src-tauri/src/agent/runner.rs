@@ -291,15 +291,34 @@ async fn run_stream_loop<R>(
     RunOutcome::Done
 }
 
-/// Current local date as `YYYY-MM-DD` (no external dep; std-only epoch math).
+/// Current local date+time as `YYYY-MM-DD HH:MM 星期X` (no external dep;
+/// std-only epoch math). Called by the `get_current_time` tool AND by the
+/// preamble injection so both paths share one source of truth.
+pub(crate) fn current_datetime_str() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    // UTC+8 (CST) - the user's wall-clock timezone for the CN locale.
+    let tz_offset_secs: i64 = 8 * 3600;
+    let local_secs = secs + tz_offset_secs;
+    let days = local_secs.div_euclid(86400);
+    let (y, m, d) = civil_from_days(days);
+    let hh = (local_secs.rem_euclid(86400)) / 3600;
+    let mm = (local_secs.rem_euclid(3600)) / 60;
+    // 1970-01-01 was a Thursday (weekday 4 if Sunday=0).
+    let wd = ((days + 4).rem_euclid(7)) as usize;
+    let weekday = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][wd];
+    format!("{y:04}-{m:02}-{d:02} {hh:02}:{mm:02} {weekday}")
+}
+
+/// Current local date as `YYYY-MM-DD`.
 fn current_date_str() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
-    // Local timezone offset in seconds (macOS/Linux: read TZ env or assume +08:00
-    // for CN locale; this is a best-effort heuristic without chrono).
-    let tz_offset_secs: i64 = 8 * 3600; // UTC+8 (CST)
+    let tz_offset_secs: i64 = 8 * 3600;
     let local_secs = secs + tz_offset_secs;
     let days = local_secs.div_euclid(86400);
     let (y, m, d) = civil_from_days(days);
@@ -315,7 +334,6 @@ fn weekday_cn() -> &'static str {
     let tz_offset_secs: i64 = 8 * 3600;
     let local_secs = secs + tz_offset_secs;
     let days = local_secs.div_euclid(86400);
-    // 1970-01-01 was a Thursday (weekday 4 if Sunday=0).
     let wd = ((days + 4).rem_euclid(7)) as usize;
     ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][wd]
 }
@@ -386,7 +404,7 @@ pub(crate) async fn run_agent_chat_stream(
         LoadOkfBlockTool, WriteOkfBlockTool, SearchOkfRecipesTool, CheckSourceFingerprintTool,
         TidyOkfKnowledgeTool, MaterializeRemoteTableTool, MaxcomputePushdownQueryTool,
         CreateTableTool, CreateViewTool, DropObjectTool, RenderChartTool,
-        SearchTenetsTool, LoadTenetsTool) {
+        SearchTenetsTool, LoadTenetsTool, GetCurrentTimeTool) {
         let ddl_shared = DdlToolShared {
             app_state: app_state.clone(),
             task_id: task_id.clone(),
@@ -411,6 +429,7 @@ pub(crate) async fn run_agent_chat_stream(
             RenderChartTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
             SearchTenetsTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
             LoadTenetsTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
+            GetCurrentTimeTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
         )
     };
 
@@ -427,7 +446,7 @@ pub(crate) async fn run_agent_chat_stream(
     let (list_tool, desc_tool, exec_tool, sample_tool,
         load_okf, write_okf, search_okf, check_okf, tidy_okf, materialize_tool, mcq_tool,
         create_table_tool, create_view_tool, drop_object_tool, render_chart_tool,
-        search_tenets_tool, load_tenets_tool) = build_tools();
+        search_tenets_tool, load_tenets_tool, get_time_tool) = build_tools();
     let tool_defs = vec![
         list_tool.definition(String::new()).await,
         desc_tool.definition(String::new()).await,
@@ -446,6 +465,7 @@ pub(crate) async fn run_agent_chat_stream(
         mcq_tool.definition(String::new()).await,
         search_tenets_tool.definition(String::new()).await,
         load_tenets_tool.definition(String::new()).await,
+        get_time_tool.definition(String::new()).await,
     ];
     let tools_json = serde_json::to_string(&tool_defs).unwrap_or_default();
     let ws_dir = app_state.workspace_dir.lock().await.to_string_lossy().to_string();
@@ -484,7 +504,7 @@ pub(crate) async fn run_agent_chat_stream(
         let (list_tool, desc_tool, exec_tool, sample_tool,
             load_okf, write_okf, search_okf, check_okf, tidy_okf, materialize_tool, mcq_tool,
             create_table_tool, create_view_tool, drop_object_tool, render_chart_tool,
-            search_tenets_tool, load_tenets_tool) = build_tools();
+            search_tenets_tool, load_tenets_tool, get_time_tool) = build_tools();
 
         let outcome = if format == "openai" {
             let base_url = sanitize_endpoint(&provider.endpoint);
@@ -514,7 +534,8 @@ pub(crate) async fn run_agent_chat_stream(
                 .tool(materialize_tool)
                 .tool(mcq_tool)
                 .tool(search_tenets_tool)
-                .tool(load_tenets_tool);
+                .tool(load_tenets_tool)
+                .tool(get_time_tool);
             if model_id.starts_with("o1") || model_id.starts_with("o3") {
                 agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
             }
@@ -553,7 +574,8 @@ pub(crate) async fn run_agent_chat_stream(
                 .tool(materialize_tool)
                 .tool(mcq_tool)
                 .tool(search_tenets_tool)
-                .tool(load_tenets_tool);
+                .tool(load_tenets_tool)
+                .tool(get_time_tool);
             if model_id.starts_with("o1") || model_id.starts_with("o3") {
                 agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
             }
