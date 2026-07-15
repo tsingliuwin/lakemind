@@ -60,27 +60,34 @@ impl Tool for ListTablesTool {
             let mut descriptions = Vec::new();
             for tname in list {
                 if let Some(rec) = records.iter().find(|r| r.table_name == tname) {
+                    let remote_ref = rec.maxcompute_remote_ref();
                     let is_partial = matches!(rec.materialize_status.as_deref(), Some("partial"));
                     if is_partial {
-                        // Partially materialized (resume / on-demand): incomplete
-                        // local data — aggregation still misleads.
+                        let remote_hint = if let Some(ref rref) = remote_ref {
+                            format!("，远程表 {}，下推 FROM 用 {}", rref, rref)
+                        } else { String::new() };
                         descriptions.push(format!(
-                            "{} (部分物化，已落盘 {} 行；远程全量约 {} 行，类型是 \"{}\"，全量直连路径为 \"{}\"。聚合需先续传完成或用原生下推)",
+                            "{} (部分物化，已落盘 {} 行；远程全量约 {} 行，类型是 \"{}\"，全量直连路径为 \"{}\"{}。聚合需先续传完成或用下推)",
                             tname,
                             rec.row_count.unwrap_or(0),
                             rec.full_row_count.map(|c: i64| c.to_string()).unwrap_or_else(|| "未知".to_string()),
                             rec.kind,
-                            rec.scan_path
+                            rec.scan_path,
+                            remote_hint
                         ));
                     } else if rec.aggregation_misleads() {
                         let full_rows_str = rec.full_row_count.map(|c: i64| c.to_string()).unwrap_or_else(|| "未知".to_string());
+                        let remote_hint = if let Some(ref rref) = remote_ref {
+                            format!("，远程表 {}，下推 FROM 用 {}", rref, rref)
+                        } else { String::new() };
                         descriptions.push(format!(
-                            "{} (已本地物化采样 {} 行，外部全量大约 {} 行，类型是 \"{}\"，全量直连路径为 \"{}\")",
+                            "{} (已本地物化采样 {} 行，外部全量大约 {} 行，类型是 \"{}\"，全量直连路径为 \"{}\"{})",
                             tname,
                             rec.row_count.unwrap_or(0),
                             full_rows_str,
                             rec.kind,
-                            rec.scan_path
+                            rec.scan_path,
+                            remote_hint
                         ));
                     } else {
                         descriptions.push(format!(

@@ -8,7 +8,7 @@ use crate::state::AppState;
 
 /// Aggregate pushdown to MaxCompute via the dbx JDBC sidecar. Used when
 /// `sample_guard` intercepts an aggregation over a sampled/partial maxcompute
-/// table — there's no DuckDB `{kind}_query` function for MaxCompute, so the
+/// table - there's no DuckDB `{kind}_query` function for MaxCompute, so the
 /// pushdown goes through the sidecar (≤10000 result rows, fine for aggregates).
 #[derive(Deserialize, Serialize)]
 pub(crate) struct MaxcomputePushdownQueryArgs {
@@ -31,12 +31,12 @@ impl Tool for MaxcomputePushdownQueryTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: "maxcompute_pushdown_query".to_string(),
-            description: "对 MaxCompute（ODPS）外部表做聚合下推：把 SQL 下推到远程 MaxCompute 执行，只拉回结果行（≤1 万行）。用于在本地采样/部分物化的 maxcompute 表上做聚合时避免指标失真——sample_guard 拦截后改用本工具。FROM 用该表在远程的 project.table 全限定名。".to_string(),
+            description: "对 MaxCompute（ODPS）外部表做聚合下推：把 SQL 下推到远程 MaxCompute 执行，只拉回结果行（≤1 万行）。用于在本地采样/部分物化的 maxcompute 表上做聚合时避免指标失真——sample_guard 拦截后改用本工具。FROM 用该表在远程的 project.table 全限定名（通过 describe_table 或 list_tables 查看远程表名，拦截消息也会给出）。".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "table_name": { "type": "string", "description": "本地已注册的 maxcompute 源表名，例如 s_yantubi_dim_users_sc_track（用于定位连接配置）" },
-                    "sql": { "type": "string", "description": "要下推到 MaxCompute 执行的 SQL。FROM 用远程全限定名 project.table，例如 SELECT count(*) AS c FROM yantubi.dim_users_sc_track" }
+                    "table_name": { "type": "string", "description": "本地已注册的 maxcompute 源表名（用于定位连接配置）" },
+                    "sql": { "type": "string", "description": "要下推到 MaxCompute 执行的 SQL。FROM 用远程全限定名 project.table（通过 describe_table 查看）" }
                 },
                 "required": ["table_name", "sql"]
             }),
@@ -74,7 +74,7 @@ impl Tool for MaxcomputePushdownQueryTool {
             if rec.kind != "maxcompute" {
                 return Err(format!("表 '{table_for_resolve}' 不是 maxcompute 源（kind={}），无法用本工具下推", rec.kind));
             }
-            // file_path = "maxcompute://{conn_id}/{project}/{table}" → conn_id is segment 2
+            // file_path = "maxcompute://{conn_id}/{project}/{table}" -> conn_id is segment 2
             let conn_id = rec.file_path.split('/').nth(2)
                 .ok_or_else(|| format!("无法从 file_path 解析 connection_id: {}", rec.file_path))?
                 .to_string();

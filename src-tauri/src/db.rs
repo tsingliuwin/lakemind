@@ -133,6 +133,26 @@ impl SourceRecord {
             Some(_) => true,
         }
     }
+
+    /// For maxcompute sources, extract the remote `project.table` reference
+    /// from `file_path` (`maxcompute://{conn_id}/{project}/{table}`).
+    /// Returns `None` for non-maxcompute sources or malformed paths.
+    pub fn maxcompute_remote_ref(&self) -> Option<String> {
+        if self.kind != "maxcompute" {
+            return None;
+        }
+        // file_path = "maxcompute://{conn_id}/{project}/{table}"
+        let segs: Vec<&str> = self.file_path.split('/').collect();
+        // segs: ["maxcompute:", "", "{conn_id}", "{project}", "{table}"]
+        if segs.len() >= 5 {
+            let project = segs[3];
+            let table = segs[4];
+            if !project.is_empty() && !table.is_empty() {
+                return Some(format!("{project}.{table}"));
+            }
+        }
+        None
+    }
 }
 
 /// Insert or update a source mapping (keyed by `(workspace_path, table_name)`).

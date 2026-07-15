@@ -68,9 +68,11 @@ fn build_intercept_message(rec: &crate::db::SourceRecord) -> String {
     // MaxCompute has no DuckDB `{kind}_query` pushdown function (no extension) —
     // route the agent to the sidecar-based pushdown tool instead.
     if kind == "maxcompute" {
+        let remote_ref = rec.maxcompute_remote_ref()
+            .unwrap_or_else(|| "<project.table>".to_string());
         return format!(
-            "[已拦截] {intro}\n\n请改用全量路径之一：\n1) 原生下推（推荐，最快）：调用 `maxcompute_pushdown_query` 工具，传入 table_name=\"{table}\" 和你要执行的聚合 SQL（FROM 用该表在 MaxCompute 远程的 project.table，如 yantubi.dim_users_sc_track），只拉回结果行。\n{mat_hint}",
-            intro = intro, table = rec.table_name, mat_hint = mat_hint,
+            "[已拦截] {intro}\n\n请改用全量路径之一：\n1) 下推（推荐，最快）：调用 `maxcompute_pushdown_query` 工具，传入 table_name=\"{table}\" 和你要执行的聚合 SQL（FROM 用该表在 MaxCompute 远程的全限定名 {remote_ref}，如 SELECT count(*) FROM {remote_ref} WHERE ...），只拉回结果行。\n{mat_hint}",
+            intro = intro, table = rec.table_name, remote_ref = remote_ref, mat_hint = mat_hint,
         );
     }
     format!(
@@ -183,5 +185,29 @@ mod tests_sampled_intercept {
         assert!(msg.contains("postgres_query"));
         assert!(msg.contains("1000"));
         assert!(msg.contains("1000000"));
+    }
+
+    #[test]
+    fn intercept_message_maxcompute_shows_remote_ref() {
+        let mut r = rec("s_mc");
+        r.kind = "maxcompute".to_string();
+        r.file_path = "maxcompute://conn_abc/yantubi/dim_user_uc".to_string();
+        let msg = build_intercept_message(&r);
+        // The real remote project.table should appear, not the hardcoded example.
+        assert!(msg.contains("yantubi.dim_user_uc"));
+        assert!(!msg.contains("dim_users_sc_track"));
+        assert!(msg.contains("maxcompute_pushdown_query"));
+    }
+
+    #[test]
+    fn maxcompute_remote_ref_parses_file_path() {
+        let mut r = rec("s_mc");
+        r.kind = "maxcompute".to_string();
+        r.file_path = "maxcompute://conn_abc/yantubi/dim_user_uc".to_string();
+        assert_eq!(r.maxcompute_remote_ref().as_deref(), Some("yantubi.dim_user_uc"));
+
+        // Non-maxcompute returns None.
+        let r2 = rec("s_pg");
+        assert!(r2.maxcompute_remote_ref().is_none());
     }
 }

@@ -111,25 +111,42 @@ impl Tool for DescribeTableTool {
                     let is_partial = matches!(rec.materialize_status.as_deref(), Some("partial"));
                     if is_partial {
                         let full_rows_str = rec.full_row_count.map(|c: i64| c.to_string()).unwrap_or_else(|| "未知".to_string());
-                        let db_alias = rec.scan_path.split('.').next().unwrap_or("db_conn");
-                        header_info = format!(
-                            " [注意: 该表当前仅部分物化（已落盘 {} 行 / 远程全量约 {} 行），数据不完整，聚合会失真。如需全量汇总，请再次调用 materialize_remote_table 续传至完成（自动跳过已物化部分），或用原生下推 \"SELECT * FROM {}_query('{}', '...')\"]",
-                            rec.row_count.unwrap_or(0),
-                            full_rows_str,
-                            rec.kind,
-                            db_alias
-                        );
+                        if let Some(remote_ref) = rec.maxcompute_remote_ref() {
+                            header_info = format!(
+                                " [注意: 该表当前仅部分物化（已落盘 {} 行 / 远程全量约 {} 行），数据不完整，聚合会失真。如需全量汇总，请再次调用 materialize_remote_table 续传至完成（自动跳过已物化部分），或用 maxcompute_pushdown_query 工具下推（FROM 用远程全限定名 {remote_ref}）]",
+                                rec.row_count.unwrap_or(0),
+                                full_rows_str,
+                            );
+                        } else {
+                            let db_alias = rec.scan_path.split('.').next().unwrap_or("db_conn");
+                            header_info = format!(
+                                " [注意: 该表当前仅部分物化（已落盘 {} 行 / 远程全量约 {} 行），数据不完整，聚合会失真。如需全量汇总，请再次调用 materialize_remote_table 续传至完成（自动跳过已物化部分），或用原生下推 \"SELECT * FROM {}_query('{}', '...')\"]",
+                                rec.row_count.unwrap_or(0),
+                                full_rows_str,
+                                rec.kind,
+                                db_alias
+                            );
+                        }
                     } else if rec.aggregation_misleads() {
                         let full_rows_str = rec.full_row_count.map(|c: i64| c.to_string()).unwrap_or_else(|| "未知".to_string());
-                        let db_alias = rec.scan_path.split('.').next().unwrap_or("db_conn");
-                        header_info = format!(
-                            " [注意: 该表当前是本地物化采样缓存，包含 {} 行数据，连接数据库类型为 \"{}\"。外部生产数据库的全量总行数大约为 {} 行。如果你需要进行全量汇总或分析完整数据，请优先使用原生下推函数，直接在 SQL 中查询 \"SELECT * FROM {}_query('{}', '...')\"]",
-                            rec.row_count.unwrap_or(0),
-                            rec.kind,
-                            full_rows_str,
-                            rec.kind,
-                            db_alias
-                        );
+                        if let Some(remote_ref) = rec.maxcompute_remote_ref() {
+                            header_info = format!(
+                                " [注意: 该表当前是本地物化采样缓存，包含 {} 行数据，连接数据库类型为 \"maxcompute\"。外部生产数据库的全量总行数大约为 {} 行。如果你需要进行全量汇总或分析完整数据，请用 maxcompute_pushdown_query 工具下推（传入 table_name=\"{}\"，SQL 的 FROM 用远程全限定名 {remote_ref}，如 SELECT count(*) FROM {remote_ref} WHERE ...）]",
+                                rec.row_count.unwrap_or(0),
+                                full_rows_str,
+                                rec.table_name,
+                            );
+                        } else {
+                            let db_alias = rec.scan_path.split('.').next().unwrap_or("db_conn");
+                            header_info = format!(
+                                " [注意: 该表当前是本地物化采样缓存，包含 {} 行数据，连接数据库类型为 \"{}\"。外部生产数据库的全量总行数大约为 {} 行。如果你需要进行全量汇总或分析完整数据，请优先使用原生下推函数，直接在 SQL 中查询 \"SELECT * FROM {}_query('{}', '...')\"]",
+                                rec.row_count.unwrap_or(0),
+                                rec.kind,
+                                full_rows_str,
+                                rec.kind,
+                                db_alias
+                            );
+                        }
                     } else {
                         let rows_str = rec.row_count.map(|c: i64| c.to_string()).unwrap_or_else(|| "未知".to_string());
                         header_info = format!(" [全量数据表，连接数据库类型为 \"{}\"，行数: {}]", rec.kind, rows_str);
