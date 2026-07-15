@@ -291,6 +291,50 @@ async fn run_stream_loop<R>(
     RunOutcome::Done
 }
 
+/// Current local date as `YYYY-MM-DD` (no external dep; std-only epoch math).
+fn current_date_str() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    // Local timezone offset in seconds (macOS/Linux: read TZ env or assume +08:00
+    // for CN locale; this is a best-effort heuristic without chrono).
+    let tz_offset_secs: i64 = 8 * 3600; // UTC+8 (CST)
+    let local_secs = secs + tz_offset_secs;
+    let days = local_secs.div_euclid(86400);
+    let (y, m, d) = civil_from_days(days);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Chinese weekday name for today.
+fn weekday_cn() -> &'static str {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let tz_offset_secs: i64 = 8 * 3600;
+    let local_secs = secs + tz_offset_secs;
+    let days = local_secs.div_euclid(86400);
+    // 1970-01-01 was a Thursday (weekday 4 if Sunday=0).
+    let wd = ((days + 4).rem_euclid(7)) as usize;
+    ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][wd]
+}
+
+/// Inverse of `days_from_civil` (Howard Hinnant's `civil_from_days`):
+/// proleptic Gregorian day number -> (year, month, day).
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    (if m <= 2 { y + 1 } else { y }, m as u32, d as u32)
+}
+
 pub(crate) async fn run_agent_chat_stream(
     window: tauri::Window,
     task_id: String,
@@ -406,10 +450,16 @@ pub(crate) async fn run_agent_chat_stream(
     let tools_json = serde_json::to_string(&tool_defs).unwrap_or_default();
     let ws_dir = app_state.workspace_dir.lock().await.to_string_lossy().to_string();
     let memory_summary = crate::okf::get_okf_memory_summary(&ws_dir);
+
+    // Inject the current date/time so the agent can resolve relative time
+    // expressions like "本月" / "今天" / "上周" without guessing. Uses the
+    // local timezone (the user's wall-clock date, which is what "本月" means).
+    let now_line = format!("# 当前时间\n现在是 {}（{}）。用户提到「今天」「本月」「上周」等相对时间时，以此为准。", current_date_str(), weekday_cn());
+
     let combined_preamble = if memory_summary.is_empty() {
-        PREAMBLE.to_string()
+        format!("{}\n\n{}", PREAMBLE, now_line)
     } else {
-        format!("{}\n\n# 你的湖仓数据及业务“记忆”\n根据你之前与用户的对话和本地 OKF 知识库的积累，你已拥有以下数据与业务概念记忆。你在进行数据关联分析、回答提问时应**直接继承并使用**这些知识（包括业务释义与表关系），无需重复向用户澄清：\n\n{}", PREAMBLE, memory_summary)
+        format!("{}\n\n{}\n\n# 你的湖仓数据及业务“记忆”\n根据你之前与用户的对话和本地 OKF 知识库的积累，你已拥有以下数据与业务概念记忆。你在进行数据关联分析、回答提问时应**直接继承并使用**这些知识（包括业务释义与表关系），无需重复向用户澄清：\n\n{}", PREAMBLE, now_line, memory_summary)
     };
     let preamble_raw = usage::estimate_tokens(&combined_preamble);
     let tools_raw = usage::estimate_tokens(&tools_json);
