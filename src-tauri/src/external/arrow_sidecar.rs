@@ -139,8 +139,7 @@ pub fn pull_table(
     let cols: Vec<String> = schema
         .fields()
         .iter()
-        .enumerate()
-        .map(|(i, f)| format!("c{} {}", i + 1, arrow_to_duckdb_type(f.data_type())))
+        .map(|f| format!("\"{}\" {}", f.name().replace('"', "\"\""), arrow_to_duckdb_type(f.data_type())))
         .collect();
     let create_sql = format!("CREATE TABLE IF NOT EXISTS \"{local_table}\" ({});", cols.join(", "));
     duck_conn
