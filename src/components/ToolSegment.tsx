@@ -185,6 +185,9 @@ export default function ToolSegment(props: {
           )}
         </span>
         <span class="tool-seg__name">{TOOL_LABELS[t()!.tool] ?? t()!.tool}</span>
+        <Show when={t()?.status === "running" && t()?.startTime != null}>
+          <span class="tool-seg__meta" id={`tool-timer-${t()?.id}`}>· …</span>
+        </Show>
         <Show when={t()?.elapsedMs != null}>
           <span class="tool-seg__meta">· {fmtMs(t()!.elapsedMs!)}</span>
         </Show>

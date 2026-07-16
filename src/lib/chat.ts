@@ -70,6 +70,7 @@ export function pushToolCall(
       tool: seg.tool,
       args: seg.args,
       status: "running",
+      startTime: Date.now(),
     },
   ];
 }

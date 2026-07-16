@@ -194,6 +194,8 @@ export type Segment =
       table?: SqlResult;
       elapsedMs?: number;
       result?: string;
+      /** Tool call timestamp (ms) - used to show a live timer while running. */
+      startTime?: number;
     }
   | {
       type: "chart";

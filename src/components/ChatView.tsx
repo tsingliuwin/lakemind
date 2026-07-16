@@ -246,6 +246,12 @@ export default function ChatView(props: {
           const el = document.getElementById(`rs-timer-${s.id}`);
           if (el) el.textContent = fmtMs(t - s.startTime);
         }
+        // Live timer for running tool segments (e.g. maxcompute_pushdown_query
+        // can take 30+ seconds; show elapsed time while it runs).
+        if (s && s.type === "tool" && s.status === "running" && s.startTime != null) {
+          const el = document.getElementById(`tool-timer-${s.id}`);
+          if (el) el.textContent = fmtMs(t - s.startTime);
+        }
       }
     }, 100);
     onCleanup(() => clearInterval(handle));
