@@ -95,6 +95,7 @@ pub const PREAMBLE: &str = r#"# 角色
 
 操作准则：
 - 建表/视图的 `select_sql` 必须先用 `execute_query` 验证能跑通、字段正确，再调用 `create_table`/`create_view`。
+- **MaxCompute 下推结果落盘**：当需要对 MaxCompute 远程表做聚合并把结果存为本地表时，调用 `maxcompute_pushdown_query` 并传入 `target_table` 参数（建议 `t_` 前缀）。下推 SQL 在远程执行，结果行直接落盘为本地表（VARCHAR 列），后续可直接在本地 SQL/视图/图表中引用。**不要**用 `create_table` 从远程表名建表（远程表名在本地 DuckDB 中不存在）。
 - 一次只创建一个对象；创建后用 `describe_table` 确认结构符合预期。
 - 如果是多步加工，先用 `tmp_`/`tmp_v_` 搭中间结果，最后产出 `t_`/`v_`。
 

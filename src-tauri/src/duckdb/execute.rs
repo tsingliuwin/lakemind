@@ -341,6 +341,60 @@ fn parse_trailing_limit(sql: &str) -> Option<u64> {
     None
 }
 
+/// Persist rows from a remote query result (e.g. MaxCompute pushdown) as a
+/// local DuckLake table. All columns are `VARCHAR` because the JDBC sidecar
+/// carries no type metadata -- DuckDB's implicit coercion handles numeric /
+/// date comparisons on VARCHAR columns correctly in practice.
+///
+/// Drops any existing table with the same name first. Returns the row count
+/// written.
+pub fn materialize_result(
+    conn: &duckdb::Connection,
+    table_name: &str,
+    columns: &[String],
+    rows: &[Vec<serde_json::Value>],
+) -> Result<u64, String> {
+    if columns.is_empty() {
+        return Err("无法建表：列名为空".to_string());
+    }
+    let safe = table_name.replace('"', "\"\"");
+    // CREATE TABLE with VARCHAR columns (c1, c2, ...). Drop first to allow
+    // re-runs with different data.
+    let col_defs: Vec<String> = (0..columns.len())
+        .map(|i| format!("\"c{}\" VARCHAR", i + 1))
+        .collect();
+    let create_sql = format!(
+        "DROP TABLE IF EXISTS \"{safe}\"; CREATE TABLE \"{safe}\" ({});",
+        col_defs.join(", ")
+    );
+    conn.execute_batch(&create_sql)
+        .map_err(|e| format!("建表失败: {e}"))?;
+
+    let mut app = conn
+        .appender(table_name)
+        .map_err(|e| format!("打开 appender 失败: {e}"))?;
+    let mut written: u64 = 0;
+    for row in rows {
+        // Build owned String values for each cell: null -> NULL, everything
+        // else -> stringified. All columns are VARCHAR, so ToSql<&str> works.
+        let owned: Vec<String> = row.iter().map(|v| match v {
+            serde_json::Value::Null => String::new(),
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        }).collect();
+        // Build &[&dyn ToSql] slice: None => SQL NULL via Option<&str>.
+        let opts: Vec<Option<&str>> = row.iter().enumerate().map(|(i, v)| {
+            if v.is_null() { None } else { Some(owned[i].as_str()) }
+        }).collect();
+        let params: Vec<&dyn duckdb::ToSql> = opts.iter().map(|o| o as &dyn duckdb::ToSql).collect();
+        app.append_row(params.as_slice())
+            .map_err(|e| format!("写入数据失败: {e}"))?;
+        written += 1;
+    }
+    drop(app);
+    Ok(written)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

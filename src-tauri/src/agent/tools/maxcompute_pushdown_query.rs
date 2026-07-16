@@ -14,6 +14,11 @@ use crate::state::AppState;
 pub(crate) struct MaxcomputePushdownQueryArgs {
     table_name: String,
     sql: String,
+    /// Optional: when set, the query result is persisted as a local DuckLake
+    /// table with this name (all VARCHAR columns). The agent can then reference
+    /// it in subsequent local queries / views / charts without re-pushing down.
+    #[serde(default)]
+    target_table: Option<String>,
 }
 
 pub(crate) struct MaxcomputePushdownQueryTool {
@@ -31,12 +36,13 @@ impl Tool for MaxcomputePushdownQueryTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: "maxcompute_pushdown_query".to_string(),
-            description: "对 MaxCompute（ODPS）外部表做聚合下推：把 SQL 下推到远程 MaxCompute 执行，只拉回结果行（≤1 万行）。用于在本地采样/部分物化的 maxcompute 表上做聚合时避免指标失真——sample_guard 拦截后改用本工具。FROM 用该表在远程的 project.table 全限定名（通过 describe_table 或 list_tables 查看远程表名，拦截消息也会给出）。".to_string(),
+            description: "对 MaxCompute（ODPS）外部表做聚合下推：把 SQL 下推到远程 MaxCompute 执行，只拉回结果行（≤1 万行）。用于在本地采样/部分物化的 maxcompute 表上做聚合时避免指标失真--sample_guard 拦截后改用本工具。FROM 用该表在远程的 project.table 全限定名（通过 describe_table 或 list_tables 查看远程表名，拦截消息也会给出）。可选传入 target_table 将结果存为本地表，便于后续本地分析和可视化。".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "table_name": { "type": "string", "description": "本地已注册的 maxcompute 源表名（用于定位连接配置）" },
-                    "sql": { "type": "string", "description": "要下推到 MaxCompute 执行的 SQL。FROM 用远程全限定名 project.table（通过 describe_table 查看）" }
+                    "sql": { "type": "string", "description": "要下推到 MaxCompute 执行的 SQL。FROM 用远程全限定名 project.table（通过 describe_table 查看）" },
+                    "target_table": { "type": "string", "description": "可选：将下推查询结果存为本地 DuckLake 表的表名（建议用 t_ 前缀，如 t_monthly_reg）。存为本地表后可直接在本地 SQL/视图/图表中引用，无需再次下推。不传则只返回结果不落盘。" }
                 },
                 "required": ["table_name", "sql"]
             }),
@@ -49,16 +55,29 @@ impl Tool for MaxcomputePushdownQueryTool {
         if table_name.is_empty() || sql.is_empty() {
             return Err(ToolError("table_name 和 sql 不能为空".to_string()));
         }
+        // Validate target_table name if provided (same rules as create_table).
+        let target_table = match &args.target_table {
+            Some(t) if !t.trim().is_empty() => {
+                let name = t.trim();
+                if name.contains('"') || name.contains('\0') {
+                    return Err(ToolError("target_table 包含非法字符".to_string()));
+                }
+                Some(name.to_string())
+            }
+            _ => None,
+        };
         let ws_path = self.app_state.workspace_path.lock().await.clone();
         let call_id = next_tool_id("mcq");
         emit_tool_call(
             &self.window, &self.task_id, &call_id, "maxcompute_pushdown_query",
-            json!({ "table_name": table_name, "sql": sql }),
+            json!({ "table_name": table_name, "sql": sql, "target_table": args.target_table }),
         );
         let start = std::time::Instant::now();
 
         let table_for_resolve = table_name.clone();
         let sql_for_run = sql.clone();
+        let target_table_clone = target_table.clone();
+        let conn_clone = self.app_state.conn.clone();
         let result: Result<(String, crate::model::SqlResult, usize), String> = tokio::task::spawn_blocking(move || -> Result<(String, crate::model::SqlResult, usize), String> {
             let sqlite = crate::db::get_db_conn()?;
             // 1. resolve the source record (to find the connection) by table_name
@@ -91,8 +110,21 @@ impl Tool for MaxcomputePushdownQueryTool {
             let (columns, rows) = sc.execute_query(&conn_obj, &sql_for_run, 10_000)?;
             sc.close();
 
-            // Build the structured SqlResult for the frontend UI + a markdown
-            // table string for the LLM context.
+            // 3. Optionally persist the result as a local DuckLake table.
+            if let Some(ref target) = target_table_clone {
+                let guard = conn_clone.blocking_lock();
+                let written = crate::duckdb::execute::materialize_result(
+                    &guard, target, &columns, &rows,
+                )?;
+                drop(guard);
+                tracing::info!(
+                    category = "link",
+                    "maxcompute: pushdown result persisted to local table {target} ({written} rows)"
+                );
+            }
+
+            // 4. Build the structured SqlResult for the frontend UI + a markdown
+            //    table string for the LLM context.
             let n = rows.len();
             let res = crate::model::SqlResult {
                 columns: columns.clone(),
@@ -116,6 +148,10 @@ impl Tool for MaxcomputePushdownQueryTool {
                 out.push_str(&cells.join(" | "));
                 out.push('\n');
             }
+            // If persisted, append a note for the LLM.
+            if let Some(ref target) = target_table_clone {
+                out.push_str(&format!("\n（结果已存为本地表 `{target}`，可直接在本地 SQL 中引用）"));
+            }
             Ok((out, res, n))
         })
         .await
@@ -124,7 +160,11 @@ impl Tool for MaxcomputePushdownQueryTool {
         let elapsed = start.elapsed().as_millis() as u64;
         match result {
             Ok((out, res, n)) => {
-                let summary = format!("下推查询成功，返回 {} 行（{} 列）", n, res.columns.len());
+                let summary = if let Some(ref target) = target_table {
+                    format!("下推查询成功，返回 {} 行（{} 列），已存为本地表 {}", n, res.columns.len(), target)
+                } else {
+                    format!("下推查询成功，返回 {} 行（{} 列）", n, res.columns.len())
+                };
                 emit_tool_result(&self.window, &self.task_id, &call_id, "ok",
                     summary, Some(sql.clone()), Some(res), Some(elapsed), None);
                 Ok(out)
