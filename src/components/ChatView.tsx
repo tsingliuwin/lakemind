@@ -270,31 +270,52 @@ export default function ChatView(props: {
   const [stickToBottom, setStickToBottom] = createSignal(true);
   const [showScrollDown, setShowScrollDown] = createSignal(false);
   let isProgrammaticScroll = false;
+  // 记录用户最后一次「主动滚动」停留的位置。Safari/WKWebView 的原生滚动锚定在
+  // 结论流式增长时会把视口下拉到结论开头，导致 scrollTop 偏离用户期望位置。
+  // ResizeObserver 校正时以此为基准把 scrollTop 拉回，钉住视口内容。
+  // 关键：不能在 handleScroll 里无条件更新它--浏览器锚定改写 scrollTop 时
+  // isProgrammaticScroll 也是 false，会把锚定后的值误当成用户位置。改用时间戳：
+  // 只有 wheel 事件后短时间内的 scroll 才算用户驱动，才更新 userScrollTop。
+  let userScrollTop = 0;
+  let lastWheelTs = 0;
 
   const handleScroll = (e: Event) => {
     if (isProgrammaticScroll) return; // 忽略程序性贴底滚动
     const el = e.currentTarget as HTMLDivElement;
+    // 仅在用户主动滚动（wheel 后短窗口内）时记录位置；浏览器锚定触发的 scroll
+    // 没有对应的 wheel，不更新 userScrollTop，保留用户真实位置供锁循环校正。
+    if (performance.now() - lastWheelTs < 200) {
+      userScrollTop = el.scrollTop;
+    }
     const diff = el.scrollHeight - el.scrollTop - el.clientHeight;
     const nearBottom = diff <= 30;
     if (!nearBottom) {
-      // 离开底部 → 取消贴底（无论是否流式）
+      // 离开底部 -> 取消贴底（无论是否流式）
       setStickToBottom(false);
     } else if (!isStreaming()) {
-      // 非流式状态下滚到底部 → 恢复贴底
+      // 非流式状态下滚到底部 -> 恢复贴底
       // 流式中不在此恢复（见 wheel），避免贴底回弹
       setStickToBottom(true);
+      stopScrollLock();
     }
     setShowScrollDown(!nearBottom);
   };
 
   // wheel 事件在 scroll 事件之前同步触发，用于捕获滚动意图：
-  //   向上 → 立即取消贴底；向下且已接近底部 → 恢复贴底（流式中亦然）。
+  //   向上 -> 立即取消贴底；向下且已接近底部 -> 恢复贴底（流式中亦然）。
   const handleWheel = (e: WheelEvent) => {
+    lastWheelTs = performance.now();
+    if (scrollEl) userScrollTop = scrollEl.scrollTop;
     if (e.deltaY < 0) {
       setStickToBottom(false);
+      // 用户上滚浏览上方内容：启动 scrollTop 锁，对抗 Safari 锚定把视口拽回结论开头。
+      startScrollLock();
     } else if (e.deltaY > 0 && scrollEl) {
       const diff = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
-      if (diff <= 30) setStickToBottom(true);
+      if (diff <= 30) {
+        setStickToBottom(true);
+        stopScrollLock();
+      }
     }
   };
 
@@ -336,6 +357,55 @@ export default function ChatView(props: {
     }
   });
 
+  // 对抗 Safari/WKWebView 的原生滚动锚定（scroll anchoring）。
+  //
+  // 背景：结论（text 段）流式输出时下方内容持续增长，Safari 会把视口锚定到结论段
+  // 开头，每帧布局后主动把 scrollTop 拉回结论开头（实测 .chat-stream 的
+  // overflow-anchor:none 在 WKWebView 不生效）。用户上滚浏览上方内容时，视口被
+  // 反复拽回结论开头，表现为“一闪一闪跳到结论开始处”。
+  //
+  // 解法：用持续 rAF 循环在每一帧强制把 scrollTop 钉回用户位置。单次校正（RO
+  // 回调里设一次）无效--Safari 会在下一帧布局重新锚定，形成帧间拉锯闪烁。持续
+  // rAF 保证在 Safari 锚定之后立即覆盖，视口始终稳定。
+  //   - 贴底（stick=true）：跟随到底部（stickScrollToBottom）。
+  //   - 非贴底（stick=false）：每帧把 scrollTop 强制设回 userScrollTop。
+  // isProgrammaticScroll 标志屏蔽覆盖触发的 scroll 事件，避免被 handleScroll 误判
+  // 为用户滚动。
+  let rafLocked = false;
+  function startScrollLock() {
+    if (rafLocked) return;
+    rafLocked = true;
+    const tick = () => {
+      if (!scrollEl || !rafLocked) return;
+      // 清除上一帧遗留的程序性滚动标志：其同步触发的 scroll 事件已在本帧之前派发，
+      // 现在恢复对用户滚动的响应，避免标志滞留导致用户滚动被忽略。
+      isProgrammaticScroll = false;
+      if (untrack(stickToBottom)) {
+        // 贴底时无需锁，交给 stickScrollToBottom 跟随。
+        rafLocked = false;
+        return;
+      }
+      if (scrollEl.scrollTop !== userScrollTop) {
+        // 置标志后赋值：本次赋值同步触发的 scroll 事件会被 handleScroll 忽略。
+        isProgrammaticScroll = true;
+        scrollEl.scrollTop = userScrollTop;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+  function stopScrollLock() {
+    rafLocked = false;
+    isProgrammaticScroll = false;
+  }
+  // 流式结束后停止 scrollTop 锁：非流式时浏览器锚定不再持续触发，无需每帧校正，
+  // 释放 rAF 循环避免空转。
+  createEffect(() => {
+    isStreaming();
+    if (!untrack(isStreaming)) stopScrollLock();
+  });
+  onCleanup(() => stopScrollLock());
+
   // 切换对话时重置折叠状态并跳到最新消息。
   // ⚠️ 关键：根据 props.taskId 的变更来检测对话切换，避免依赖 tasks() 导致流式输出中反复重置，
   // 并且保证即使对话同名也能正确触发重置。
@@ -344,6 +414,7 @@ export default function ChatView(props: {
     const currentId = props.taskId;
     if (currentId === prevTaskId) return; // 同一个对话，跳过
     prevTaskId = currentId;
+    stopScrollLock();
     setOpenReasoningIds(new Set<string>());
     setExpandedToolIds(new Set<string>());
     setManualReasoningIds(new Set<string>());
