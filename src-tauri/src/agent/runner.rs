@@ -404,7 +404,7 @@ pub(crate) async fn run_agent_chat_stream(
         LoadOkfBlockTool, WriteOkfBlockTool, SearchOkfRecipesTool, CheckSourceFingerprintTool,
         TidyOkfKnowledgeTool, MaterializeRemoteTableTool, MaxcomputePushdownQueryTool,
         CreateTableTool, CreateViewTool, DropObjectTool, RenderChartTool,
-        SearchTenetsTool, LoadTenetsTool, GetCurrentTimeTool) {
+        SearchTenetsTool, LoadTenetsTool, GetCurrentTimeTool, GetWorkspaceDialectsTool) {
         let ddl_shared = DdlToolShared {
             app_state: app_state.clone(),
             task_id: task_id.clone(),
@@ -430,6 +430,7 @@ pub(crate) async fn run_agent_chat_stream(
             SearchTenetsTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
             LoadTenetsTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
             GetCurrentTimeTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
+            GetWorkspaceDialectsTool { app_state: app_state.clone(), task_id: task_id.clone(), window: window.clone() },
         )
     };
 
@@ -446,7 +447,7 @@ pub(crate) async fn run_agent_chat_stream(
     let (list_tool, desc_tool, exec_tool, sample_tool,
         load_okf, write_okf, search_okf, check_okf, tidy_okf, materialize_tool, mcq_tool,
         create_table_tool, create_view_tool, drop_object_tool, render_chart_tool,
-        search_tenets_tool, load_tenets_tool, get_time_tool) = build_tools();
+        search_tenets_tool, load_tenets_tool, get_time_tool, dialect_tool) = build_tools();
     let tool_defs = vec![
         list_tool.definition(String::new()).await,
         desc_tool.definition(String::new()).await,
@@ -466,6 +467,7 @@ pub(crate) async fn run_agent_chat_stream(
         search_tenets_tool.definition(String::new()).await,
         load_tenets_tool.definition(String::new()).await,
         get_time_tool.definition(String::new()).await,
+        dialect_tool.definition(String::new()).await,
     ];
     let tools_json = serde_json::to_string(&tool_defs).unwrap_or_default();
     let ws_dir = app_state.workspace_dir.lock().await.to_string_lossy().to_string();
@@ -504,7 +506,7 @@ pub(crate) async fn run_agent_chat_stream(
         let (list_tool, desc_tool, exec_tool, sample_tool,
             load_okf, write_okf, search_okf, check_okf, tidy_okf, materialize_tool, mcq_tool,
             create_table_tool, create_view_tool, drop_object_tool, render_chart_tool,
-            search_tenets_tool, load_tenets_tool, get_time_tool) = build_tools();
+            search_tenets_tool, load_tenets_tool, get_time_tool, dialect_tool) = build_tools();
 
         let outcome = if format == "openai" {
             let base_url = sanitize_endpoint(&provider.endpoint);
@@ -535,7 +537,8 @@ pub(crate) async fn run_agent_chat_stream(
                 .tool(mcq_tool)
                 .tool(search_tenets_tool)
                 .tool(load_tenets_tool)
-                .tool(get_time_tool);
+                .tool(get_time_tool)
+                .tool(dialect_tool);
             if model_id.starts_with("o1") || model_id.starts_with("o3") {
                 agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
             }
@@ -575,7 +578,8 @@ pub(crate) async fn run_agent_chat_stream(
                 .tool(mcq_tool)
                 .tool(search_tenets_tool)
                 .tool(load_tenets_tool)
-                .tool(get_time_tool);
+                .tool(get_time_tool)
+                .tool(dialect_tool);
             if model_id.starts_with("o1") || model_id.starts_with("o3") {
                 agent_builder = agent_builder.additional_params(json!({"reasoning_effort": effort}));
             }
@@ -615,6 +619,7 @@ pub(crate) async fn run_agent_chat_stream(
                 .tool(mcq_tool)
                 .tool(search_tenets_tool)
                 .tool(load_tenets_tool)
+                .tool(dialect_tool)
                 .build();
             let stream = agent.stream_chat(prompt.clone(), rig_history.clone())
                 .multi_turn(100)

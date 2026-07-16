@@ -19,6 +19,7 @@ mod fingerprint;
 mod usage;
 mod okf;
 mod tenets;
+mod db_dialects;
 
 use state::AppState;
 
