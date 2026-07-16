@@ -5694,6 +5694,18 @@ button.lm-select-trigger:hover:not(:disabled) {
 .tool-seg--error .tool-seg__status {
   color: var(--accent-red);
 }
+.tool-seg__error-detail {
+  font-size: 12px;
+  color: var(--accent-red);
+  background: var(--accent-red-bg, rgba(239, 68, 68, 0.08));
+  border: 1px solid var(--accent-red-border, rgba(239, 68, 68, 0.2));
+  border-radius: 6px;
+  padding: 8px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  margin: 0 0 6px 0;
+}
 .tool-seg--running .tool-seg__status {
   color: var(--accent-blue);
 }

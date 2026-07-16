@@ -202,6 +202,11 @@ export default function ToolSegment(props: {
 
       <Show when={props.expanded && hasBody()}>
         <div class="tool-seg__body">
+          {/* Error message (full, untruncated - the header truncates it to one line). */}
+          <Show when={t()?.status === "error" && t()?.summary}>
+            <div class="tool-seg__error-detail">{t()!.summary}</div>
+          </Show>
+
           {/* Awaiting confirmation: show the DDL to be run + confirm/cancel. */}
           <Show when={t()?.status === "awaiting"}>
             <div class="tool-seg__confirm">
