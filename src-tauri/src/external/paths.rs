@@ -42,10 +42,11 @@ impl SidecarPaths {
             .map_err(|e| format!("解析 resource_dir 失败: {e}"))?;
         let base = res.join("sidecars");
         let home = get_home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let ext = if cfg!(windows) { ".bat" } else { "" };
         Ok(Self {
-            dbx_launcher: base.join("dbx-jdbc-plugin/bin/dbx-jdbc-plugin"),
+            dbx_launcher: base.join(format!("dbx-jdbc-plugin/bin/dbx-jdbc-plugin{ext}")),
             arrow_jar: base.join("arrow-maxcompute/arrow-maxcompute-sidecar.jar"),
-            resolver_bin: base.join("dbx-jdbc-plugin/bin/dbx-maven-resolver"),
+            resolver_bin: base.join(format!("dbx-jdbc-plugin/bin/dbx-maven-resolver{ext}")),
             maven_cache: home.join(".lakemind").join(".odps-maven"),
         })
     }

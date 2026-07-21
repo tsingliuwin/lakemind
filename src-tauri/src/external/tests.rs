@@ -30,8 +30,9 @@ fn dev_sidecar_root() -> PathBuf {
 }
 
 fn dbx_launcher() -> String {
+    let ext = if cfg!(windows) { ".bat" } else { "" };
     dev_sidecar_root()
-        .join("dbx-jdbc-plugin/bin/dbx-jdbc-plugin")
+        .join(format!("dbx-jdbc-plugin/bin/dbx-jdbc-plugin{ext}"))
         .to_str()
         .unwrap()
         .to_string()
@@ -46,8 +47,9 @@ fn arrow_jar() -> String {
 }
 
 fn resolver_bin() -> String {
+    let ext = if cfg!(windows) { ".bat" } else { "" };
     dev_sidecar_root()
-        .join("dbx-jdbc-plugin/bin/dbx-maven-resolver")
+        .join(format!("dbx-jdbc-plugin/bin/dbx-maven-resolver{ext}"))
         .to_str()
         .unwrap()
         .to_string()

@@ -222,7 +222,8 @@ pub fn find_java_bin() -> Option<String> {
         }
     }
     if let Ok(jh) = std::env::var("JAVA_HOME") {
-        let p = std::path::Path::new(&jh).join("bin/java");
+        let exe = if cfg!(windows) { "java.exe" } else { "java" };
+        let p = std::path::Path::new(&jh).join("bin").join(exe);
         if p.is_file() {
             return p.to_str().map(String::from);
         }

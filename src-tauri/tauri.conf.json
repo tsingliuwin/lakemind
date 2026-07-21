@@ -42,7 +42,9 @@
     "resources": [
       "sidecars/arrow-maxcompute/arrow-maxcompute-sidecar.jar",
       "sidecars/dbx-jdbc-plugin/bin/dbx-jdbc-plugin",
+      "sidecars/dbx-jdbc-plugin/bin/dbx-jdbc-plugin.bat",
       "sidecars/dbx-jdbc-plugin/bin/dbx-maven-resolver",
+      "sidecars/dbx-jdbc-plugin/bin/dbx-maven-resolver.bat",
       "sidecars/dbx-jdbc-plugin/lib/dbx-jdbc-plugin.jar",
       "sidecars/dbx-jdbc-plugin/manifest.json"
     ],

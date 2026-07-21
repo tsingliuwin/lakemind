@@ -93,10 +93,11 @@ pub fn pull_table(
     let java = crate::external::jdbc_sidecar::find_java_bin()
         .ok_or_else(|| "未找到 Java 运行时（MaxCompute 物化需要 JRE 17+）".to_string())?;
 
-    // classpath = driver jars : sidecar jar
-    let mut cp = driver_jars.join(":");
+    // classpath = driver jars ; sidecar jar (or : on Unix)
+    let cp_sep = if cfg!(windows) { ";" } else { ":" };
+    let mut cp = driver_jars.join(cp_sep);
     if !cp.is_empty() {
-        cp.push(':');
+        cp.push_str(cp_sep);
     }
     cp.push_str(sidecar_jar);
 
