@@ -4,6 +4,27 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.0] - 2026-07-21
+
+### 新增
+
+#### MaxCompute 阿里云大数据引擎集成
+- **架构支持**：集成 MaxCompute 数据库（基于 JDBC + Arrow Sidecar 架构），支持大体量云端数据快速连接与物化。
+- **采样与分区物化**：支持智能采样物化、分区感知物化以及断点续拉取能力，加速千万级大表查询响应。
+- **下推计算工具**：新增 `maxcompute_pushdown_query` 工具，支持远程下推执行并在本地持久化存储（`target_table`）。
+- **Windows 平台全兼容**：完美支持 Windows 系统的二进制批处理 sidecar 启动及类路径自动适配。
+
+#### Agent 工具与能力增强
+- **数据库方言感知**：新增 `get_workspace_dialects` 工具，自动识别当前工作区数据源方言进行 SQL 语法适配。
+- **时间感知与准则**：新增 `get_current_time` 工具并注入当前系统时间到 Agent Prompt，提升相对时间（如“近 30 天”）分析准确度。
+
+### 优化
+
+#### 交互与界面体验
+- **工具片段耗时计时**：Agent 实时工具片段新增动态耗时计时器。
+- **错误信息完备显示**：展开工具片段可展示完整 Backend/Sidecar 错误信息及堆栈日志。
+- **Safari 滚动体验**：修复流式输出时 Safari/WebKit 浏览器的页面滚动锚定抖动问题。
+
 ## [0.5.5] - 2026-07-12
 
 ### 优化

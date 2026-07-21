@@ -1,5 +1,5 @@
 {
-  "version": "v0.5.5",
-  "changelog": "- 总结内联图表：LLM 在文字结论中用 {{chart:...}} 标记引用本轮已生成的图表，该处原样渲染出可交互图表（可切换类型/全屏/导出），不再显示成裸文本\n- 流式渲染修复：消除流式输出总结时内联图表每 token 反复重建 echarts 的卡顿，图表在标记闭合后挂载一次即稳定",
+  "version": "v0.6.0",
+  "changelog": "- 集成 MaxCompute 阿里云大数据引擎（JDBC + Arrow Sidecar 架构），支持大体量云端数据快速连接与采样/分区物化\n- 新增 maxcompute_pushdown_query 远程下推计算工具及 get_workspace_dialects 数据库方言感知工具\n- 全面兼容 Windows 系统批处理脚本 Sidecar 启动与类路径分隔符适配",
   "url": "https://upload.xi-n.com/"
 }
