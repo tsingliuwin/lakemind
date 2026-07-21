@@ -1,14 +1,14 @@
 {
   "version": "0.6.0",
   "notes": "- 集成 MaxCompute 阿里云大数据引擎（JDBC + Arrow Sidecar 架构），支持大体量云端数据快速连接与采样/分区物化\n- 新增 maxcompute_pushdown_query 远程下推计算工具及 get_workspace_dialects 数据库方言感知工具\n- 全面兼容 Windows 系统批处理脚本 Sidecar 启动与类路径分隔符适配",
-  "pubdate": "2026-07-21T18:15:00.000Z",
+  "pubdate": "2026-07-21T11:11:51.419Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK1VXTDBjSmdnQ0wyejFDMzF6V2p6dGxCMVBWaXFUcjQrQzFMQzVCSkUxayt2RG42UzZmN1YzUm9RRG9hcXlJRkZYNXZoWG9GZmh1TUI2VW1waVRmTXdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzODMxMDAzCWZpbGU6bGFrZW1pbmQuYXBwLnRhci5negpqRTBWcmk4RXJNYWdiNURXVXZpVFd0TC82VGJGYkpMZGdRNGFMTDdQV0tyK05TWG9UcWthV2xrV3ZXekhFOGgvQnloY0pYT2dYYm0rbkoxeVVhRmpBQT09Cg==",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK1FmRjdtcnBTTmZhY0tCR0RXTzY1SFowemVBNWNyYUZtU2ZUSFU5UjJXSWdqQTRIMUw2YkJSRHE3UVFvemZHSGdyOXk2cmlvVzlpYkk2Z3lnMVEwOHdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NjMxMTMyCWZpbGU6bGFrZW1pbmQuYXBwLnRhci5nego2aThVZ2Jwbm1Gb1orajNwbklFT3p1TDV2eVlBOVNMM0diYW5rRWYxVVZiREFmYTNTMjRMVUR6Z1VtZWpQSEt1RTJBKzAxa0ZJalJHbUtOaU5iRXhDUT09Cg==",
       "url": "https://upload.xi-n.com/lakemind-v0.6.0-arm64.app.tar.gz"
     },
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK2U0QThMV0hoWUlOT2hValMrNFU0Kys3LzB6T3RZbVE1V3NvMFNmSC9KNmJOVE1IdU9CK2F0WnFQY3g4dlh4SFdna3JHNzAwbnpaVlVydlZDaWIyOFFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzODMwNzExCWZpbGU6bGFrZW1pbmRfMC41LjVfeDY0LXNldHVwLmV4ZQpwRWZBRmZBVWpYbFRSelRBNVh0dDZCUExNeUE0TTZjUTZhRUF3Z0hEV1VDTHU0ZFVMTUlGUHd3enRmdWY0bWJ3YW0wdFpnT09aUm55akQrcmNBdStDdz09Cg==",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaWhUdU1yR3BEK2RzYWNFUENPcmNndS9EMEo4L0VpN0JnbS9yYWhmdlVwQVM1azlqbEo5WCtjb3ZMMzRyczBqdVcyYzk3OCtZYmxWNm0zNUFBNVIrZ2JGWnlJd1J4c3cwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NjMyMjI0CWZpbGU6bGFrZW1pbmRfMC42LjBfeDY0LXNldHVwLmV4ZQorZEp1OVc2NXF3YnpZQ0dkNjZ0emFhekJnY2FUcVVlT3BGalRrTE9zMHcwVTN4UHIvSStHK05QWVdXKzQydDk3RlhxS21IOHkwcmNuQkd2eUVWRnlEZz09Cg==",
       "url": "https://upload.xi-n.com/lakemind-v0.6.0.exe"
     }
   }
